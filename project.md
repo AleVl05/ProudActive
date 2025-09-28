@@ -7,14 +7,33 @@
   cd MOBILE/ProudactiveMobile // VE A LA CARPETA DE MOBILE
   npx expo start // INICIA EXPO
 
-  Github
+  Github:
 
+  INICIAR UN GIT
+  git init
+  git remote add origin URLDEGIT
+  git branch -M main
 
-## Resumo do Projeto
+  Subir A GIT:
+  git add .
+  git commit -m "commit1"
+  git push -u origin main
 
-**Proudactive** é um aplicativo completo de produtividade **MOBILE-FIRST** que combina calendário inteligente, rastreamento de atividades físicas, biblioteca pessoal de anotações e sistema de desafios gamificados. O objetivo é centralizar todas as ferramentas de produtividade em uma plataforma unificada e sincronizada.
+  Ver tus COMMITS:
+  git log --oneline
+  git reset --soft 381f195
 
-### Estrutura do Repositório
+  👉 Te deja en ese commit, pero los cambios de commits posteriores quedan en tu editor como “unstaged changes”.
+
+  git reset --hard 381f195
+
+  👉 Vuelve al commit y borra cualquier cambio hecho después (lo que haya en VS Code desaparece). Es como viajar en el tiempo a ese snapshot exacto.
+
+## Resumen del Proyecto
+
+**Proudactive** es una aplicación completa de productividad **MOBILE-FIRST** que combina calendario inteligente, seguimiento de actividad física, biblioteca personal de notas y sistema de desafíos gamificados. El objetivo es centralizar todas las herramientas de productividad en una plataforma unificada y sincronizada.
+
+### Estructura del Repositorio
 
 ```
 Proudactive/
@@ -28,155 +47,213 @@ Proudactive/
 └── project.md              # Este documento (fonte da verdade)
 ```
 
-**Filosofia MOBILE-FIRST**: 
-- O desenvolvimento prioriza a experiência mobile
-- Web é uma extensão da funcionalidade mobile
-- Interface otimizada para telas pequenas primeiro
+**Filosofía MOBILE-FIRST**: 
+- El desarrollo prioriza la experiencia mobile
+- Web es una extensión de la funcionalidad mobile
+- Interfaz optimizada para pantallas pequeñas primero
 - Progressive Web App (PWA) para web
 
-**Requisito crítico**: Web e mobile utilizam a mesma API REST e os dados devem permanecer sincronizados de forma consistente entre todas as plataformas.
+**Requisito crítico**: Web y mobile utilizan la misma API REST y los datos deben permanecer sincronizados de forma consistente entre todas las plataformas.
 
-## Requisitos Funcionais
+## Requisitos Funcionales
 
-### Módulos Principais
+### Módulos Principales
 
-1. **Calendário** (Prioridade 1 - MVP)
-   - Vista por Dia/Semana/Mês/Ano
-   - Criação de blocos de 30 min arrastavéis
-   - Sistema de recorrência avançado
-   - Múltiplos alarmes por evento
-   - Suporte completo a fusos horários
+1. **Calendario** (Prioridad 1 - MVP)
+   - Vista por Día/Semana/Mes/Año
+   - Creación de bloques de 30 min arrastrables
+   - Sistema de recurrencia avanzado
+   - Múltiples alarmas por evento
+   - Soporte completo a husos horarios
 
-2. **Rastreador de Academia** (Prioridade 2)
-   - Registro de treinos e atividades
-   - Histórico de progresso
+2. **Rastreador de Gimnasio** (Prioridad 2)
+   - Registro de entrenamientos y actividades
+   - Historial de progreso
    - Métricas básicas
 
-3. **Biblioteca/Anotações** (Prioridade 2)
-   - Gerenciamento de livros e leituras
-   - Sistema de anotações
-   - Categorização por tags
+3. **Biblioteca/Notas** (Prioridad 2)
+   - Gestión de libros y lecturas
+   - Sistema de notas
+   - Categorización por etiquetas
 
-4. **Sistema de Desafios** (Prioridade 3)
-   - Gamificação de produtividade
-   - Conquistas e recompensas
-   - Progresso de metas
+4. **Sistema de Desafíos** (Prioridad 3)
+   - Gamificación de productividad
+   - Logros y recompensas
+   - Progreso de metas
 
-5. **Ferramentas Auxiliares** (Prioridade 3)
-   - Timer Pomodoro
-   - Lista de tarefas rápidas
-   - Widgets personalizáveis
+5. **Herramientas Auxiliares** (Prioridad 3)
+   - Temporizador Pomodoro
+   - Lista de tareas rápidas
+   - Widgets personalizables
 
-## Arquitetura & Stack Tecnológico
+## Estado actual (Mobile)
+
+- Vistas implementadas: día, semana y mes, con navegación por fechas y encabezado sincronizado en semana.
+- Creación/edición básica de eventos:
+  - Día/Semana: tap en celda de 30 minutos abre modal; un bloque por celda; duración inicial 30 min.
+  - Mes: tap en día crea evento de 1 día (estructura `MonthEvent`).
+  - Selector de color, título y descripción en modal. Validación mínima (título requerido).
+- Sincronización de scroll: el header de días en semana se sincroniza con el contenido horizontal.
+- Cambio de vista resetea scroll; en vista día se centra en el día actual.
+- Indexación en memoria para lookup rápido (`eventsByCell`, `monthEventsByDay`).
+
+Pendiente (Mobile):
+- Estirar bloques (vertical y horizontal) en vista semanal.
+- Mover bloques por arrastre (drag & drop) en día/semana.
+- Recurrencia avanzada, excepciones y eliminación a nivel de serie.
+- Alarmas locales/push y editor de múltiples alarmas.
+- Husos horarios, eventos all-day y conversiones a/local.
+- Sincronización con API real (persistencia remota) y soporte offline básico.
+- Accesibilidad y rendimiento con muchos eventos.
+
+## Plan para estirar bloques (vista semanal)
+
+- Objetivo
+  - **Vertical**: ajustar la duración del evento en pasos de 30 min al arrastrar el borde superior/inferior del bloque.
+  - **Horizontal**: extender el evento a días contiguos arrastrando lateralmente (cada día añadido crea/ocupa su celda correspondiente).
+
+- Modelo de datos (MVP)
+  - Mantener `Event` acotado al día: `date` + `startTime` + `duration` (min).
+  - Para extensión horizontal, crear "slices" por cada día adicional con el mismo `id` de grupo o un `parentId` común para agrupar visualmente.
+  - Alternativa futura: campo `spanDays` o entidad de serie de bloque para semana.
+
+- UX/Interacción
+  - Mostrar "handles" de 6–8 px en borde superior/inferior para redimensionar verticalmente; todo el bloque actúa como handle horizontal.
+  - Snap-to-grid de 30 min; duración mínima 30 min. Limitar entre `START_HOUR` y `END_HOUR`.
+  - Permitir solapamientos; resaltar el bloque activo con mayor `zIndex` y borde.
+  - Auto-scroll cuando el arrastre se acerca a bordes (vertical u horizontal).
+
+- Detección de gestos
+  - Usar `react-native-gesture-handler` (PanGestureHandler) para arrastre continuo sin jitter.
+  - Calcular delta en píxeles y convertir a intervalos de 30 min (vertical) o a columnas de día (horizontal).
+
+- Persistencia
+  - Fase 1: actualizar estado en memoria (`setEvents`) y, para multi-día, crear/actualizar slices adyacentes.
+  - Fase 2: normalizar en API (series/slices) y reconciliar con recurrencia.
+
+- Casos límite
+  - Extender más allá de la semana visible → navegación a semana siguiente previa confirmación.
+  - Bloques al inicio/fin de la jornada (`START_HOUR`–`END_HOUR`).
+  - Cambios de mes en vista semana (solo afecta visual).
+
+- Checklist (estirar bloques)
+  - [ ] Handles visibles y estados de interacción
+  - [ ] Redimensionado vertical con snap a 30 min
+  - [ ] Extensión horizontal día a día
+  - [ ] Auto-scroll en bordes
+  - [ ] Agrupación visual de slices multi-día
+  - [ ] Persistencia temporal en memoria
+
+## Arquitectura y Stack Tecnológico
 
 ### Frontend Web
 - **Framework**: React 18+
-- **Padrão ES**: ES2022+ com modules
-- **Bundler**: Vite (já configurado)
-- **Gerenciamento de Estado**: Context API + useReducer ou Zustand
-- **Estilização**: CSS Modules ou Styled Components
-- **Requisições HTTP**: Axios ou Fetch API
+- **Estándar ES**: ES2022+ con modules
+- **Bundler**: Vite (ya configurado)
+- **Gestión de Estado**: Context API + useReducer o Zustand
+- **Estilos**: CSS Modules o Styled Components
+- **Peticiones HTTP**: Axios o Fetch API
 
 ### Mobile
-- **Framework**: React Native com Expo (managed workflow)
-- **Vantagens do Expo**: Setup rápido, teste fácil com Expo Go, sem configuração nativa inicial
-- **Navegação**: React Navigation v6
-- **Gerenciamento de Estado**: Mesmo padrão do web
-- **Armazenamento Local**: AsyncStorage + SQLite (Expo SQLite)
+- **Framework**: React Native con Expo (managed workflow)
+- **Ventajas de Expo**: Setup rápido, test fácil con Expo Go, sin configuración nativa inicial
+- **Navegación**: React Navigation v6
+- **Gestión de Estado**: Mismo patrón que web
+- **Almacenamiento Local**: AsyncStorage + SQLite (Expo SQLite)
 
 ### API Backend
 - **Framework**: Laravel 10+
-- **Linguagem**: PHP 8.1+
-- **Servidor Web**: Nginx + PHP-FPM (produção)
-- **Autenticação**: JWT (Laravel Sanctum + tymon/jwt-auth)
-- **Validação**: Form Requests do Laravel
-- **Documentação**: Swagger/OpenAPI automático
+- **Lenguaje**: PHP 8.1+
+- **Servidor Web**: Nginx + PHP-FPM (producción)
+- **Autenticación**: JWT (Laravel Sanctum + tymon/jwt-auth)
+- **Validación**: Form Requests de Laravel
+- **Documentación**: Swagger/OpenAPI automático
 
-### Banco de Dados
+### Base de Datos
 - **SGBD**: MySQL 8.0+
 - **Charset**: utf8mb4_unicode_ci
 - **Engine**: InnoDB
-- **Migrações**: Laravel Migrations
+- **Migraciones**: Laravel Migrations
 - **Seeds**: Laravel Seeders
 
-### Autenticação
-**Fluxo JWT**:
+### Autenticación
+**Flujo JWT**:
 1. Login → API retorna access_token + refresh_token
-2. Requests autenticados → Header: `Authorization: Bearer {token}`
+2. Requests autenticadas → Header: `Authorization: Bearer {token}`
 3. Token expira → Usar refresh_token para renovar
-4. Logout → Invalidar tokens no servidor
+4. Logout → Invalidar tokens en el servidor
 
-### Internacionalização (i18n)
+### Internacionalización (i18n)
 - **Idioma base**: Español
-- **Estrutura**: Arquivos JSON por locale
-- **Localização**: `/locales/pt-BR.json`, `/locales/en-US.json`, `/locales/es-ES.json`
-- **Implementação**: 
+- **Estructura**: Archivos JSON por locale
+- **Localización**: `/locales/pt-BR.json`, `/locales/en-US.json`, `/locales/es-ES.json`
+- **Implementación**: 
   - Web: react-i18next
   - Mobile: react-i18next
   - API: Laravel Localization
 
 
-### Sistema de Recorrência Avançado
+### Sistema de Recurrencia Avanzado
 
-#### Tipos de Repetição
-1. **Não repete** (padrão)
+#### Tipos de Repetición
+1. **No repite** (por defecto)
 2. **Diariamente**
-3. **Semanalmente** (com seleção de dias)
-4. **Mensalmente** (mesmo dia do mês)
-5. **Anualmente** (mesma data)
-6. **Personalizado** (regras customizadas)
+3. **Semanalmente** (con selección de días)
+4. **Mensualmente** (mismo día del mes)
+5. **Anualmente** (misma fecha)
+6. **Personalizado** (reglas customizadas)
 
 
-#### Exceções e Modificações
-- **Excluir ocorrência**: Remove uma instância específica
-- **Modificar ocorrência**: Altera apenas uma instância (cria override)
-- **Modificar série**: Altera todas as ocorrências futuras
+#### Excepciones y Modificaciones
+- **Excluir ocurrencia**: Remueve una instancia específica
+- **Modificar ocurrencia**: Cambia solo una instancia (crea override)
+- **Modificar serie**: Cambia todas las ocurrencias futuras
 
-#### Eliminação de Eventos
-- **Modal de confirmação** com opções:
-  1. "Excluir apenas este evento"
-  2. "Excluir esta e todas as futuras"
-  3. "Excluir toda a série"
+#### Eliminación de Eventos
+- **Modal de confirmación** con opciones:
+  1. "Eliminar solo este evento"
+  2. "Eliminar este y todos los futuros"
+  3. "Eliminar toda la serie"
 
-### Conflitos e Solapamentos
-- **Comportamento**: Permitir solapamentos por padrão
-- **Aviso visual**: Indicador quando há conflito de horário
-- **Resolução opcional**: Sugerir horários alternativos
+### Conflictos y Solapamientos
+- **Comportamiento**: Permitir solapamientos por defecto
+- **Aviso visual**: Indicador cuando hay conflicto de horario
+- **Resolución opcional**: Sugerir horarios alternativos
 
-### Sistema de Alarmes
+### Sistema de Alarmas
 
-#### Tipos de Alarme
-1. **Local**: Notificação no dispositivo
-2. **Push**: Notificação push (mobile)
-3. **Email**: Envio de email (futuro)
-
-
-## API - Contrato e Endpoints
+#### Tipos de Alarma
+1. **Local**: Notificación en el dispositivo
+2. **Push**: Notificación push (mobile)
+3. **Email**: Envío de email (futuro)
 
 
-## Modelo de Dados MySQL
+## API - Contrato y Endpoints
 
-### Scripts de Criação
+
+## Modelo de Datos MySQL
+
+### Scripts de Creación
 
 ```sql
 -- =============================================
 -- PROUDACTIVE DATABASE SCHEMA
--- Versão: 1.0
--- Data: 2024-01-15
+-- Versión: 1.0
+-- Fecha: 2024-01-15
 -- Charset: utf8mb4_unicode_ci
 -- =============================================
 
--- Criar bancos para diferentes ambientes
+-- Crear bases para diferentes entornos
 CREATE DATABASE IF NOT EXISTS proudactive_dev CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS proudactive_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS proudactive_prod CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- Usar banco de desenvolvimento
+-- Usar base de desarrollo
 USE proudactive_dev;
 
 -- =============================================
--- TABELA: users
--- Armazena informações básicas dos usuários
+-- TABLA: users
+-- Almacena informaciones básicas de los usuarios
 -- =============================================
 CREATE TABLE users (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -198,8 +275,8 @@ CREATE TABLE users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
--- TABELA: user_profiles
--- Informações estendidas e configurações do usuário
+-- TABLA: user_profiles
+-- Información extendida y configuraciones del usuario
 -- =============================================
 CREATE TABLE user_profiles (
     user_id BIGINT UNSIGNED PRIMARY KEY,
@@ -214,8 +291,8 @@ CREATE TABLE user_profiles (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
--- TABELA: calendars
--- Calendários dos usuários (permite múltiplos por usuário)
+-- TABLA: calendars
+-- Calendarios de los usuarios (permite múltiples por usuario)
 -- =============================================
 CREATE TABLE calendars (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -232,12 +309,12 @@ CREATE TABLE calendars (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_id (user_id),
     INDEX idx_user_default (user_id, is_default),
-    UNIQUE KEY unique_user_default (user_id, is_default) -- Apenas um padrão por usuário
+    UNIQUE KEY unique_user_default (user_id, is_default) -- Solo un predeterminado por usuario
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
--- TABELA: events
--- Eventos do calendário (série master ou evento único)
+-- TABLA: events
+-- Eventos del calendario (serie master o evento único)
 -- =============================================
 CREATE TABLE events (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -247,28 +324,28 @@ CREATE TABLE events (
     description TEXT COMMENT 'Descrição detalhada do evento',
     location VARCHAR(255) COMMENT 'Local do evento',
     
-    -- Datas e horários (sempre em UTC)
+    -- Fechas y horarios (siempre en UTC)
     start_utc DATETIME NOT NULL COMMENT 'Data/hora de início em UTC',
     end_utc DATETIME NOT NULL COMMENT 'Data/hora de fim em UTC',
     all_day TINYINT(1) DEFAULT 0 COMMENT 'Se é evento de dia inteiro',
     timezone VARCHAR(64) DEFAULT 'UTC' COMMENT 'Fuso horário original de criação',
     
-    -- Aparência e categorização
+    -- Apariencia y categorización
     color VARCHAR(7) NULL COMMENT 'Cor personalizada (herda do calendário se NULL)',
     category VARCHAR(100) COMMENT 'Categoria/tag do evento',
     priority ENUM('low', 'normal', 'high') DEFAULT 'normal' COMMENT 'Prioridade do evento',
     
-    -- Recorrência
+    -- Recurrencia
     is_recurring TINYINT(1) DEFAULT 0 COMMENT 'Se é um evento recorrente',
     recurrence_rule JSON COMMENT 'Regras de recorrência em formato JSON',
     recurrence_end_date DATE NULL COMMENT 'Data limite para recorrências',
     recurrence_count INT NULL COMMENT 'Número máximo de ocorrências',
     
-    -- Referência para série (quando é uma instância modificada)
+    -- Referencia para serie (cuando es una instancia modificada)
     series_id BIGINT UNSIGNED NULL COMMENT 'ID da série master se for override',
     original_start_utc DATETIME NULL COMMENT 'Horário original se foi modificado',
     
-    -- Controle
+    -- Control
     is_deleted TINYINT(1) DEFAULT 0 COMMENT 'Soft delete',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -288,8 +365,8 @@ CREATE TABLE events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
--- TABELA: recurrence_exceptions
--- Exceções e modificações em séries recorrentes
+-- TABLA: recurrence_exceptions
+-- Excepciones y modificaciones en series recurrentes
 -- =============================================
 CREATE TABLE recurrence_exceptions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -309,8 +386,8 @@ CREATE TABLE recurrence_exceptions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
--- TABELA: alarms
--- Alarmes e lembretes para eventos
+-- TABLA: alarms
+-- Alarmas y recordatorios para eventos
 -- =============================================
 CREATE TABLE alarms (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -328,8 +405,8 @@ CREATE TABLE alarms (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
--- TABELA: devices
--- Dispositivos registrados para notificações push
+-- TABLA: devices
+-- Dispositivos registrados para notificaciones push
 -- =============================================
 CREATE TABLE devices (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -352,10 +429,10 @@ CREATE TABLE devices (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
--- MÓDULOS ADICIONAIS
+-- MÓDULOS ADICIONALES
 -- =============================================
 
--- TABELA: gym_entries (Rastreador de Academia)
+-- TABLA: gym_entries (Rastreador de Gimnasio)
 CREATE TABLE gym_entries (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,
@@ -373,7 +450,7 @@ CREATE TABLE gym_entries (
     INDEX idx_activity (activity)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- TABELA: books (Biblioteca/Leituras)
+-- TABLA: books (Biblioteca/Lecturas)
 CREATE TABLE books (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,
@@ -397,7 +474,7 @@ CREATE TABLE books (
     INDEX idx_title (title)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- TABELA: challenges (Sistema de Desafios/Gamificação)
+-- TABLA: challenges (Sistema de Desafíos/Gamificación)
 CREATE TABLE challenges (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,
@@ -423,7 +500,7 @@ CREATE TABLE challenges (
     INDEX idx_dates (start_date, end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- TABELA: user_achievements (Conquistas dos usuários)
+-- TABLA: user_achievements (Logros de los usuarios)
 CREATE TABLE user_achievements (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,
@@ -438,55 +515,16 @@ CREATE TABLE user_achievements (
     INDEX idx_type (achievement_type),
     INDEX idx_earned_at (earned_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- =============================================
--- DADOS INICIAIS (SEEDS)
--- =============================================
-
--- Usuário de exemplo
-INSERT INTO users (email, password, name, timezone, locale) VALUES 
-('admin@proudactive.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Administrador', 'America/Sao_Paulo', 'pt-BR'),
-('usuario@exemplo.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Usuário Teste', 'America/Sao_Paulo', 'pt-BR');
-
--- Calendários padrão
-INSERT INTO calendars (user_id, name, color, is_default) VALUES 
-(1, 'Pessoal', '#1976d2', 1),
-(1, 'Trabalho', '#f44336', 0),
-(2, 'Meu Calendário', '#4caf50', 1);
-
--- Eventos de exemplo
-INSERT INTO events (calendar_id, user_id, title, description, start_utc, end_utc, timezone) VALUES 
-(1, 1, 'Reunião de equipe', 'Discussão sobre projetos', '2024-01-15 17:00:00', '2024-01-15 18:00:00', 'America/Sao_Paulo'),
-(1, 1, 'Academia', 'Treino de força', '2024-01-16 09:00:00', '2024-01-16 10:30:00', 'America/Sao_Paulo'),
-(2, 1, 'Apresentação cliente', 'Demo do novo produto', '2024-01-17 19:00:00', '2024-01-17 20:00:00', 'America/Sao_Paulo');
-
--- Alarmes de exemplo
-INSERT INTO alarms (event_id, trigger_minutes_before, method) VALUES 
-(1, 15, 'local'),
-(1, 60, 'push'),
-(2, 30, 'local'),
-(3, 1440, 'push'); -- 1 dia antes
-
--- Livros de exemplo
-INSERT INTO books (user_id, title, author, status, pages_total) VALUES 
-(1, 'Hábitos Atômicos', 'James Clear', 'reading', 320),
-(1, 'O Poder do Agora', 'Eckhart Tolle', 'finished', 256),
-(2, 'Mindset', 'Carol Dweck', 'to-read', 288);
-
--- Desafios de exemplo
-INSERT INTO challenges (user_id, title, description, type, category, target_value, unit, start_date, end_date) VALUES 
-(1, 'Ler 30 minutos por dia', 'Criar o hábito de leitura diária', 'daily', 'learning', 30, 'minutos', '2024-01-01', '2024-01-31'),
-(1, 'Treinar 3x na semana', 'Manter regularidade nos exercícios', 'weekly', 'health', 3, 'treinos', '2024-01-01', '2024-03-31');
 ```
 
 
-### Diagrama de Relacionamentos (ASCII)
+### Diagrama de Relaciones (ASCII)
 
 ```
 
-## Internacionalização e Conteúdo Traduzível
+## Internacionalización y Contenido Traducible
 
-### Estrutura de Arquivos
+### Estructura de Archivos
 
 ```
 /locales/
@@ -495,7 +533,7 @@ INSERT INTO challenges (user_id, title, description, type, category, target_valu
 └── es-ES.json    # Espanhol
 ```
 
-### Exemplo de Arquivo de Tradução
+### Ejemplo de Archivo de Traducción
 
 ```json
 // /locales/pt-BR.json
@@ -519,109 +557,109 @@ INSERT INTO challenges (user_id, title, description, type, category, target_valu
     "invalid_credentials": "Credenciais inválidas"
   },
   "calendar": {
-    "title": "Calendário",
-    "create_event": "Criar Evento",
+    "title": "Calendario",
+    "create_event": "Crear Evento",
     "edit_event": "Editar Evento",
-    "delete_event": "Excluir Evento",
-    "event_title": "Título do evento",
-    "event_description": "Descrição",
-    "start_time": "Horário de início",
-    "end_time": "Horário de término",
-    "all_day": "Dia inteiro",
+    "delete_event": "Eliminar Evento",
+    "event_title": "Título del evento",
+    "event_description": "Descripción",
+    "start_time": "Hora de inicio",
+    "end_time": "Hora de término",
+    "all_day": "Todo el día",
     "repeat": "Repetir",
-    "alarms": "Lembretes",
-    "delete_confirm": "Tem certeza que deseja excluir este evento?",
+    "alarms": "Recordatorios",
+    "delete_confirm": "¿Seguro que deseas eliminar este evento?",
     "delete_series_options": {
       "this_only": "Apenas este evento",
       "this_and_future": "Este e todos os futuros",
       "entire_series": "Toda a série"
     },
     "views": {
-      "day": "Dia",
+      "day": "Día",
       "week": "Semana", 
-      "month": "Mês",
-      "year": "Ano"
+      "month": "Mes",
+      "year": "Año"
     },
     "repeat_options": {
       "never": "Nunca",
       "daily": "Diariamente",
       "weekly": "Semanalmente",
-      "monthly": "Mensalmente",
+      "monthly": "Mensualmente",
       "yearly": "Anualmente",
       "custom": "Personalizado"
     }
   },
   "gym": {
-    "title": "Academia",
-    "add_workout": "Adicionar Treino",
-    "activity": "Atividade",
-    "duration": "Duração (min)",
-    "calories": "Calorias",
-    "notes": "Observações"
+    "title": "Gimnasio",
+    "add_workout": "Agregar Entrenamiento",
+    "activity": "Actividad",
+    "duration": "Duración (min)",
+    "calories": "Calorías",
+    "notes": "Notas"
   }
 }
 ```
 
-### Implementação
+### Implementación
 
 
-## Sincronização / Consistência entre Mobile e Web
+## Sincronización / Consistencia entre Mobile y Web
 
-### Estratégia de Sincronização
+### Estrategia de Sincronización
 
-#### 1. Autenticação Compartilhada
-- **JWT único**: Mesmo token funciona em web e mobile
-- **Refresh automático**: Renovação transparente antes da expiração
-- **Logout global**: Invalidar token em todas as plataformas
+#### 1. Autenticación Compartida
+- **JWT único**: Mismo token funciona en web y mobile
+- **Refresh automático**: Renovación transparente antes de la expiración
+- **Logout global**: Invalidar token en todas las plataformas
 
 
-#### 4. Suporte Offline Básico
+#### 4. Soporte Offline Básico
 
 **Mobile**:
 
 
-### 2. Checklist de QA - Calendário
+### 2. Checklist de QA - Calendario
 
 #### Funcionalidades Básicas
-- [ ] Criar evento simples
+- [ ] Crear evento simple
 - [ ] Editar evento existente
-- [ ] Excluir evento
-- [ ] Visualizar em diferentes vistas (dia/semana/mês)
-- [ ] Navegação entre datas
-- [ ] Arrastar para redimensionar evento
-- [ ] Arrastar para mover evento
+- [ ] Eliminar evento
+- [ ] Visualizar en diferentes vistas (día/semana/mes)
+- [ ] Navegación entre fechas
+- [ ] Arrastrar para redimensionar evento
+- [ ] Arrastrar para mover evento
 
-#### Recorrência
-- [ ] Criar evento recorrente diário
-- [ ] Criar evento recorrente semanal
-- [ ] Criar evento recorrente mensal
-- [ ] Modificar uma instância da série
-- [ ] Excluir uma instância da série
-- [ ] Excluir série completa
-- [ ] Regras de recorrência personalizadas
+#### Recurrencia
+- [ ] Crear evento recurrente diario
+- [ ] Crear evento recurrente semanal
+- [ ] Crear evento recurrente mensual
+- [ ] Modificar una instancia de la serie
+- [ ] Eliminar una instancia de la serie
+- [ ] Eliminar serie completa
+- [ ] Reglas de recurrencia personalizadas
 
-#### Alarmes
-- [ ] Adicionar alarme local
-- [ ] Adicionar alarme push (mobile)
-- [ ] Múltiplos alarmes por evento
-- [ ] Editar/remover alarmes
-- [ ] Testar disparo de notificações
+#### Alarmas
+- [ ] Agregar alarma local
+- [ ] Agregar alarma push (mobile)
+- [ ] Múltiples alarmas por evento
+- [ ] Editar/remover alarmas
+- [ ] Probar disparo de notificaciones
 
-#### Fusos Horários
-- [ ] Criar evento em fuso diferente
-- [ ] Exibir corretamente em fuso local
-- [ ] Viajar para outro fuso (mudança temporária)
+#### Husos Horarios
+- [ ] Crear evento en huso diferente
+- [ ] Mostrar correctamente en huso local
+- [ ] Viajar a otro huso (cambio temporal)
 - [ ] Eventos all-day
 
-#### Sincronização
-- [ ] Criar evento no web, ver no mobile
-- [ ] Criar evento no mobile, ver no web
-- [ ] Editar evento em uma plataforma, sincronizar
-- [ ] Teste offline básico (mobile)
-- [ ] Resolução de conflitos
+#### Sincronización
+- [ ] Crear evento en web, ver en mobile
+- [ ] Crear evento en mobile, ver en web
+- [ ] Editar evento en una plataforma, sincronizar
+- [ ] Test offline básico (mobile)
+- [ ] Resolución de conflictos
 
 #### Performance
-- [ ] Carregar calendário com 100+ eventos
-- [ ] Navegação fluida entre meses
-- [ ] Busca rápida por eventos
-- [ ] Scroll suave na vista semanal
+- [ ] Cargar calendario con 100+ eventos
+- [ ] Navegación fluida entre meses
+- [ ] Búsqueda rápida por eventos
+- [ ] Scroll suave en la vista semanal

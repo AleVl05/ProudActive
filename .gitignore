@@ -1,0 +1,29 @@
+﻿# Node (web & mobile)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Expo / React Native
+MOBILE/ProudactiveMobile/.expo/
+MOBILE/ProudactiveMobile/node_modules/
+MOBILE/ProudactiveMobile/ios/
+MOBILE/ProudactiveMobile/android/
+MOBILE/ProudactiveMobile/.vscode/
+
+# Web (Vite)
+WEB/node_modules/
+WEB/dist/
+
+# Laravel / PHP
+APILaravel/vendor/
+APILaravel/node_modules/
+APILaravel/.env
+APILaravel/storage/
+APILaravel/bootstrap/cache/
+
+# IDEs / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

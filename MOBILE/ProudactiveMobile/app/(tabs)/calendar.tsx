@@ -13,6 +13,8 @@ import {
   ScrollView,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  PanResponder,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
@@ -22,6 +24,7 @@ const { width } = Dimensions.get('window');
 const CELL_HEIGHT = 50; // 30 minutos = 50px
 const START_HOUR = 6;
 const END_HOUR = 22;
+const API_BASE = 'http://192.168.0.11:8000/api';
 
 interface Event {
   id: string;
@@ -33,6 +36,154 @@ interface Event {
   category: string;
   date: string; // 'YYYY-MM-DD' -> fecha absoluta del evento
 }
+
+// Utilidades fecha/UTC mínimas para PATCH
+const dateKeyToLocalDate = (dateKey: string, minutesFromStart: number) => {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(y, (m - 1), d, 0, 0, 0, 0); // local time
+  dt.setHours(START_HOUR, 0, 0, 0);
+  dt.setMinutes(dt.getMinutes() + minutesFromStart);
+  return dt; // Date local; toISOString() enviará UTC
+};
+
+async function patchEventUtc(eventId: string, startUtcIso: string, endUtcIso: string) {
+  const url = `${API_BASE}/events/${eventId}`;
+  try {
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start_utc: startUtcIso, end_utc: endUtcIso }),
+    });
+    return res;
+  } catch (err) {
+    throw err;
+  }
+}
+
+interface EventResizableBlockProps {
+  ev: Event;
+  onResizeCommit: (eventId: string, newStartTime: number, newDuration: number) => void;
+}
+
+const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit }: EventResizableBlockProps) {
+  const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
+  const ghostTopOffset = useRef(new Animated.Value(0)).current;
+  const [showGhost, setShowGhost] = useState(false);
+  const initial = useRef({ startTime: ev.startTime, duration: ev.duration }).current;
+
+  const commitResize = useCallback(async (newStartTime: number, newDuration: number) => {
+    const minDuration = 30;
+    if (newDuration < minDuration) newDuration = minDuration;
+
+    const startLocal = dateKeyToLocalDate(ev.date, newStartTime);
+    const endLocal = dateKeyToLocalDate(ev.date, newStartTime + newDuration);
+    if (endLocal <= startLocal) return;
+
+    const prev = { startTime: ev.startTime, duration: ev.duration };
+    onResizeCommit(ev.id, newStartTime, newDuration);
+
+    try {
+      const res = await patchEventUtc(ev.id, startLocal.toISOString(), endLocal.toISOString());
+      console.log('Resize PATCH status:', res.status);
+      if (!res.ok) {
+        onResizeCommit(ev.id, prev.startTime, prev.duration);
+        const body = await res.text().catch(() => '');
+        console.log('Resize PATCH body (first 200):', body.slice(0, 200));
+        Alert.alert('Error', 'No se pudo guardar el cambio (API). Revertido.');
+      }
+    } catch (e) {
+      onResizeCommit(ev.id, prev.startTime, prev.duration);
+      console.log('patchEventUtc error:', (e as any)?.message || e);
+      Alert.alert('Error', 'No se pudo guardar el cambio (red). Revertido.');
+    }
+  }, [ev.date, ev.id, onResizeCommit]);
+
+  const topResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      setShowGhost(true);
+      ghostTopOffset.setValue(0);
+      ghostHeight.setValue((initial.duration / 30) * CELL_HEIGHT - 2);
+    },
+    onPanResponderMove: (_, gesture) => {
+      const deltaSlots = Math.round(gesture.dy / CELL_HEIGHT); // snap 30min
+      const deltaMin = deltaSlots * 30;
+      const newStart = initial.startTime + deltaMin;
+      const newDuration = initial.duration - deltaMin;
+      if (newDuration >= 30 && newStart >= 0) {
+        ghostTopOffset.setValue(deltaSlots * CELL_HEIGHT);
+        ghostHeight.setValue((newDuration / 30) * CELL_HEIGHT - 2);
+      }
+    },
+    onPanResponderRelease: (_, gesture) => {
+      const deltaSlots = Math.round(gesture.dy / CELL_HEIGHT);
+      const deltaMin = deltaSlots * 30;
+      const newStart = Math.max(0, initial.startTime + deltaMin);
+      const newDuration = Math.max(30, initial.duration - deltaMin);
+      setShowGhost(false);
+      commitResize(newStart, newDuration);
+    },
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderTerminate: () => setShowGhost(false),
+  })).current;
+
+  const bottomResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      setShowGhost(true);
+      ghostTopOffset.setValue(0);
+      ghostHeight.setValue((initial.duration / 30) * CELL_HEIGHT - 2);
+    },
+    onPanResponderMove: (_, gesture) => {
+      const deltaSlots = Math.round(gesture.dy / CELL_HEIGHT);
+      const deltaMin = deltaSlots * 30;
+      const newDuration = initial.duration + deltaMin;
+      if (newDuration >= 30) {
+        ghostHeight.setValue((newDuration / 30) * CELL_HEIGHT - 2);
+      }
+    },
+    onPanResponderRelease: (_, gesture) => {
+      const deltaSlots = Math.round(gesture.dy / CELL_HEIGHT);
+      const deltaMin = deltaSlots * 30;
+      const newDuration = Math.max(30, initial.duration + deltaMin);
+      setShowGhost(false);
+      commitResize(initial.startTime, newDuration);
+    },
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderTerminate: () => setShowGhost(false),
+  })).current;
+
+  return (
+    <View style={{ flex: 1 }}>
+      {showGhost && (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 2,
+            left: 2,
+            right: 2,
+            transform: [{ translateY: ghostTopOffset }],
+            height: ghostHeight,
+            borderWidth: 1,
+            borderStyle: 'dashed',
+            borderColor: ev.color,
+            borderRadius: 4,
+            backgroundColor: 'transparent',
+            zIndex: 5,
+          }}
+        />
+      )}
+
+      <View style={[styles.eventBlock, { backgroundColor: ev.color, height: (ev.duration / 30) * CELL_HEIGHT - 2 }]}> 
+        <Text style={styles.eventText} numberOfLines={2}>{ev.title}</Text>
+        {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
+        <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
+        <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
+      </View>
+    </View>
+  );
+});
 
 interface MonthEvent {
   id: string;
@@ -62,7 +213,7 @@ interface CalendarViewProps {}
 export default function CalendarView({}: CalendarViewProps) {
   const insets = useSafeAreaInsets();
 
-  // estado principal
+  // Estado principal
   const [events, setEvents] = useState<Event[]>([]);
   const [monthEvents, setMonthEvents] = useState<MonthEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<Event | MonthEvent | null>(null);
@@ -81,10 +232,10 @@ export default function CalendarView({}: CalendarViewProps) {
   const headerHorizontalRef = useRef<ScrollView | null>(null); // header de días (sin gestos)
   const horizontalOffsetRef = useRef(0);
 
-  // colores
+  // Colores disponibles
   const availableColors = ['#6b53e2', '#f44336', '#4caf50', '#ff9800', '#9c27b0'];
 
-  // --- utilidades de fecha ---
+  // Utilidades de fecha
   const startOfWeek = useCallback((date: Date) => {
     const d = new Date(date);
     const day = d.getDay(); // 0=Dom,1=Lun...
@@ -107,11 +258,10 @@ export default function CalendarView({}: CalendarViewProps) {
   }, []);
 
   const toDateKey = useCallback((d: Date) => {
-    // 'YYYY-MM-DD'
-    return d.toISOString().slice(0, 10);
+    return d.toISOString().slice(0, 10); // 'YYYY-MM-DD'
   }, []);
 
-  // time slots
+  // Ranuras de tiempo (cada 30 minutos)
   const timeSlots = useMemo(() => {
     const slots: string[] = [];
     for (let hour = START_HOUR; hour < END_HOUR; hour++) {
@@ -130,7 +280,7 @@ export default function CalendarView({}: CalendarViewProps) {
     return Array.from({ length: daysInMonth }, (_, i) => i + 1);
   }, [currentDate]);
 
-  // Indexar eventos por fecha+hora para lookup rápido
+  // Indexar eventos por fecha+hora para búsqueda rápida
   const eventsByCell = useMemo(() => {
     const index: { [key: string]: Event } = {};
     events.forEach(ev => {
@@ -140,7 +290,7 @@ export default function CalendarView({}: CalendarViewProps) {
     return index;
   }, [events]);
 
-  // Indexar eventos mensuales por año-mes-dia
+  // Indexar eventos mensuales por año-mes-día
   const monthEventsByDay = useMemo(() => {
     const index: { [key: string]: MonthEvent } = {};
     monthEvents.forEach(ev => {
@@ -161,22 +311,21 @@ export default function CalendarView({}: CalendarViewProps) {
     return availableColors[Math.floor(Math.random() * availableColors.length)];
   }, []);
 
-  // obtener ancho celda
+  // Obtener ancho de celda
   const getCellWidth = useCallback(() => {
     if (currentView === 'day') {
       return width - 60;
     } else if (currentView === 'week') {
-      return ((width - 60) / 7) * 2; // doble ancho por día (según requeriste)
+      return ((width - 60) / 7) * 2; // doble ancho por día
     }
     return (width - 60) / 7;
   }, [currentView]);
 
-  // Formatea header superior usando currentDate (no usar new Date fijo)
+  // Formatea el header superior usando currentDate
   const formatHeaderDate = useCallback(() => {
     const d = new Date(currentDate);
     const dayNames = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-    const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
     if (currentView === 'day') {
       return `Hoy, ${dayNames[d.getDay()]}, ${d.getDate()} de ${monthNames[d.getMonth()]}`;
@@ -190,12 +339,12 @@ export default function CalendarView({}: CalendarViewProps) {
     return '';
   }, [currentView, currentDate, startOfWeek, addDays]);
 
-  // ---- Manejo de creación/edición de eventos ----
+  // Manejo de creación/edición de eventos
   // Determina la fecha real (YYYY-MM-DD) que corresponde a la celda seleccionada
   const dateForCell = useCallback((view: string, cell: SelectedCell | SelectedMonthCell | null) => {
     if (!cell) return null;
     if (view === 'day' && 'timeIndex' in (cell as SelectedCell)) {
-      // el día actual
+      // Día actual
       return toDateKey(currentDate);
     }
     if (view === 'week' && 'timeIndex' in (cell as SelectedCell)) {
@@ -215,7 +364,7 @@ export default function CalendarView({}: CalendarViewProps) {
   }, [currentDate, startOfWeek, addDays, toDateKey]);
 
   const handleCellPress = useCallback((dayIndex: number, timeIndex: number) => {
-    // calcular fecha correspondiente a la celda (usando view semana)
+    // Calcular fecha correspondiente a la celda (usando vista semana)
     let dateKey = '';
     if (currentView === 'day') {
       dateKey = toDateKey(currentDate);
@@ -224,7 +373,7 @@ export default function CalendarView({}: CalendarViewProps) {
       const dayDate = addDays(weekStart, dayIndex);
       dateKey = toDateKey(dayDate);
     } else {
-      // por defecto usar currentDate
+      // Por defecto usar currentDate
       dateKey = toDateKey(currentDate);
     }
 
@@ -275,14 +424,14 @@ export default function CalendarView({}: CalendarViewProps) {
     }
 
     if (selectedEvent) {
-      // editar existente
+      // Editar existente
       if ('startTime' in selectedEvent) {
         setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
       } else {
         setMonthEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
       }
     } else if (selectedCell) {
-      // crear evento día/semana -> asignar fecha absoluta
+      // Crear evento día/semana → asignar fecha absoluta
       let dateKey = '';
       if (currentView === 'day') {
         dateKey = toDateKey(currentDate);
@@ -291,7 +440,7 @@ export default function CalendarView({}: CalendarViewProps) {
         const dayDate = addDays(weekStart, selectedCell.dayIndex);
         dateKey = toDateKey(dayDate);
       } else {
-        // fallback al día actual
+        // Fallback al día actual
         dateKey = toDateKey(currentDate);
       }
 
@@ -323,7 +472,7 @@ export default function CalendarView({}: CalendarViewProps) {
       setMonthEvents(prev => [...prev, newMonthEvent]);
     }
 
-    // limpiar modal
+    // Limpiar modal
     setModalVisible(false);
     setEventTitle('');
     setEventDescription('');
@@ -332,12 +481,12 @@ export default function CalendarView({}: CalendarViewProps) {
     setSelectedMonthCell(null);
   }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, startOfWeek, addDays, toDateKey]);
 
-  // ---- Navegación de fecha (flechas) ----
+  // Navegación de fecha (flechas)
   const navigateDate = useCallback((direction: 'prev' | 'next') => {
     if (currentView === 'day') {
       const newDate = addDays(currentDate, direction === 'next' ? 1 : -1);
       setCurrentDate(newDate);
-      // reset scrolls
+      // Reset de scrolls
       verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
       contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
       return;
@@ -347,7 +496,7 @@ export default function CalendarView({}: CalendarViewProps) {
       const weekStart = startOfWeek(currentDate);
       const newWeekStart = addDays(weekStart, direction === 'next' ? 7 : -7);
       setCurrentDate(newWeekStart);
-      // reset scroll horizontal/vertical
+      // Reset de scroll horizontal/vertical
       setTimeout(() => {
         contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
         headerHorizontalRef.current?.scrollTo({ x: 0, animated: false });
@@ -368,15 +517,14 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [currentView, currentDate, addDays, addMonths, startOfWeek]);
 
-  // Cuando el usuario cambia la vista desde los botones de arriba:
-  // - si elige 'day' volvemos al día de hoy (UX solicitado)
-  // - reset de scrolls
+  // Cambio de vista desde los botones superiores
+  // - Si elige 'day' volvemos al día de hoy
+  // - Reset de scrolls
   const onChangeView = useCallback((view: 'day'|'week'|'month'|'year') => {
     setCurrentView(view);
     if (view === 'day') {
       setCurrentDate(new Date());
     }
-    // reseteo visual
     setTimeout(() => {
       verticalScrollRef.current?.scrollTo({ y: 0, animated: false });
       contentHorizontalRef.current?.scrollTo({ x: 0, animated: false });
@@ -384,17 +532,15 @@ export default function CalendarView({}: CalendarViewProps) {
     }, 20);
   }, []);
 
-  // sincronizar horizontal header con contenido (semana)
+  // Sincronizar header horizontal con contenido (semana)
   const handleHorizontalScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset?.x || 0;
     horizontalOffsetRef.current = x;
-    // sync header (no gestos en header)
     headerHorizontalRef.current?.scrollTo({ x, animated: false });
   }, []);
 
-  // al cambiar currentView/currentDate, resetear offsets si hace falta (sin setState en bucle)
+  // Al cambiar currentView/currentDate, resetear offsets post-render
   useEffect(() => {
-    // solo ajustar scrolls después de render
     setTimeout(() => {
       contentHorizontalRef.current?.scrollTo({ x: 0, animated: false });
       headerHorizontalRef.current?.scrollTo({ x: 0, animated: false });
@@ -402,11 +548,16 @@ export default function CalendarView({}: CalendarViewProps) {
     }, 20);
   }, [currentView, currentDate]);
 
-  // ---- renderizado ----
+  // Callback de commit desde bloque redimensionable
+  const onResizeCommit = useCallback((eventId: string, newStartTime: number, newDuration: number) => {
+    setEvents(prev => prev.map(ev => ev.id === eventId ? { ...ev, startTime: newStartTime, duration: newDuration } : ev));
+  }, []);
+
+  // Renderizado principal
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}> 
         <View style={styles.viewFilters}>
           {(['day','week','month','year'] as const).map((view) => (
             <TouchableOpacity
@@ -432,7 +583,7 @@ export default function CalendarView({}: CalendarViewProps) {
         </View>
       </View>
 
-      {/* header días (si no month) - para semana sincronizamos el scroll horizontal del header */}
+      {/* Header de días (si no es month). En semana sincronizamos el scroll horizontal del header */}
       {currentView !== 'month' && (
         <View style={styles.weekHeader}>
           <View style={styles.timeColumn} />
@@ -441,7 +592,7 @@ export default function CalendarView({}: CalendarViewProps) {
               <Text style={styles.dayText}>Hoy</Text>
             </View>
           ) : (
-            // Semana: header horizontal sincronizable (no permitimos scroll en header directamente)
+            // Semana: header horizontal sincronizable (sin scroll directo en header)
             (() => {
               const weekStart = startOfWeek(currentDate);
               const dayHeaderWidth = getCellWidth();
@@ -470,7 +621,7 @@ export default function CalendarView({}: CalendarViewProps) {
         </View>
       )}
 
-      {/* header mes */}
+      {/* Header de mes */}
       {currentView === 'month' && (
         <View style={styles.monthHeader}>
           <View style={styles.timeColumn} />
@@ -480,7 +631,7 @@ export default function CalendarView({}: CalendarViewProps) {
         </View>
       )}
 
-      {/* contenido: month / day / week */}
+      {/* Contenido: month / day / week */}
       {currentView === 'month' ? (
         <FlatList
           style={styles.calendarContainer}
@@ -496,7 +647,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 </View>
                 <TouchableOpacity style={[styles.cell, { width: getCellWidth() }]} onPress={() => handleMonthCellPress(day)}>
                   {event && (
-                    <View style={[styles.eventBlock, { backgroundColor: event.color, height: (event.duration) * CELL_HEIGHT - 2 }]}>
+                    <View style={[styles.eventBlock, { backgroundColor: event.color, height: (event.duration) * CELL_HEIGHT - 2 }]}> 
                       <Text style={styles.eventText} numberOfLines={2}>{event.title}</Text>
                     </View>
                   )}
@@ -527,9 +678,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 </View>
                 <TouchableOpacity style={[styles.cell, { width: getCellWidth() }]} onPress={() => handleCellPress(0, timeIndex)}>
                   {event && (
-                    <View style={[styles.eventBlock, { backgroundColor: event.color, height: (event.duration / 30) * CELL_HEIGHT - 2 }]}>
-                      <Text style={styles.eventText} numberOfLines={2}>{event.title}</Text>
-                    </View>
+                    <EventResizableBlock ev={event} onResizeCommit={onResizeCommit} />
                   )}
                 </TouchableOpacity>
               </View>
@@ -543,7 +692,7 @@ export default function CalendarView({}: CalendarViewProps) {
           showsVerticalScrollIndicator={false}
         />
       ) : (
-        // WEEK view: single vertical ScrollView (para evitar jitter) que contiene columna de horas + content horizontal
+        // Vista semanal: ScrollView vertical con columna de horas fija y contenido horizontal scrollable
         <View style={styles.weekContainer}>
           <ScrollView
             ref={verticalScrollRef}
@@ -553,10 +702,10 @@ export default function CalendarView({}: CalendarViewProps) {
             showsVerticalScrollIndicator
           >
             <View style={{ flexDirection: 'row' }}>
-              {/* Column of hours (fixed) */}
+              {/* Columna de horas (fija) */}
               <View style={styles.fixedTimeColumn}>
                 {timeSlots.map((time, idx) => (
-                  <View key={`h-${idx}`} style={[styles.timeRow, { width: 60 }]}>
+                  <View key={`h-${idx}`} style={[styles.timeRow, { width: 60 }]}> 
                     <View style={styles.timeColumn}>
                       <Text style={styles.timeText}>{time}</Text>
                     </View>
@@ -564,7 +713,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 ))}
               </View>
 
-              {/* Horizontal days content (scrollable) */}
+              {/* Contenido de días horizontal (scrollable) */}
               <ScrollView
                 horizontal
                 ref={contentHorizontalRef}
@@ -576,7 +725,7 @@ export default function CalendarView({}: CalendarViewProps) {
               >
                 <View>
                   {timeSlots.map((_, timeIndex) => (
-                    <View key={`row-${timeIndex}`} style={[styles.timeRow, { width: getCellWidth() * 7 }]}>
+                    <View key={`row-${timeIndex}`} style={[styles.timeRow, { width: getCellWidth() * 7 }]}> 
                       {Array.from({ length: 7 }, (_, dayIndex) => {
                         const weekStart = startOfWeek(currentDate);
                         const dayDate = addDays(weekStart, dayIndex);
@@ -592,9 +741,7 @@ export default function CalendarView({}: CalendarViewProps) {
                             onPress={() => handleCellPress(dayIndex, timeIndex)}
                           >
                             {event && (
-                              <View style={[styles.eventBlock, { backgroundColor: event.color, height: (event.duration / 30) * CELL_HEIGHT - 2 }]}>
-                                <Text style={styles.eventText} numberOfLines={2}>{event.title}</Text>
-                              </View>
+                              <EventResizableBlock ev={event} onResizeCommit={onResizeCommit} />
                             )}
                           </TouchableOpacity>
                         );
@@ -608,7 +755,7 @@ export default function CalendarView({}: CalendarViewProps) {
         </View>
       )}
 
-      {/* Modal para crear/editar (restaurado con opciones que pediste) */}
+      {/* Modal para crear/editar */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => {
         setModalVisible(false);
         setSelectedEvent(null);
