@@ -19,50 +19,64 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { API_BASE } from '../../src/config/api';
 
 const { width } = Dimensions.get('window');
 const CELL_HEIGHT = 50; // 30 minutos = 50px
 const START_HOUR = 6;
 const END_HOUR = 22;
-const API_BASE = 'http://192.168.0.11:8000/api';
 
 interface Event {
-  id: string;
+  id: string;           // id del servidor (o local provisional)
+  clientId: string;     // id estable del cliente para mapear el mismo evento
   title: string;
   description?: string;
-  startTime: number; // minutos desde las 6 AM
-  duration: number; // minutos
+  startTime: number;    // minutos desde las 6 AM
+  duration: number;     // minutos
   color: string;
   category: string;
-  date: string; // 'YYYY-MM-DD' -> fecha absoluta del evento
+  date: string;         // 'YYYY-MM-DD' -> fecha absoluta del evento
 }
 
-// Utilidades fecha/UTC mínimas para PATCH
+// Utilidad para crear clientId estable
+const createClientId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+// Utilidades fecha/UTC mínimas para API
 const dateKeyToLocalDate = (dateKey: string, minutesFromStart: number) => {
   const [y, m, d] = dateKey.split('-').map(Number);
-  const dt = new Date(y, (m - 1), d, 0, 0, 0, 0); // local time
+  const dt = new Date(y, (m - 1), d, 0, 0, 0, 0);
   dt.setHours(START_HOUR, 0, 0, 0);
   dt.setMinutes(dt.getMinutes() + minutesFromStart);
-  return dt; // Date local; toISOString() enviará UTC
+  return dt; // local Date; toISOString() es UTC
 };
 
-async function patchEventUtc(eventId: string, startUtcIso: string, endUtcIso: string) {
+async function apiPutEventTimes(eventId: string, startUtcIso: string, endUtcIso: string) {
   const url = `${API_BASE}/events/${eventId}`;
-  try {
-    const res = await fetch(url, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ start_utc: startUtcIso, end_utc: endUtcIso }),
-    });
-    return res;
-  } catch (err) {
-    throw err;
-  }
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start_utc: startUtcIso, end_utc: endUtcIso }),
+  });
+  return res;
+}
+
+async function apiGetCalendars() {
+  const res = await fetch(`${API_BASE}/calendars`);
+  return res.json();
+}
+
+async function apiPostEvent(payload: any) {
+  const res = await fetch(`${API_BASE}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return res;
 }
 
 interface EventResizableBlockProps {
   ev: Event;
-  onResizeCommit: (eventId: string, newStartTime: number, newDuration: number) => void;
+  onResizeCommit: (clientId: string, newStartTime: number, newDuration: number) => void;
 }
 
 const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit }: EventResizableBlockProps) {
@@ -71,32 +85,12 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
   const [showGhost, setShowGhost] = useState(false);
   const initial = useRef({ startTime: ev.startTime, duration: ev.duration }).current;
 
-  const commitResize = useCallback(async (newStartTime: number, newDuration: number) => {
+  const commitResize = useCallback((newStartTime: number, newDuration: number) => {
     const minDuration = 30;
     if (newDuration < minDuration) newDuration = minDuration;
-
-    const startLocal = dateKeyToLocalDate(ev.date, newStartTime);
-    const endLocal = dateKeyToLocalDate(ev.date, newStartTime + newDuration);
-    if (endLocal <= startLocal) return;
-
-    const prev = { startTime: ev.startTime, duration: ev.duration };
-    onResizeCommit(ev.id, newStartTime, newDuration);
-
-    try {
-      const res = await patchEventUtc(ev.id, startLocal.toISOString(), endLocal.toISOString());
-      console.log('Resize PATCH status:', res.status);
-      if (!res.ok) {
-        onResizeCommit(ev.id, prev.startTime, prev.duration);
-        const body = await res.text().catch(() => '');
-        console.log('Resize PATCH body (first 200):', body.slice(0, 200));
-        Alert.alert('Error', 'No se pudo guardar el cambio (API). Revertido.');
-      }
-    } catch (e) {
-      onResizeCommit(ev.id, prev.startTime, prev.duration);
-      console.log('patchEventUtc error:', (e as any)?.message || e);
-      Alert.alert('Error', 'No se pudo guardar el cambio (red). Revertido.');
-    }
-  }, [ev.date, ev.id, onResizeCommit]);
+    if (newStartTime < 0) return;
+    onResizeCommit(ev.clientId, newStartTime, newDuration);
+  }, [ev.clientId, onResizeCommit]);
 
   const topResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -225,6 +219,9 @@ export default function CalendarView({}: CalendarViewProps) {
   const [selectedMonthCell, setSelectedMonthCell] = useState<SelectedMonthCell | null>(null);
   const [currentView, setCurrentView] = useState<'day' | 'week' | 'month' | 'year'>('week');
   const [currentDate, setCurrentDate] = useState(new Date());
+
+  // Lock para evitar commits duplicados por el mismo evento en paralelo
+  const resizeLockRef = useRef<Set<string>>(new Set());
 
   // Refs para scroll y sincronización
   const verticalScrollRef = useRef<ScrollView | null>(null);
@@ -431,7 +428,7 @@ export default function CalendarView({}: CalendarViewProps) {
         setMonthEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
       }
     } else if (selectedCell) {
-      // Crear evento día/semana → asignar fecha absoluta
+      // Crear evento día/semana → asignar fecha absoluta y persistir en API
       let dateKey = '';
       if (currentView === 'day') {
         dateKey = toDateKey(currentDate);
@@ -440,12 +437,14 @@ export default function CalendarView({}: CalendarViewProps) {
         const dayDate = addDays(weekStart, selectedCell.dayIndex);
         dateKey = toDateKey(dayDate);
       } else {
-        // Fallback al día actual
         dateKey = toDateKey(currentDate);
       }
 
+      const clientId = createClientId();
+      const localId = clientId; // usar clientId como id provisional
       const newEvent: Event = {
-        id: Date.now().toString(),
+        id: localId,
+        clientId,
         title: eventTitle,
         description: eventDescription,
         startTime: selectedCell.startTime,
@@ -455,6 +454,40 @@ export default function CalendarView({}: CalendarViewProps) {
         date: dateKey,
       };
       setEvents(prev => [...prev, newEvent]);
+
+      // Persistencia API (optimista con reconciliación de id)
+      (async () => {
+        try {
+          const startLocal = dateKeyToLocalDate(dateKey, newEvent.startTime);
+          const endLocal = dateKeyToLocalDate(dateKey, newEvent.startTime + newEvent.duration);
+          // Obtener calendar_id válido
+          const calJson = await apiGetCalendars();
+          const calendarId = calJson?.data?.[0]?.id;
+          if (!calendarId) throw new Error('No hay calendars disponibles');
+
+          const payload = {
+            calendar_id: calendarId,
+            title: newEvent.title,
+            description: newEvent.description,
+            start_utc: startLocal.toISOString(),
+            end_utc: endLocal.toISOString(),
+            color: newEvent.color,
+          };
+          const res = await apiPostEvent(payload);
+          const body = await res.json().catch(() => null);
+          if (res.ok && body?.data?.id) {
+            const serverId = String(body.data.id);
+            setEvents(prev => prev.map(e => e.clientId === clientId ? { ...e, id: serverId } : e));
+          } else {
+            console.log('POST event failed:', res.status, body);
+            Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
+          }
+        } catch (e) {
+          console.log('POST event error:', (e as any)?.message || e);
+          Alert.alert('Aviso', 'No se pudo crear el evento en el servidor.');
+        }
+      })();
+
     } else if (selectedMonthCell) {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
@@ -549,9 +582,56 @@ export default function CalendarView({}: CalendarViewProps) {
   }, [currentView, currentDate]);
 
   // Callback de commit desde bloque redimensionable
-  const onResizeCommit = useCallback((eventId: string, newStartTime: number, newDuration: number) => {
-    setEvents(prev => prev.map(ev => ev.id === eventId ? { ...ev, startTime: newStartTime, duration: newDuration } : ev));
-  }, []);
+  const onResizeCommit = useCallback((clientId: string, newStartTime: number, newDuration: number) => {
+    // actualizar optimista por clientId
+    setEvents(prev => prev.map(ev => ev.clientId === clientId ? { ...ev, startTime: newStartTime, duration: newDuration } : ev));
+    const ev = events.find(e => e.clientId === clientId);
+    if (!ev) return;
+    const startLocal = dateKeyToLocalDate(ev.date, newStartTime);
+    const endLocal = dateKeyToLocalDate(ev.date, newStartTime + newDuration);
+    (async () => {
+      try {
+        const currentId = ev.id; // id actual (puede ser provisional o del servidor)
+        console.log('PUT attempt id:', currentId, 'clientId:', clientId);
+        const res = await apiPutEventTimes(currentId, startLocal.toISOString(), endLocal.toISOString());
+        console.log('Resize PATCH status:', res.status);
+        if (res.status === 404) {
+          try {
+            const calJson = await apiGetCalendars();
+            const calendarId = calJson?.data?.[0]?.id;
+            if (!calendarId) throw new Error('No hay calendars disponibles');
+            const payload = {
+              calendar_id: calendarId,
+              title: ev.title,
+              description: ev.description,
+              start_utc: startLocal.toISOString(),
+              end_utc: endLocal.toISOString(),
+              color: ev.color,
+            };
+            const createRes = await apiPostEvent(payload);
+            const body = await createRes.json().catch(() => null);
+            if (createRes.ok && body?.data?.id) {
+              const serverId = String(body.data.id);
+              setEvents(prev => prev.map(e => e.clientId === clientId ? { ...e, id: serverId } : e));
+              console.log('Fallback POST created event id:', serverId);
+              const retryRes = await apiPutEventTimes(serverId, startLocal.toISOString(), endLocal.toISOString());
+              console.log('Re-try PUT after create status:', retryRes.status);
+            } else {
+              const txt = await createRes.text().catch(() => '');
+              console.log('Fallback POST failed:', createRes.status, body || txt);
+            }
+          } catch (e2) {
+            console.log('Fallback POST error:', (e2 as any)?.message || e2);
+          }
+        } else if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          console.log('Resize PATCH body (first 200):', body.slice(0, 200));
+        }
+      } catch (e) {
+        console.log('patchEventUtc error:', (e as any)?.message || e);
+      }
+    })();
+  }, [events]);
 
   // Renderizado principal
   return (
