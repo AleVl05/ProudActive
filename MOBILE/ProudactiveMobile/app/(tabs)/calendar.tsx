@@ -27,19 +27,15 @@ const START_HOUR = 6;
 const END_HOUR = 22;
 
 interface Event {
-  id: string;           // id del servidor (o local provisional)
-  clientId: string;     // id estable del cliente para mapear el mismo evento
+  id: string;
   title: string;
   description?: string;
-  startTime: number;    // minutos desde las 6 AM
-  duration: number;     // minutos
+  startTime: number; // minutos desde las 6 AM
+  duration: number; // minutos
   color: string;
   category: string;
-  date: string;         // 'YYYY-MM-DD' -> fecha absoluta del evento
+  date: string; // 'YYYY-MM-DD' -> fecha absoluta del evento
 }
-
-// Utilidad para crear clientId estable
-const createClientId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 // Utilidades fecha/UTC mínimas para API
 const dateKeyToLocalDate = (dateKey: string, minutesFromStart: number) => {
@@ -76,7 +72,7 @@ async function apiPostEvent(payload: any) {
 
 interface EventResizableBlockProps {
   ev: Event;
-  onResizeCommit: (clientId: string, newStartTime: number, newDuration: number) => void;
+  onResizeCommit: (event: Event, newStartTime: number, newDuration: number) => void;
 }
 
 const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit }: EventResizableBlockProps) {
@@ -89,8 +85,8 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
     const minDuration = 30;
     if (newDuration < minDuration) newDuration = minDuration;
     if (newStartTime < 0) return;
-    onResizeCommit(ev.clientId, newStartTime, newDuration);
-  }, [ev.clientId, onResizeCommit]);
+    onResizeCommit(ev, newStartTime, newDuration);
+  }, [ev, onResizeCommit]);
 
   const topResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -414,21 +410,25 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [currentDate, monthEventsByDay, getRandomColor]);
 
-  const handleSaveEvent = useCallback(() => {
+  const handleSaveEvent = useCallback(async () => {
     if (!eventTitle.trim()) {
       Alert.alert('Error', 'El título es obligatorio');
       return;
     }
 
-    if (selectedEvent) {
-      // Editar existente
+    // Almacena el ID temporal del evento que se está creando/editando
+    const tempId = selectedEvent?.id; 
+    const isNewEvent = !selectedEvent;
+
+    if (tempId && !isNewEvent) {
+      // Lógica para actualizar un evento existente
       if ('startTime' in selectedEvent) {
         setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
       } else {
         setMonthEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
       }
     } else if (selectedCell) {
-      // Crear evento día/semana → asignar fecha absoluta y persistir en API
+      // Lógica para crear un nuevo evento
       let dateKey = '';
       if (currentView === 'day') {
         dateKey = toDateKey(currentDate);
@@ -440,11 +440,9 @@ export default function CalendarView({}: CalendarViewProps) {
         dateKey = toDateKey(currentDate);
       }
 
-      const clientId = createClientId();
-      const localId = clientId; // usar clientId como id provisional
+      const localId = Date.now().toString();
       const newEvent: Event = {
         id: localId,
-        clientId,
         title: eventTitle,
         description: eventDescription,
         startTime: selectedCell.startTime,
@@ -455,38 +453,53 @@ export default function CalendarView({}: CalendarViewProps) {
       };
       setEvents(prev => [...prev, newEvent]);
 
-      // Persistencia API (optimista con reconciliación de id)
-      (async () => {
-        try {
-          const startLocal = dateKeyToLocalDate(dateKey, newEvent.startTime);
-          const endLocal = dateKeyToLocalDate(dateKey, newEvent.startTime + newEvent.duration);
-          // Obtener calendar_id válido
-          const calJson = await apiGetCalendars();
-          const calendarId = calJson?.data?.[0]?.id;
-          if (!calendarId) throw new Error('No hay calendars disponibles');
+      // Persistencia API con reconciliación de ID
+      try {
+        const startLocal = dateKeyToLocalDate(dateKey, newEvent.startTime);
+        const endLocal = dateKeyToLocalDate(dateKey, newEvent.startTime + newEvent.duration);
+        // Obtener calendar_id válido
+        const calJson = await apiGetCalendars();
+        const calendarId = calJson?.data?.[0]?.id;
+        if (!calendarId) throw new Error('No hay calendars disponibles');
 
-          const payload = {
-            calendar_id: calendarId,
-            title: newEvent.title,
-            description: newEvent.description,
-            start_utc: startLocal.toISOString(),
-            end_utc: endLocal.toISOString(),
-            color: newEvent.color,
-          };
-          const res = await apiPostEvent(payload);
-          const body = await res.json().catch(() => null);
-          if (res.ok && body?.data?.id) {
-            const serverId = String(body.data.id);
-            setEvents(prev => prev.map(e => e.clientId === clientId ? { ...e, id: serverId } : e));
-          } else {
-            console.log('POST event failed:', res.status, body);
-            Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
-          }
-        } catch (e) {
-          console.log('POST event error:', (e as any)?.message || e);
-          Alert.alert('Aviso', 'No se pudo crear el evento en el servidor.');
-        }
-      })();
+        const payload = {
+          calendar_id: calendarId,
+          title: newEvent.title,
+          description: newEvent.description,
+          start_utc: startLocal.toISOString(),
+          end_utc: endLocal.toISOString(),
+          color: newEvent.color,
+        };
+        const res = await apiPostEvent(payload);
+        const createdEvent = await res.json();
+        
+        // En handleSaveEvent, reemplaza el bloque if (res.ok...) por este:
+      if (res.ok && createdEvent?.data?.id) {
+        // Construimos un objeto limpio que SÍ CUMPLE con la interfaz 'Event'
+        const finalEvent: Event = {
+            id: createdEvent.data.id.toString(), // Usamos el ID real del servidor
+            title: createdEvent.data.title,
+            description: createdEvent.data.description,
+            color: createdEvent.data.color,
+            // Mantenemos estos datos del evento temporal que creamos antes
+            date: dateKey,
+            startTime: newEvent.startTime,
+            duration: newEvent.duration,
+            category: 'General',
+        };
+
+        // Reemplaza el evento temporal por el evento final con el ID correcto
+        setEvents(prev => [...prev.filter(e => e.id !== localId), finalEvent]);
+
+      } else {
+        // Tu lógica de manejo de errores
+        console.log('POST event failed:', res.status, createdEvent);
+        Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
+      }
+      } catch (e) {
+        console.log('POST event error:', (e as any)?.message || e);
+        Alert.alert('Aviso', 'No se pudo crear el evento en el servidor.');
+      }
 
     } else if (selectedMonthCell) {
       const year = currentDate.getFullYear();
@@ -582,56 +595,67 @@ export default function CalendarView({}: CalendarViewProps) {
   }, [currentView, currentDate]);
 
   // Callback de commit desde bloque redimensionable
-  const onResizeCommit = useCallback((clientId: string, newStartTime: number, newDuration: number) => {
-    // actualizar optimista por clientId
-    setEvents(prev => prev.map(ev => ev.clientId === clientId ? { ...ev, startTime: newStartTime, duration: newDuration } : ev));
-    const ev = events.find(e => e.clientId === clientId);
-    if (!ev) return;
-    const startLocal = dateKeyToLocalDate(ev.date, newStartTime);
-    const endLocal = dateKeyToLocalDate(ev.date, newStartTime + newDuration);
-    (async () => {
-      try {
-        const currentId = ev.id; // id actual (puede ser provisional o del servidor)
-        console.log('PUT attempt id:', currentId, 'clientId:', clientId);
-        const res = await apiPutEventTimes(currentId, startLocal.toISOString(), endLocal.toISOString());
+  const onResizeCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDuration: number) => {
+    const eventId = eventToUpdate.id; // ID actual, ya sea temporal o real
+
+    if (resizeLockRef.current.has(eventId)) return;
+    resizeLockRef.current.add(eventId);
+
+    // 1. Actualización optimista de la UI (para que se vea instantáneo)
+    setEvents(prev => prev.map(ev => ev.id === eventId ? { ...ev, startTime: newStartTime, duration: newDuration } : ev));
+
+    const startLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime);
+    const endLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime + newDuration);
+
+    try {
+        console.log(`PATCH attempt eventId: ${eventId} start: ${startLocal.toISOString()} end: ${endLocal.toISOString()}`);
+        const res = await apiPutEventTimes(eventId, startLocal.toISOString(), endLocal.toISOString());
         console.log('Resize PATCH status:', res.status);
+
         if (res.status === 404) {
-          try {
+            // FALLBACK: El evento no existía en el servidor, lo creamos
+            console.log('Fallback: Event not found, creating it...');
             const calJson = await apiGetCalendars();
             const calendarId = calJson?.data?.[0]?.id;
-            if (!calendarId) throw new Error('No hay calendars disponibles');
+            if (!calendarId) throw new Error('No calendars available');
+
             const payload = {
-              calendar_id: calendarId,
-              title: ev.title,
-              description: ev.description,
-              start_utc: startLocal.toISOString(),
-              end_utc: endLocal.toISOString(),
-              color: ev.color,
+                calendar_id: calendarId,
+                title: eventToUpdate.title,
+                description: eventToUpdate.description,
+                start_utc: startLocal.toISOString(),
+                end_utc: endLocal.toISOString(),
+                color: eventToUpdate.color,
             };
             const createRes = await apiPostEvent(payload);
-            const body = await createRes.json().catch(() => null);
+            const body = await createRes.json();
+
             if (createRes.ok && body?.data?.id) {
-              const serverId = String(body.data.id);
-              setEvents(prev => prev.map(e => e.clientId === clientId ? { ...e, id: serverId } : e));
-              console.log('Fallback POST created event id:', serverId);
-              const retryRes = await apiPutEventTimes(serverId, startLocal.toISOString(), endLocal.toISOString());
-              console.log('Re-try PUT after create status:', retryRes.status);
+                const serverId = String(body.data.id);
+                console.log(`Fallback POST created event id: ${serverId}, replacing old id: ${eventId}`);
+
+                // Reemplazamos el ID temporal por el ID del servidor EN el evento que ya habíamos actualizado
+                setEvents(prev => prev.map(e => (e.id === eventId ? { ...e, id: serverId } : e)));
+
+                // Reintentamos el guardado de la hora correcta con el nuevo ID
+                const retryRes = await apiPutEventTimes(serverId, startLocal.toISOString(), endLocal.toISOString());
+                console.log('Re-try PUT after create status:', retryRes.status);
+                if (!retryRes.ok) throw new Error('Failed to update after fallback create');
             } else {
-              const txt = await createRes.text().catch(() => '');
-              console.log('Fallback POST failed:', createRes.status, body || txt);
+                throw new Error('Fallback POST failed');
             }
-          } catch (e2) {
-            console.log('Fallback POST error:', (e2 as any)?.message || e2);
-          }
         } else if (!res.ok) {
-          const body = await res.text().catch(() => '');
-          console.log('Resize PATCH body (first 200):', body.slice(0, 200));
+            throw new Error(`API error: ${res.status}`);
         }
-      } catch (e) {
-        console.log('patchEventUtc error:', (e as any)?.message || e);
-      }
-    })();
-  }, [events]);
+    } catch (e) {
+        console.log('Error during resize commit:', (e as Error).message);
+        Alert.alert('Error', 'No se pudo guardar el cambio. Reintentando...');
+        // Revertimos al estado original del bloque antes del estiramiento
+        setEvents(prev => prev.map(ev => ev.id === eventId ? eventToUpdate : ev));
+    } finally {
+        resizeLockRef.current.delete(eventId);
+    }
+}, []); // <-- La dependencia vacía [] es clave, ahora no sufre de "estado obsoleto"
 
   // Renderizado principal
   return (
@@ -757,9 +781,9 @@ export default function CalendarView({}: CalendarViewProps) {
                   <Text style={styles.timeText}>{time}</Text>
                 </View>
                 <TouchableOpacity style={[styles.cell, { width: getCellWidth() }]} onPress={() => handleCellPress(0, timeIndex)}>
-                  {event && (
-                    <EventResizableBlock ev={event} onResizeCommit={onResizeCommit} />
-                  )}
+                {event && (
+                    <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} />
+                )}
                 </TouchableOpacity>
               </View>
             );
@@ -821,7 +845,7 @@ export default function CalendarView({}: CalendarViewProps) {
                             onPress={() => handleCellPress(dayIndex, timeIndex)}
                           >
                             {event && (
-                              <EventResizableBlock ev={event} onResizeCommit={onResizeCommit} />
+                                <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} />
                             )}
                           </TouchableOpacity>
                         );
