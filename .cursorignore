@@ -1,0 +1,5 @@
+# permitir expresamente el .env que está dentro de includes/
+!includes/.env
+!includes/.env.local
+!*.env
+!APIlaravel/.env
