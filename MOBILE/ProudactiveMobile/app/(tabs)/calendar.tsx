@@ -203,6 +203,10 @@ const generateRecurrentInstances = (
           color: masterEvent.color,
           category: masterEvent.category || 'General',
           date: instanceStart.toISOString().slice(0, 10), // YYYY-MM-DD
+          // IMPORTANTE: Pasar los campos de recurrencia del evento master
+          is_recurring: masterEvent.is_recurring,
+          recurrence_rule: masterEvent.recurrence_rule,
+          recurrence_end_date: masterEvent.recurrence_end_date,
         };
 
         instances.push(instance);
@@ -1313,6 +1317,15 @@ export default function CalendarView({}: CalendarViewProps) {
       try {
         const startLocal = dateKeyToLocalDate(dateKey, newEvent.startTime);
         const endLocal = dateKeyToLocalDate(dateKey, newEvent.startTime + newEvent.duration);
+        
+        // Debug: Verificar conversión de fechas
+        console.log('🔍 DEBUG - Conversión de fechas:', {
+          dateKey,
+          startTime: newEvent.startTime,
+          startLocal: startLocal.toISOString(),
+          endLocal: endLocal.toISOString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        });
         // Obtener calendar_id válido
         const calJson = await apiGetCalendars();
         const calendarId = calJson?.data?.[0]?.id;
