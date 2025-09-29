@@ -66,6 +66,9 @@ class EventController extends Controller
             'timezone' => 'nullable|string',
             'color' => 'nullable|string|max:7',
             'category_id' => 'nullable|exists:event_categories,id',
+            'is_recurring' => 'boolean',
+            'recurrence_rule' => 'nullable|string',
+            'recurrence_end_date' => 'nullable|date|after_or_equal:start_utc',
             'alarms' => 'nullable|array',
             'alarms.*.trigger_minutes_before' => 'required_with:alarms|integer|min:1',
             'alarms.*.method' => 'required_with:alarms|in:local,push,email',
@@ -96,6 +99,9 @@ class EventController extends Controller
                 'all_day' => $request->all_day ?? false,
                 'timezone' => $request->timezone ?? 'UTC',
                 'color' => $request->color,
+                'is_recurring' => $request->is_recurring ?? false,
+                'recurrence_rule' => $request->recurrence_rule,
+                'recurrence_end_date' => $request->recurrence_end_date,
                 'version' => 1,
             ]);
 
@@ -178,6 +184,9 @@ class EventController extends Controller
             'timezone' => 'nullable|string',
             'color' => 'nullable|string|max:7',
             'category_id' => 'nullable|exists:event_categories,id',
+            'is_recurring' => 'boolean',
+            'recurrence_rule' => 'nullable|string',
+            'recurrence_end_date' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -194,7 +203,8 @@ class EventController extends Controller
             $event->update(array_merge(
                 $request->only([
                     'calendar_id', 'title', 'description', 'location',
-                    'start_utc', 'end_utc', 'all_day', 'timezone', 'color', 'category_id'
+                    'start_utc', 'end_utc', 'all_day', 'timezone', 'color', 'category_id',
+                    'is_recurring', 'recurrence_rule', 'recurrence_end_date'
                 ]),
                 ['version' => $event->version + 1]
             ));

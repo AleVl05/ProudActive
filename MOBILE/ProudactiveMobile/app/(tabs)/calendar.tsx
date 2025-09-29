@@ -15,16 +15,325 @@ import {
   NativeScrollEvent,
   PanResponder,
   Animated,
+  Switch,
+  Platform,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from '../../src/config/api';
 
+
 const { width } = Dimensions.get('window');
 const CELL_HEIGHT = 50; // 30 minutos = 50px
 const START_HOUR = 6;
 const END_HOUR = 22;
+
+const WEEK_DAY_ITEMS = [
+  { code: 'SU', short: 'D', label: 'Dom' },
+  { code: 'MO', short: 'S', label: 'Seg' },
+  { code: 'TU', short: 'T', label: 'Ter' },
+  { code: 'WE', short: 'Q', label: 'Qua' },
+  { code: 'TH', short: 'Q', label: 'Qui' },
+  { code: 'FR', short: 'S', label: 'Sex' },
+  { code: 'SA', short: 'S', label: 'Sáb' },
+];
+
+const WEEK_DAY_CODES = WEEK_DAY_ITEMS.map(item => item.code);
+
+const WEEK_DAY_LABEL_BY_CODE = WEEK_DAY_ITEMS.reduce<Record<string, string>>((acc, item) => {
+  acc[item.code] = item.label;
+  return acc;
+}, {});
+
+const WEEK_DAY_SHORT_BY_CODE = WEEK_DAY_ITEMS.reduce<Record<string, string>>((acc, item) => {
+  acc[item.code] = item.short;
+  return acc;
+}, {});
+
+const MONTH_DAY_ITEMS = Array.from({ length: 31 }, (_, i) => i + 1);
+const MONTH_WEEKDAY_HEADERS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+const RECURRENCE_MODE_LABEL: Record<RecurrenceMode, string> = {
+  daily: 'Diário',
+  weekly: 'Semanal',
+  monthly: 'Mensal',
+};
+
+const INTERVAL_UNIT_LABEL: Record<RecurrenceMode, { singular: string; plural: string }> = {
+  daily: { singular: 'dia', plural: 'dias' },
+  weekly: { singular: 'semana', plural: 'semanas' },
+  monthly: { singular: 'mês', plural: 'meses' },
+};
+
+const createDefaultRecurrenceConfig = (): RecurrenceConfig => ({
+  enabled: false,
+  mode: 'daily',
+  interval: 1,
+  weekDays: [],
+  monthDays: [],
+  hasEndDate: false,
+  endDate: null,
+});
+
+const cloneRecurrenceConfig = (config: RecurrenceConfig): RecurrenceConfig => ({
+  ...config,
+  weekDays: [...config.weekDays],
+  monthDays: [...config.monthDays],
+});
+
+const clampRecurrenceInterval = (value: number) => {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(30, Math.round(value)));
+};
+
+const getWeekDayCode = (date: Date) => WEEK_DAY_ITEMS[date.getDay()]?.code ?? 'MO';
+
+const getRecurrenceTitle = (config: RecurrenceConfig): string => {
+  if (!config.enabled) return 'Repetir';
+  
+  const mode = RECURRENCE_MODE_LABEL[config.mode];
+  
+  if (config.mode === 'daily') {
+    return `Repete A cada dia`;
+  } else if (config.mode === 'weekly') {
+    const firstDay = config.weekDays.length > 0 ? WEEK_DAY_LABEL_BY_CODE[config.weekDays[0]] || 'Dom' : 'Dom';
+    return `Repete A cada semana em ${firstDay}`;
+  } else if (config.mode === 'monthly') {
+    const firstDay = config.monthDays.length > 0 ? config.monthDays[0] : 28;
+    return `Repete A cada mês em ${firstDay}°`;
+  }
+  
+  return `Repete ${mode}`;
+};
+
+const extractRecurrenceFromEvent = (event: any): RecurrenceConfig => {
+  // Debug: Log para ver qué datos está recibiendo
+  console.log('🔍 DEBUG - Evento recibido para extraer recurrencia:', {
+    id: event?.id,
+    is_recurring: event?.is_recurring,
+    recurrence_rule: event?.recurrence_rule,
+    recurrence_end_date: event?.recurrence_end_date
+  });
+
+  if (!event || !event.is_recurring) {
+    return createDefaultRecurrenceConfig();
+  }
+
+  try {
+    const rule = typeof event.recurrence_rule === 'string' 
+      ? JSON.parse(event.recurrence_rule) 
+      : event.recurrence_rule;
+
+    if (!rule || !rule.frequency) {
+      return createDefaultRecurrenceConfig();
+    }
+
+    const mode = rule.frequency.toLowerCase() as RecurrenceMode;
+    const config: RecurrenceConfig = {
+      enabled: true,
+      mode,
+      interval: rule.interval || 1,
+      weekDays: rule.byWeekDays || [],
+      monthDays: rule.byMonthDays || [],
+      hasEndDate: !!event.recurrence_end_date,
+      endDate: event.recurrence_end_date || null,
+    };
+
+    console.log('🔍 DEBUG - Configuración de recurrencia extraída:', config);
+    return config;
+  } catch (error) {
+    console.warn('Error parsing recurrence rule:', error);
+    return createDefaultRecurrenceConfig();
+  }
+};
+
+// Función para generar instancias recurrentes bajo demanda
+const generateRecurrentInstances = (
+  masterEvent: any, 
+  startDate: Date, 
+  endDate: Date
+): Event[] => {
+  if (!masterEvent || !masterEvent.is_recurring) {
+    return [];
+  }
+
+  try {
+    const rule = typeof masterEvent.recurrence_rule === 'string'
+      ? JSON.parse(masterEvent.recurrence_rule)
+      : masterEvent.recurrence_rule;
+
+    if (!rule || !rule.frequency) {
+      return [];
+    }
+
+    const instances: Event[] = [];
+    const eventStart = new Date(masterEvent.start_utc);
+    const eventEnd = new Date(masterEvent.end_utc);
+    const duration = eventEnd.getTime() - eventStart.getTime();
+    const recurrenceEndDate = masterEvent.recurrence_end_date 
+      ? new Date(masterEvent.recurrence_end_date + 'T23:59:59')
+      : null;
+
+    const frequency = rule.frequency.toUpperCase();
+    const interval = rule.interval || 1;
+
+    let currentDate = new Date(eventStart);
+    let instanceCount = 0;
+    const maxInstances = 1000; // Límite de seguridad
+
+    while (
+      currentDate <= endDate && 
+      instanceCount < maxInstances &&
+      (!recurrenceEndDate || currentDate <= recurrenceEndDate)
+    ) {
+      // Solo generar si la instancia está en el rango visible
+      if (currentDate >= startDate) {
+        const instanceStart = new Date(currentDate);
+        const instanceEnd = new Date(currentDate.getTime() + duration);
+        
+        // Crear la instancia con ID único
+        const instance: Event = {
+          id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
+          title: masterEvent.title,
+          description: masterEvent.description,
+          startTime: (instanceStart.getHours() * 60 + instanceStart.getMinutes()),
+          duration: Math.round(duration / (1000 * 60)), // minutos
+          color: masterEvent.color,
+          category: masterEvent.category || 'General',
+          date: instanceStart.toISOString().slice(0, 10), // YYYY-MM-DD
+        };
+
+        instances.push(instance);
+      }
+
+      // Calcular la próxima fecha según la frecuencia
+      switch (frequency) {
+        case 'DAILY':
+          currentDate.setDate(currentDate.getDate() + interval);
+          break;
+        
+        case 'WEEKLY':
+          if (rule.byWeekDays && rule.byWeekDays.length > 0) {
+            // Encontrar el próximo día de la semana especificado
+            const weekDayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+            const targetDays = rule.byWeekDays.map((day: string) => weekDayCodes.indexOf(day)).filter((d: number) => d !== -1);
+            
+            let nextDate = new Date(currentDate);
+            nextDate.setDate(nextDate.getDate() + 1);
+            
+            // Buscar el próximo día válido
+            for (let i = 0; i < 7 * interval; i++) {
+              if (targetDays.includes(nextDate.getDay())) {
+                currentDate = nextDate;
+                break;
+              }
+              nextDate.setDate(nextDate.getDate() + 1);
+            }
+          } else {
+            currentDate.setDate(currentDate.getDate() + (7 * interval));
+          }
+          break;
+        
+        case 'MONTHLY':
+          if (rule.byMonthDays && rule.byMonthDays.length > 0) {
+            // Encontrar el próximo día del mes especificado
+            const currentDay = currentDate.getDate();
+            const targetDays = rule.byMonthDays.sort((a: number, b: number) => a - b);
+            
+            let nextDay = targetDays.find((day: number) => day > currentDay);
+            if (nextDay) {
+              currentDate.setDate(nextDay);
+            } else {
+              // Ir al próximo mes con el primer día especificado
+              currentDate.setMonth(currentDate.getMonth() + interval);
+              currentDate.setDate(targetDays[0]);
+            }
+          } else {
+            currentDate.setMonth(currentDate.getMonth() + interval);
+          }
+          break;
+        
+        default:
+          // Si no reconocemos la frecuencia, salir para evitar bucle infinito
+          return instances;
+      }
+
+      instanceCount++;
+    }
+
+    return instances;
+  } catch (error) {
+    console.warn('Error generating recurrent instances:', error);
+    return [];
+  }
+};
+
+const buildMonthMatrix = (date: Date) => {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startOffset = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const rows: (number | null)[][] = [];
+  let currentDay = 1;
+  for (let week = 0; week < 6; week++) {
+    const row: (number | null)[] = [];
+    for (let dow = 0; dow < 7; dow++) {
+      if (week === 0 && dow < startOffset) {
+        row.push(null);
+      } else if (currentDay > daysInMonth) {
+        row.push(null);
+      } else {
+        row.push(currentDay);
+        currentDay++;
+      }
+    }
+    rows.push(row);
+  }
+  return rows;
+};
+
+const toggleItemInArray = <T,>(arr: T[], value: T): T[] => {
+  if (arr.includes(value)) {
+    return arr.filter(item => item !== value);
+  }
+  return [...arr, value];
+};
+
+const sortNumericArray = (arr: number[]) => [...arr].sort((a, b) => a - b);
+
+const sanitizeRecurrenceDraft = (draft: RecurrenceConfig | null, fallbackDate: Date): RecurrenceConfig => {
+  const base = draft ?? createDefaultRecurrenceConfig();
+  const sanitized = cloneRecurrenceConfig(base);
+  sanitized.enabled = !!base.enabled;
+  sanitized.interval = clampRecurrenceInterval(sanitized.interval || 1);
+
+  if (sanitized.mode === 'weekly') {
+    const uniqueDays = Array.from(new Set(sanitized.weekDays));
+    sanitized.weekDays = uniqueDays.length > 0 ? uniqueDays : [getWeekDayCode(fallbackDate)];
+    sanitized.monthDays = [];
+  } else if (sanitized.mode === 'monthly') {
+    const filteredDays = sanitized.monthDays
+      .map(day => Math.max(1, Math.min(31, Math.round(day))))
+      .filter((day, index, arr) => arr.indexOf(day) === index)
+      .sort((a, b) => a - b);
+    sanitized.monthDays = filteredDays.length > 0 ? filteredDays : [fallbackDate.getDate()];
+    sanitized.weekDays = [];
+  } else {
+    sanitized.weekDays = [];
+    sanitized.monthDays = [];
+  }
+
+  if (!sanitized.hasEndDate) {
+    sanitized.endDate = null;
+  }
+
+  return sanitized;
+};
+
 
 interface Event {
   id: string;
@@ -35,6 +344,29 @@ interface Event {
   color: string;
   category: string;
   date: string; // 'YYYY-MM-DD' -> fecha absoluta del evento
+  // Campos de recurrencia
+  is_recurring?: boolean;
+  recurrence_rule?: string | object | null;
+  recurrence_end_date?: string | null;
+}
+
+type RecurrenceMode = 'daily' | 'weekly' | 'monthly';
+
+interface RecurrenceConfig {
+  enabled: boolean;
+  mode: RecurrenceMode;
+  interval: number;
+  weekDays: string[]; // códigos ISO-8601: 'MO', 'TU'...
+  monthDays: number[]; // 1-31
+  hasEndDate: boolean;
+  endDate: string | null; // YYYY-MM-DD
+}
+
+interface RecurrenceRule {
+  frequency: string;
+  interval: number;
+  byWeekDays?: string[];
+  byMonthDays?: number[];
 }
 
 // Utilidades fecha/UTC mínimas para API
@@ -44,6 +376,22 @@ const dateKeyToLocalDate = (dateKey: string, minutesFromStart: number) => {
   dt.setHours(START_HOUR, 0, 0, 0);
   dt.setMinutes(dt.getMinutes() + minutesFromStart);
   return dt; // local Date; toISOString() es UTC
+};
+
+const dateKeyToDate = (dateKey: string) => {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+};
+
+const formatDateKey = (dateKey: string) => {
+  const d = dateKeyToDate(dateKey);
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
+
+const formatDisplayMonthYear = (date: Date) => {
+  const formatter = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
+  const formatted = formatter.format(date);
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 };
 
 async function apiPutEventTimes(eventId: string, startUtcIso: string, endUtcIso: string) {
@@ -67,6 +415,12 @@ async function apiPostEvent(payload: any) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  return res;
+}
+
+async function apiFetchEvents(startIso: string, endIso: string) {
+  const params = new URLSearchParams({ start: startIso, end: endIso });
+  const res = await fetch(`${API_BASE}/events?${params.toString()}`);
   return res;
 }
 
@@ -200,6 +554,332 @@ interface SelectedMonthCell {
 
 interface CalendarViewProps {}
 
+// Componente del Modal de Repetición
+interface RecurrenceModalProps {
+  config: RecurrenceConfig;
+  onSave: (config: RecurrenceConfig) => void;
+  onCancel: () => void;
+  calendarMonth: Date;
+  onCalendarMonthChange: (date: Date) => void;
+}
+
+function RecurrenceModal({ config, onSave, onCancel, calendarMonth, onCalendarMonthChange }: RecurrenceModalProps) {
+  const insets = useSafeAreaInsets();
+  const [localConfig, setLocalConfig] = useState<RecurrenceConfig>(() => cloneRecurrenceConfig(config));
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+
+  // Actualizar configuración local cuando cambie la prop
+  useEffect(() => {
+    setLocalConfig(cloneRecurrenceConfig(config));
+  }, [config]);
+
+  const updateConfig = useCallback((updates: Partial<RecurrenceConfig>) => {
+    setLocalConfig(prev => ({ ...prev, ...updates }));
+  }, []);
+
+  const handleSave = useCallback(() => {
+    onSave(localConfig);
+  }, [localConfig, onSave]);
+
+  const handleModeChange = useCallback((mode: RecurrenceMode) => {
+    const updates: Partial<RecurrenceConfig> = { mode };
+    
+    // Configurar valores por defecto según el modo
+    if (mode === 'weekly') {
+      const currentWeekDay = getWeekDayCode(new Date());
+      updates.weekDays = localConfig.weekDays.length > 0 ? localConfig.weekDays : [currentWeekDay];
+    } else if (mode === 'monthly') {
+      const currentDay = new Date().getDate();
+      updates.monthDays = localConfig.monthDays.length > 0 ? localConfig.monthDays : [currentDay];
+    }
+    
+    updateConfig(updates);
+  }, [localConfig.weekDays, localConfig.monthDays, updateConfig]);
+
+  const handleIntervalChange = useCallback((delta: number) => {
+    const newInterval = clampRecurrenceInterval(localConfig.interval + delta);
+    updateConfig({ interval: newInterval });
+  }, [localConfig.interval, updateConfig]);
+
+  const handleWeekDayToggle = useCallback((dayCode: string) => {
+    const newWeekDays = localConfig.weekDays.includes(dayCode)
+      ? localConfig.weekDays.filter(d => d !== dayCode)
+      : [...localConfig.weekDays, dayCode];
+    updateConfig({ weekDays: newWeekDays });
+  }, [localConfig.weekDays, updateConfig]);
+
+  const handleMonthDayToggle = useCallback((day: number) => {
+    const newMonthDays = localConfig.monthDays.includes(day)
+      ? localConfig.monthDays.filter(d => d !== day)
+      : [...localConfig.monthDays, day];
+    updateConfig({ monthDays: newMonthDays });
+  }, [localConfig.monthDays, updateConfig]);
+
+  const handleEndDateChange = useCallback((event: DateTimePickerEvent, selectedDate?: Date) => {
+    setShowEndDatePicker(false);
+    if (event.type === 'set' && selectedDate) {
+      const dateStr = selectedDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      updateConfig({ endDate: dateStr });
+    }
+  }, [updateConfig]);
+
+  const formatEndDate = useCallback((dateStr: string | null) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr + 'T00:00:00');
+    return date.toLocaleDateString('pt-BR');
+  }, []);
+
+  const renderTabContent = () => {
+    switch (localConfig.mode) {
+      case 'daily':
+        return (
+          <View style={recurrenceStyles.tabContent}>
+            <View style={recurrenceStyles.intervalSection}>
+              <Text style={recurrenceStyles.sectionTitle}>Intervalo</Text>
+              <View style={recurrenceStyles.intervalRow}>
+                <Text style={recurrenceStyles.intervalLabel}>A cada</Text>
+                <View style={recurrenceStyles.stepperContainer}>
+                  <TouchableOpacity
+                    style={recurrenceStyles.stepperButton}
+                    onPress={() => handleIntervalChange(-1)}
+                    disabled={localConfig.interval <= 1}
+                  >
+                    <Text style={[recurrenceStyles.stepperText, localConfig.interval <= 1 && recurrenceStyles.stepperDisabled]}>-</Text>
+                  </TouchableOpacity>
+                  <Text style={recurrenceStyles.intervalValue}>{localConfig.interval.toString().padStart(2, '0')}</Text>
+                  <TouchableOpacity
+                    style={recurrenceStyles.stepperButton}
+                    onPress={() => handleIntervalChange(1)}
+                    disabled={localConfig.interval >= 30}
+                  >
+                    <Text style={[recurrenceStyles.stepperText, localConfig.interval >= 30 && recurrenceStyles.stepperDisabled]}>+</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={recurrenceStyles.intervalLabel}>
+                  {localConfig.interval === 1 ? 'dia' : 'dias'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        );
+
+      case 'weekly':
+        return (
+          <View style={recurrenceStyles.tabContent}>
+            <View style={recurrenceStyles.weekDaysSection}>
+              <View style={recurrenceStyles.weekDaysGrid}>
+                {WEEK_DAY_ITEMS.map(item => (
+                  <TouchableOpacity
+                    key={item.code}
+                    style={[
+                      recurrenceStyles.weekDayChip,
+                      localConfig.weekDays.includes(item.code) && recurrenceStyles.weekDayChipSelected
+                    ]}
+                    onPress={() => handleWeekDayToggle(item.code)}
+                  >
+                    <Text style={[
+                      recurrenceStyles.weekDayChipText,
+                      localConfig.weekDays.includes(item.code) && recurrenceStyles.weekDayChipTextSelected
+                    ]}>
+                      {item.short}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={recurrenceStyles.intervalSection}>
+              <Text style={recurrenceStyles.sectionTitle}>Intervalo</Text>
+              <View style={recurrenceStyles.intervalRow}>
+                <Text style={recurrenceStyles.intervalLabel}>A cada</Text>
+                <View style={recurrenceStyles.stepperContainer}>
+                  <TouchableOpacity
+                    style={recurrenceStyles.stepperButton}
+                    onPress={() => handleIntervalChange(-1)}
+                    disabled={localConfig.interval <= 1}
+                  >
+                    <Text style={[recurrenceStyles.stepperText, localConfig.interval <= 1 && recurrenceStyles.stepperDisabled]}>-</Text>
+                  </TouchableOpacity>
+                  <Text style={recurrenceStyles.intervalValue}>{localConfig.interval.toString().padStart(2, '0')}</Text>
+                  <TouchableOpacity
+                    style={recurrenceStyles.stepperButton}
+                    onPress={() => handleIntervalChange(1)}
+                    disabled={localConfig.interval >= 30}
+                  >
+                    <Text style={[recurrenceStyles.stepperText, localConfig.interval >= 30 && recurrenceStyles.stepperDisabled]}>+</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={recurrenceStyles.intervalLabel}>
+                  {localConfig.interval === 1 ? 'semana' : 'semanas'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        );
+
+      case 'monthly':
+        return (
+          <View style={recurrenceStyles.tabContent}>
+            <View style={recurrenceStyles.monthDaysSection}>
+              <View style={recurrenceStyles.monthGrid}>
+                {MONTH_DAY_ITEMS.map(day => (
+                  <TouchableOpacity
+                    key={day}
+                    style={[
+                      recurrenceStyles.monthDayChip,
+                      localConfig.monthDays.includes(day) && recurrenceStyles.monthDayChipSelected
+                    ]}
+                    onPress={() => handleMonthDayToggle(day)}
+                  >
+                    <Text style={[
+                      recurrenceStyles.monthDayChipText,
+                      localConfig.monthDays.includes(day) && recurrenceStyles.monthDayChipTextSelected
+                    ]}>
+                      {day}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={recurrenceStyles.intervalSection}>
+              <Text style={recurrenceStyles.sectionTitle}>Intervalo</Text>
+              <View style={recurrenceStyles.intervalRow}>
+                <Text style={recurrenceStyles.intervalLabel}>A cada</Text>
+                <View style={recurrenceStyles.stepperContainer}>
+                  <TouchableOpacity
+                    style={recurrenceStyles.stepperButton}
+                    onPress={() => handleIntervalChange(-1)}
+                    disabled={localConfig.interval <= 1}
+                  >
+                    <Text style={[recurrenceStyles.stepperText, localConfig.interval <= 1 && recurrenceStyles.stepperDisabled]}>-</Text>
+                  </TouchableOpacity>
+                  <Text style={recurrenceStyles.intervalValue}>{localConfig.interval.toString().padStart(2, '0')}</Text>
+                  <TouchableOpacity
+                    style={recurrenceStyles.stepperButton}
+                    onPress={() => handleIntervalChange(1)}
+                    disabled={localConfig.interval >= 30}
+                  >
+                    <Text style={[recurrenceStyles.stepperText, localConfig.interval >= 30 && recurrenceStyles.stepperDisabled]}>+</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={recurrenceStyles.intervalLabel}>
+                  {localConfig.interval === 1 ? 'mês' : 'meses'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <View style={recurrenceStyles.container}>
+      <View style={[recurrenceStyles.header, { paddingTop: insets.top }]}>
+        <TouchableOpacity style={recurrenceStyles.backButton} onPress={onCancel}>
+          <Ionicons name="arrow-back" size={24} color={Colors.light.text} />
+        </TouchableOpacity>
+        <Text style={recurrenceStyles.headerTitle}>
+          {localConfig.enabled ? getRecurrenceTitle(localConfig) : 'Repetir'}
+        </Text>
+      </View>
+
+      <ScrollView style={recurrenceStyles.content}>
+        {/* Switch principal de repetición */}
+        <View style={recurrenceStyles.mainSwitchSection}>
+          <View style={recurrenceStyles.mainSwitchRow}>
+            <Ionicons name="refresh-outline" size={20} color={Colors.light.tint} />
+            <Text style={recurrenceStyles.mainSwitchLabel}>Repetir</Text>
+            <Text style={recurrenceStyles.mainSwitchSubtitle}>Defina um ciclo para seu plano</Text>
+            <Switch
+              value={localConfig.enabled}
+              onValueChange={(enabled) => updateConfig({ enabled })}
+              trackColor={{ false: '#e0e0e0', true: Colors.light.tint }}
+              thumbColor={localConfig.enabled ? 'white' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
+        {localConfig.enabled && (
+          <>
+            {/* Pestañas de modo */}
+            <View style={recurrenceStyles.tabsSection}>
+              <View style={recurrenceStyles.tabsContainer}>
+                {(['daily', 'weekly', 'monthly'] as RecurrenceMode[]).map(mode => (
+                  <TouchableOpacity
+                    key={mode}
+                    style={[
+                      recurrenceStyles.tab,
+                      localConfig.mode === mode && recurrenceStyles.tabActive
+                    ]}
+                    onPress={() => handleModeChange(mode)}
+                  >
+                    <Text style={[
+                      recurrenceStyles.tabText,
+                      localConfig.mode === mode && recurrenceStyles.tabTextActive
+                    ]}>
+                      {RECURRENCE_MODE_LABEL[mode]}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Contenido de la pestaña activa */}
+            {renderTabContent()}
+
+            {/* Sección de fecha de término */}
+            <View style={recurrenceStyles.endDateSection}>
+              <View style={recurrenceStyles.endDateRow}>
+                <Text style={recurrenceStyles.endDateLabel}>Data de término</Text>
+                <Switch
+                  value={localConfig.hasEndDate}
+                  onValueChange={(hasEndDate) => updateConfig({ hasEndDate, endDate: hasEndDate ? new Date().toISOString().split('T')[0] : null })}
+                  trackColor={{ false: '#e0e0e0', true: Colors.light.tint }}
+                  thumbColor={localConfig.hasEndDate ? 'white' : '#f4f3f4'}
+                />
+              </View>
+
+              {localConfig.hasEndDate && (
+                <TouchableOpacity
+                  style={recurrenceStyles.endDateButton}
+                  onPress={() => setShowEndDatePicker(true)}
+                >
+                  <Text style={recurrenceStyles.endDateButtonText}>
+                    {formatEndDate(localConfig.endDate) || 'Selecionar data'}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#ccc" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </>
+        )}
+
+        {/* Botón de guardar */}
+        <View style={recurrenceStyles.saveSection}>
+          <TouchableOpacity style={recurrenceStyles.saveButton} onPress={handleSave}>
+            <Text style={recurrenceStyles.saveButtonText}>Salvar</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+
+      {/* Date Picker para fecha de término */}
+      {showEndDatePicker && (
+        <DateTimePicker
+          value={localConfig.endDate ? new Date(localConfig.endDate + 'T00:00:00') : new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleEndDateChange}
+          minimumDate={new Date()}
+        />
+      )}
+    </View>
+  );
+}
+
 export default function CalendarView({}: CalendarViewProps) {
   const insets = useSafeAreaInsets();
 
@@ -215,6 +895,30 @@ export default function CalendarView({}: CalendarViewProps) {
   const [selectedMonthCell, setSelectedMonthCell] = useState<SelectedMonthCell | null>(null);
   const [currentView, setCurrentView] = useState<'day' | 'week' | 'month' | 'year'>('week');
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [recurrenceConfig, setRecurrenceConfig] = useState<RecurrenceConfig>(() => createDefaultRecurrenceConfig());
+  const [recurrenceModalVisible, setRecurrenceModalVisible] = useState(false);
+  const [tempRecurrenceConfig, setTempRecurrenceConfig] = useState<RecurrenceConfig | null>(null);
+  const [recurrenceCalendarMonth, setRecurrenceCalendarMonth] = useState<Date>(new Date());
+
+  const handleOpenRecurrenceModal = useCallback(() => {
+  setTempRecurrenceConfig(cloneRecurrenceConfig(recurrenceConfig));
+  setRecurrenceCalendarMonth(new Date(currentDate));
+    setRecurrenceModalVisible(true);
+  }, [recurrenceConfig, currentDate]);
+
+  const handleSaveRecurrenceConfig = useCallback((newConfig: RecurrenceConfig) => {
+    setRecurrenceConfig(newConfig);
+    setRecurrenceModalVisible(false);
+    setTempRecurrenceConfig(null);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setModalVisible(false);
+    setSelectedEvent(null);
+    setSelectedCell(null);
+    setSelectedMonthCell(null);
+    setRecurrenceConfig(createDefaultRecurrenceConfig());
+  }, []);
 
   // Lock para evitar commits duplicados por el mismo evento en paralelo
   const resizeLockRef = useRef<Set<string>>(new Set());
@@ -304,6 +1008,130 @@ export default function CalendarView({}: CalendarViewProps) {
     return availableColors[Math.floor(Math.random() * availableColors.length)];
   }, []);
 
+  const recurrenceSummary = useMemo(() => {
+    if (!recurrenceConfig.enabled) return 'Desligado';
+
+    const unit = INTERVAL_UNIT_LABEL[recurrenceConfig.mode];
+    const intervalText = `a cada ${recurrenceConfig.interval} ${recurrenceConfig.interval === 1 ? unit.singular : unit.plural}`;
+
+    let detail = '';
+    if (recurrenceConfig.mode === 'weekly') {
+      const days = recurrenceConfig.weekDays.map(code => WEEK_DAY_LABEL_BY_CODE[code] ?? code).join(', ');
+      detail = days ? ` • ${days}` : ' • —';
+    } else if (recurrenceConfig.mode === 'monthly') {
+      const days = recurrenceConfig.monthDays.join(', ');
+      detail = days ? ` • Dias ${days}` : ' • —';
+    }
+
+    const endText = recurrenceConfig.hasEndDate && recurrenceConfig.endDate ? ` • até ${formatDateKey(recurrenceConfig.endDate)}` : '';
+
+    return `${RECURRENCE_MODE_LABEL[recurrenceConfig.mode]} • ${intervalText}${detail}${endText}`;
+  }, [recurrenceConfig]);
+
+  const normalizeApiEvent = useCallback((apiEvent: any): Event | null => {
+    if (!apiEvent?.id || !apiEvent?.start_utc || !apiEvent?.end_utc) return null;
+
+    const startDate = new Date(apiEvent.start_utc);
+    const endDate = new Date(apiEvent.end_utc);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+
+    const totalStartMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+    const minutesFromCalendarStart = totalStartMinutes - START_HOUR * 60;
+    const snappedStart = Math.max(0, Math.floor(minutesFromCalendarStart / 30) * 30);
+
+    const rawDuration = Math.max(30, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
+    const snappedDuration = Math.max(30, Math.round(rawDuration / 30) * 30);
+
+    return {
+      id: String(apiEvent.id),
+      title: apiEvent.title ?? 'Sin título',
+      description: apiEvent.description ?? undefined,
+      color: apiEvent.color || '#6b53e2',
+      category: apiEvent?.category?.name ?? 'General',
+      date: toDateKey(startDate),
+      startTime: snappedStart,
+      duration: snappedDuration,
+      // Campos de recurrencia
+      is_recurring: apiEvent.is_recurring || false,
+      recurrence_rule: apiEvent.recurrence_rule || null,
+      recurrence_end_date: apiEvent.recurrence_end_date || null,
+    };
+  }, [toDateKey]);
+
+  const fetchEventsForRange = useCallback(async (rangeStart: Date, rangeEnd: Date) => {
+    try {
+      // Expandir el rango para capturar eventos recurrentes que puedan generar instancias en el rango visible
+      const expandedStart = new Date(rangeStart);
+      expandedStart.setMonth(expandedStart.getMonth() - 6); // 6 meses atrás para capturar eventos recurrentes
+      
+      const response = await apiFetchEvents(expandedStart.toISOString(), rangeEnd.toISOString());
+      if (!response.ok) {
+        console.log('GET events failed:', response.status);
+        return null;
+      }
+
+      const body = await response.json();
+      if (!body?.success || !Array.isArray(body.data)) {
+        console.log('GET events unexpected body:', body);
+        return null;
+      }
+
+      const allEvents: Event[] = [];
+      
+      // Procesar eventos regulares y recurrentes
+      for (const item of body.data) {
+        if (item.is_recurring) {
+          // Generar instancias recurrentes solo para el rango visible
+          const recurrentInstances = generateRecurrentInstances(item, rangeStart, rangeEnd);
+          allEvents.push(...recurrentInstances);
+          
+          // También incluir el evento maestro si está en el rango visible
+          const masterEvent = normalizeApiEvent(item);
+          if (masterEvent) {
+            const masterDate = new Date(masterEvent.date);
+            if (masterDate >= rangeStart && masterDate <= rangeEnd) {
+              allEvents.push(masterEvent);
+            }
+          }
+        } else {
+          // Evento regular
+          const normalizedEvent = normalizeApiEvent(item);
+          if (normalizedEvent) {
+            allEvents.push(normalizedEvent);
+          }
+        }
+      }
+
+      return allEvents;
+    } catch (error) {
+      console.log('GET events error:', (error as Error).message);
+      return null;
+    }
+  }, [normalizeApiEvent]);
+
+  useEffect(() => {
+    if (currentView !== 'week' && currentView !== 'day') return;
+
+    const rangeStart = new Date(currentView === 'week' ? startOfWeek(currentDate) : currentDate);
+    rangeStart.setHours(0, 0, 0, 0);
+    const rangeEndBase = currentView === 'week' ? addDays(rangeStart, 6) : new Date(rangeStart);
+    const rangeEnd = new Date(rangeEndBase);
+    rangeEnd.setHours(23, 59, 59, 999);
+
+    let ignore = false;
+
+    (async () => {
+      const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
+      if (!ignore && fetched) {
+        setEvents(prev => [...prev, ...fetched]);
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [currentView, currentDate, startOfWeek, addDays, fetchEventsForRange]);
+
   // Obtener ancho de celda
   const getCellWidth = useCallback(() => {
     if (currentView === 'day') {
@@ -327,7 +1155,8 @@ export default function CalendarView({}: CalendarViewProps) {
       const weekEnd = addDays(weekStart, 6);
       return `Semana ${weekStart.getDate()}/${weekStart.getMonth() + 1} - ${weekEnd.getDate()}/${weekEnd.getMonth() + 1}`;
     } else if (currentView === 'month') {
-      return `${d.toLocaleString('es-ES', { month: 'long' })} ${d.getFullYear()}`;
+      const formatted = d.toLocaleString('es-ES', { month: 'long' });
+      return `${formatted.charAt(0).toUpperCase() + formatted.slice(1)} ${d.getFullYear()}`;
     }
     return '';
   }, [currentView, currentDate, startOfWeek, addDays]);
@@ -379,12 +1208,14 @@ export default function CalendarView({}: CalendarViewProps) {
       setEventTitle(existingEvent.title);
       setEventDescription(existingEvent.description || '');
       setEventColor(existingEvent.color);
+      setRecurrenceConfig(extractRecurrenceFromEvent(existingEvent));
       setModalVisible(true);
     } else {
       setSelectedEvent(null);
       setEventTitle('');
       setEventDescription('');
       setEventColor(getRandomColor());
+      setRecurrenceConfig(createDefaultRecurrenceConfig());
       setModalVisible(true);
       setSelectedCell({ dayIndex, timeIndex, startTime });
     }
@@ -399,12 +1230,14 @@ export default function CalendarView({}: CalendarViewProps) {
       setEventTitle(existingEvent.title);
       setEventDescription(existingEvent.description || '');
       setEventColor(existingEvent.color);
+      setRecurrenceConfig(extractRecurrenceFromEvent(existingEvent));
       setModalVisible(true);
     } else {
       setSelectedEvent(null);
       setEventTitle('');
       setEventDescription('');
       setEventColor(getRandomColor());
+      setRecurrenceConfig(createDefaultRecurrenceConfig());
       setModalVisible(true);
       setSelectedMonthCell({ dayIndex: day - 1, day });
     }
@@ -423,7 +1256,21 @@ export default function CalendarView({}: CalendarViewProps) {
     if (tempId && !isNewEvent) {
       // Lógica para actualizar un evento existente
       if ('startTime' in selectedEvent) {
-        setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
+        setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { 
+          ...ev, 
+          title: eventTitle, 
+          description: eventDescription, 
+          color: eventColor,
+          // Guardar campos de recurrencia
+          is_recurring: recurrenceConfig.enabled,
+          recurrence_rule: recurrenceConfig.enabled ? JSON.stringify({
+            frequency: recurrenceConfig.mode.toUpperCase(),
+            interval: recurrenceConfig.interval,
+            ...(recurrenceConfig.mode === 'weekly' && recurrenceConfig.weekDays.length > 0 && { byWeekDays: recurrenceConfig.weekDays }),
+            ...(recurrenceConfig.mode === 'monthly' && recurrenceConfig.monthDays.length > 0 && { byMonthDays: recurrenceConfig.monthDays })
+          }) : null,
+          recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null
+        } : ev));
       } else {
         setMonthEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
       }
@@ -450,6 +1297,15 @@ export default function CalendarView({}: CalendarViewProps) {
         color: eventColor,
         category: 'General',
         date: dateKey,
+        // Campos de recurrencia
+        is_recurring: recurrenceConfig.enabled,
+        recurrence_rule: recurrenceConfig.enabled ? JSON.stringify({
+          frequency: recurrenceConfig.mode.toUpperCase(),
+          interval: recurrenceConfig.interval,
+          ...(recurrenceConfig.mode === 'weekly' && recurrenceConfig.weekDays.length > 0 && { byWeekDays: recurrenceConfig.weekDays }),
+          ...(recurrenceConfig.mode === 'monthly' && recurrenceConfig.monthDays.length > 0 && { byMonthDays: recurrenceConfig.monthDays })
+        }) : null,
+        recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null
       };
       setEvents(prev => [...prev, newEvent]);
 
@@ -462,6 +1318,23 @@ export default function CalendarView({}: CalendarViewProps) {
         const calendarId = calJson?.data?.[0]?.id;
         if (!calendarId) throw new Error('No hay calendars disponibles');
 
+        // Crear regla de recurrencia si está habilitada
+        let recurrenceRule: RecurrenceRule | null = null;
+        if (recurrenceConfig.enabled) {
+          recurrenceRule = {
+            frequency: recurrenceConfig.mode.toUpperCase(), // 'DAILY', 'WEEKLY', 'MONTHLY'
+            interval: recurrenceConfig.interval,
+          };
+
+          if (recurrenceConfig.mode === 'weekly' && recurrenceConfig.weekDays.length > 0) {
+            recurrenceRule.byWeekDays = recurrenceConfig.weekDays;
+          }
+
+          if (recurrenceConfig.mode === 'monthly' && recurrenceConfig.monthDays.length > 0) {
+            recurrenceRule.byMonthDays = recurrenceConfig.monthDays;
+          }
+        }
+
         const payload = {
           calendar_id: calendarId,
           title: newEvent.title,
@@ -469,7 +1342,13 @@ export default function CalendarView({}: CalendarViewProps) {
           start_utc: startLocal.toISOString(),
           end_utc: endLocal.toISOString(),
           color: newEvent.color,
+          is_recurring: recurrenceConfig.enabled,
+          recurrence_rule: recurrenceRule ? JSON.stringify(recurrenceRule) : null,
+          recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null,
         };
+        
+        // Debug: Log para verificar qué se está enviando
+        console.log('🔍 DEBUG - Payload enviado al API:', JSON.stringify(payload, null, 2));
         const res = await apiPostEvent(payload);
         const createdEvent = await res.json();
         
@@ -525,7 +1404,8 @@ export default function CalendarView({}: CalendarViewProps) {
     setSelectedEvent(null);
     setSelectedCell(null);
     setSelectedMonthCell(null);
-  }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, startOfWeek, addDays, toDateKey]);
+    // NO resetear recurrenceConfig aquí - se mantiene para próximos eventos
+  }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, recurrenceConfig]);
 
   // Navegación de fecha (flechas)
   const navigateDate = useCallback((direction: 'prev' | 'next') => {
@@ -860,15 +1740,10 @@ export default function CalendarView({}: CalendarViewProps) {
       )}
 
       {/* Modal para crear/editar */}
-      <Modal visible={modalVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => {
-        setModalVisible(false);
-        setSelectedEvent(null);
-        setSelectedCell(null);
-        setSelectedMonthCell(null);
-      }}>
+      <Modal visible={modalVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleCloseModal}>
         <View style={styles.fullscreenModal}>
           <View style={[styles.modalHeader, { paddingTop: insets.top }]}>
-            <TouchableOpacity style={styles.closeButton} onPress={() => { setModalVisible(false); setSelectedEvent(null); setSelectedCell(null); }}>
+            <TouchableOpacity style={styles.closeButton} onPress={handleCloseModal}>
               <Ionicons name="close" size={24} color={Colors.light.text} />
             </TouchableOpacity>
 
@@ -903,10 +1778,13 @@ export default function CalendarView({}: CalendarViewProps) {
                 <Ionicons name="chevron-forward" size={16} color="#ccc" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.configRow}>
+              <TouchableOpacity
+                style={styles.configRow}
+                onPress={handleOpenRecurrenceModal}
+              >
                 <Ionicons name="refresh-outline" size={20} color={Colors.light.tint} />
                 <Text style={styles.configLabel}>Repetir</Text>
-                <Text style={styles.configValue}>Desligado</Text>
+                <Text style={styles.configValue} numberOfLines={1}>{recurrenceSummary}</Text>
                 <Ionicons name="chevron-forward" size={16} color="#ccc" />
               </TouchableOpacity>
 
@@ -940,6 +1818,28 @@ export default function CalendarView({}: CalendarViewProps) {
             <Text style={styles.subtasksDescription}>As subtarefas podem ser definidas como sua rotina ou lista de verificação diária</Text>
           </View>
         </View>
+      </Modal>
+
+      {/* Modal de Repetición */}
+      <Modal
+        visible={recurrenceModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => {
+          setRecurrenceModalVisible(false);
+          setTempRecurrenceConfig(null);
+        }}
+      >
+        <RecurrenceModal
+          config={tempRecurrenceConfig || recurrenceConfig}
+          onSave={handleSaveRecurrenceConfig}
+          onCancel={() => {
+            setRecurrenceModalVisible(false);
+            setTempRecurrenceConfig(null);
+          }}
+          calendarMonth={recurrenceCalendarMonth}
+          onCalendarMonthChange={setRecurrenceCalendarMonth}
+        />
       </Modal>
     </View>
   );
@@ -997,4 +1897,203 @@ const styles = StyleSheet.create({
   subtasksCard: { backgroundColor: 'white', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   subtasksLabel: { fontSize: 16, color: Colors.light.text, marginLeft: 12 },
   subtasksDescription: { fontSize: 12, color: '#666', textAlign: 'center', lineHeight: 16 },
+});
+
+// Estilos para el Modal de Repetición
+const recurrenceStyles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f0f8ff' },
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingHorizontal: 20, 
+    paddingVertical: 16, 
+    backgroundColor: '#f0f8ff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0'
+  },
+  backButton: { padding: 8, marginRight: 12 },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: Colors.light.text },
+  content: { flex: 1, paddingHorizontal: 20 },
+  
+  // Switch principal
+  mainSwitchSection: { 
+    backgroundColor: 'white', 
+    borderRadius: 12, 
+    marginVertical: 20,
+    padding: 16 
+  },
+  mainSwitchRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    minHeight: 50
+  },
+  mainSwitchLabel: { 
+    fontSize: 16, 
+    fontWeight: '600',
+    color: Colors.light.text, 
+    marginLeft: 12,
+    flex: 1
+  },
+  mainSwitchSubtitle: { 
+    fontSize: 12, 
+    color: '#666',
+    marginTop: 4,
+    marginLeft: 12,
+    flex: 2
+  },
+  
+  // Pestañas
+  tabsSection: { marginBottom: 20 },
+  tabsContainer: { 
+    flexDirection: 'row', 
+    backgroundColor: '#f5f5f5',
+    borderRadius: 25,
+    padding: 4
+  },
+  tab: { 
+    flex: 1, 
+    paddingVertical: 12, 
+    alignItems: 'center',
+    borderRadius: 20
+  },
+  tabActive: { backgroundColor: '#a8e6cf' },
+  tabText: { fontSize: 14, fontWeight: '500', color: '#666' },
+  tabTextActive: { color: Colors.light.text },
+  
+  // Contenido de pestañas
+  tabContent: { marginBottom: 20 },
+  
+  // Secciones
+  intervalSection: { 
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16
+  },
+  sectionTitle: { 
+    fontSize: 16, 
+    fontWeight: '600', 
+    color: Colors.light.text, 
+    marginBottom: 16 
+  },
+  
+  // Controles de intervalo
+  intervalRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between' 
+  },
+  intervalLabel: { fontSize: 14, color: Colors.light.text },
+  stepperContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 4
+  },
+  stepperButton: { 
+    width: 32, 
+    height: 32, 
+    backgroundColor: 'white',
+    borderRadius: 6,
+    justifyContent: 'center', 
+    alignItems: 'center',
+    marginHorizontal: 2
+  },
+  stepperText: { fontSize: 18, fontWeight: 'bold', color: Colors.light.tint },
+  stepperDisabled: { color: '#ccc' },
+  intervalValue: { 
+    fontSize: 16, 
+    fontWeight: '600', 
+    color: Colors.light.text,
+    minWidth: 40,
+    textAlign: 'center',
+    marginHorizontal: 8
+  },
+  
+  // Días de la semana
+  weekDaysSection: { 
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16
+  },
+  weekDaysGrid: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between' 
+  },
+  weekDayChip: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  weekDayChipSelected: { backgroundColor: '#a8e6cf' },
+  weekDayChipText: { fontSize: 14, fontWeight: '500', color: '#666' },
+  weekDayChipTextSelected: { color: Colors.light.text },
+  
+  // Días del mes
+  monthDaysSection: { 
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16
+  },
+  monthGrid: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap',
+    justifyContent: 'space-between'
+  },
+  monthDayChip: { 
+    width: '13%', 
+    aspectRatio: 1,
+    borderRadius: 8, 
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center', 
+    alignItems: 'center',
+    marginBottom: 8
+  },
+  monthDayChipSelected: { backgroundColor: '#a8e6cf' },
+  monthDayChipText: { fontSize: 12, fontWeight: '500', color: '#666' },
+  monthDayChipTextSelected: { color: Colors.light.text },
+  
+  // Fecha de término
+  endDateSection: { 
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20
+  },
+  endDateRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between',
+    marginBottom: 12
+  },
+  endDateLabel: { fontSize: 16, fontWeight: '600', color: Colors.light.text },
+  endDateButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 12
+  },
+  endDateButtonText: { fontSize: 14, color: Colors.light.text },
+  
+  // Botón de guardar
+  saveSection: { paddingBottom: 40 },
+  saveButton: { 
+    backgroundColor: Colors.light.tint, 
+    borderRadius: 12, 
+    padding: 16, 
+    alignItems: 'center' 
+  },
+  saveButtonText: { 
+    color: 'white', 
+    fontSize: 16, 
+    fontWeight: '600' 
+  },
 });

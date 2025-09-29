@@ -1,6 +1,5 @@
 # Proudactive - Aplicativo de Produtividade
 
-
 ## Codigos para terminal
 
  INICIAR:
@@ -33,203 +32,86 @@
 
 **Proudactive** es una aplicación completa de productividad **MOBILE-FIRST** que combina calendario inteligente, seguimiento de actividad física, biblioteca personal de notas y sistema de desafíos gamificados. El objetivo es centralizar todas las herramientas de productividad en una plataforma unificada y sincronizada.
 
-### Estructura del Repositorio
 
 ```
-Proudactive/
-├── API/                    # Pasta para desenvolvimento inicial (contém schema.sql)
-│   ├── backend/            # Laravel instalado aqui (composer install executado)
-│   └── schema_sql/         # Scripts SQL atuais do banco
-├── APILaravel/             # Laravel limpo (backup/alternativo)
-├── MOBILE/                 # App React Native (Expo) - PRIORIDADE 1
-│   └── ProudactiveMobile/  # Projeto Expo configurado
-├── WEB/                    # Frontend React - PRIORIDADE 2
-└── project.md              # Este documento (fonte da verdade)
+
+## 📋 Estado del Proyecto - CHECKLIST
+
+### ✅ **CALENDARIO - COMPLETADO**
+- [x] **Vistas implementadas**: Día, Semana, Mes con navegación
+- [x] **Creación de eventos**: Modal con título, descripción, color
+- [x] **Sistema de recurrencia**: Modal completo con modos diario/semanal/mensual
+- [x] **Redimensionar bloques**: Arrastrar para cambiar duración (vertical)
+- [x] **Sincronización API**: Crear/actualizar eventos en base de datos
+- [x] **Generación de instancias**: Eventos recurrentes se generan bajo demanda
+- [x] **Persistencia**: Eventos se guardan y cargan desde API
+
+### ❌ **CALENDARIO - PENDIENTE**
+- [ ] **Verificar guardado de recurrencia**: Confirmar que `is_recurring`, `recurrence_rule`, `recurrence_end_date` se guardan correctamente
+- [ ] **Mover bloques**: Drag & drop para cambiar horario
+- [ ] **Extensión horizontal**: Bloques multi-día en vista semanal
+- [ ] **Alarmas**: Sistema de notificaciones locales/push
+- [ ] **Excepciones de recurrencia**: Modificar/eliminar instancias específicas
+- [ ] **Husos horarios**: Soporte completo a zonas horarias
+
+### 🗑️ **ELIMINACIÓN DE EVENTOS - PENDIENTE**
+- [ ] **Modal de confirmación** con opciones:
+  - [ ] "Eliminar solo este evento"
+  - [ ] "Eliminar este y todos los futuros" 
+  - [ ] "Eliminar toda la serie"
+
+### 🔔 **SISTEMA DE ALARMAS - PENDIENTE**
+- [ ] **Tipos de Alarma**:
+  - [ ] **Local**: Notificación en el dispositivo
+  - [ ] **Push**: Notificación push (mobile)
+  - [ ] **Email**: Envío de email (futuro)
+
+### 🔄 **API BACKEND - EN PROGRESO**
+- [x] **Estructura de base de datos**: Tablas creadas con campos de recurrencia
+- [x] **Endpoints básicos**: GET/POST/PUT eventos
+- [ ] **Validación de recurrencia**: Verificar que se guardan las reglas JSON
+- [ ] **Generación de instancias**: API debe generar eventos recurrentes
+- [ ] **Manejo de excepciones**: Tabla `recurrence_exceptions`
+
+### 📱 **MOBILE - COMPLETADO**
+- [x] **Navegación**: React Navigation configurado
+- [x] **Vistas de calendario**: Día/Semana/Mes funcionales
+- [x] **Modal de eventos**: Crear/editar con todos los campos
+- [x] **Modal de recurrencia**: Configuración completa
+- [x] **Redimensionar**: Bloques redimensionables verticalmente
+- [x] **Sincronización**: Conectado a API Laravel
+
+### 🌐 **WEB - PENDIENTE**
+- [ ] **Setup inicial**: React + Vite configurado
+- [ ] **Vistas de calendario**: Implementar mismas vistas que mobile
+- [ ] **Sincronización**: Misma API que mobile
+- [ ] **PWA**: Progressive Web App
+
+### 🏋️ **MÓDULOS ADICIONALES - PENDIENTE**
+- [ ] **Gimnasio**: Rastreador de entrenamientos
+- [ ] **Biblioteca**: Gestión de libros y notas
+- [ ] **Desafíos**: Sistema de gamificación
+- [ ] **Herramientas**: Pomodoro, tareas rápidas
+
+## 🗄️ Base de Datos - Estructura Esencial
+
+### Campos de Recurrencia en tabla `events`:
+```sql
+is_recurring TINYINT(1) DEFAULT 0
+recurrence_rule JSON
+recurrence_end_date DATE NULL
+recurrence_count INT NULL
 ```
 
-**Filosofía MOBILE-FIRST**: 
-- El desarrollo prioriza la experiencia mobile
-- Web es una extensión de la funcionalidad mobile
-- Interfaz optimizada para pantallas pequeñas primero
-- Progressive Web App (PWA) para web
+### Tablas principales:
+- `users` - Usuarios del sistema
+- `calendars` - Calendarios por usuario  
+- `events` - Eventos con soporte de recurrencia
+- `recurrence_exceptions` - Excepciones en series recurrentes
+- `alarms` - Alarmas y recordatorios
+- `devices` - Dispositivos para notificaciones push
 
-**Requisito crítico**: Web y mobile utilizan la misma API REST y los datos deben permanecer sincronizados de forma consistente entre todas las plataformas.
-
-## Requisitos Funcionales
-
-### Módulos Principales
-
-1. **Calendario** (Prioridad 1 - MVP)
-   - Vista por Día/Semana/Mes/Año
-   - Creación de bloques de 30 min arrastrables
-   - Sistema de recurrencia avanzado
-   - Múltiples alarmas por evento
-   - Soporte completo a husos horarios
-
-2. **Rastreador de Gimnasio** (Prioridad 2)
-   - Registro de entrenamientos y actividades
-   - Historial de progreso
-   - Métricas básicas
-
-3. **Biblioteca/Notas** (Prioridad 2)
-   - Gestión de libros y lecturas
-   - Sistema de notas
-   - Categorización por etiquetas
-
-4. **Sistema de Desafíos** (Prioridad 3)
-   - Gamificación de productividad
-   - Logros y recompensas
-   - Progreso de metas
-
-5. **Herramientas Auxiliares** (Prioridad 3)
-   - Temporizador Pomodoro
-   - Lista de tareas rápidas
-   - Widgets personalizables
-
-## Estado actual (Mobile)
-
-- Vistas implementadas: día, semana y mes, con navegación por fechas y encabezado sincronizado en semana.
-- Creación/edición básica de eventos:
-  - Día/Semana: tap en celda de 30 minutos abre modal; un bloque por celda; duración inicial 30 min.
-  - Mes: tap en día crea evento de 1 día (estructura `MonthEvent`).
-  - Selector de color, título y descripción en modal. Validación mínima (título requerido).
-- Sincronización de scroll: el header de días en semana se sincroniza con el contenido horizontal.
-- Cambio de vista resetea scroll; en vista día se centra en el día actual.
-- Indexación en memoria para lookup rápido (`eventsByCell`, `monthEventsByDay`).
-
-Pendiente (Mobile):
-- Estirar bloques (vertical y horizontal) en vista semanal.
-- Mover bloques por arrastre (drag & drop) en día/semana.
-- Recurrencia avanzada, excepciones y eliminación a nivel de serie.
-- Alarmas locales/push y editor de múltiples alarmas.
-- Husos horarios, eventos all-day y conversiones a/local.
-- Sincronización con API real (persistencia remota) y soporte offline básico.
-- Accesibilidad y rendimiento con muchos eventos.
-
-## Plan para estirar bloques (vista semanal)
-
-- Objetivo
-  - **Vertical**: ajustar la duración del evento en pasos de 30 min al arrastrar el borde superior/inferior del bloque.
-  - **Horizontal**: extender el evento a días contiguos arrastrando lateralmente (cada día añadido crea/ocupa su celda correspondiente).
-
-- Modelo de datos (MVP)
-  - Mantener `Event` acotado al día: `date` + `startTime` + `duration` (min).
-  - Para extensión horizontal, crear "slices" por cada día adicional con el mismo `id` de grupo o un `parentId` común para agrupar visualmente.
-  - Alternativa futura: campo `spanDays` o entidad de serie de bloque para semana.
-
-- UX/Interacción
-  - Mostrar "handles" de 6–8 px en borde superior/inferior para redimensionar verticalmente; todo el bloque actúa como handle horizontal.
-  - Snap-to-grid de 30 min; duración mínima 30 min. Limitar entre `START_HOUR` y `END_HOUR`.
-  - Permitir solapamientos; resaltar el bloque activo con mayor `zIndex` y borde.
-  - Auto-scroll cuando el arrastre se acerca a bordes (vertical u horizontal).
-
-- Detección de gestos
-  - Usar `react-native-gesture-handler` (PanGestureHandler) para arrastre continuo sin jitter.
-  - Calcular delta en píxeles y convertir a intervalos de 30 min (vertical) o a columnas de día (horizontal).
-
-- Persistencia
-  - Fase 1: actualizar estado en memoria (`setEvents`) y, para multi-día, crear/actualizar slices adyacentes.
-  - Fase 2: normalizar en API (series/slices) y reconciliar con recurrencia.
-
-- Casos límite
-  - Extender más allá de la semana visible → navegación a semana siguiente previa confirmación.
-  - Bloques al inicio/fin de la jornada (`START_HOUR`–`END_HOUR`).
-  - Cambios de mes en vista semana (solo afecta visual).
-
-- Checklist (estirar bloques)
-  - [ ] Handles visibles y estados de interacción
-  - [ ] Redimensionado vertical con snap a 30 min
-  - [ ] Extensión horizontal día a día
-  - [ ] Auto-scroll en bordes
-  - [ ] Agrupación visual de slices multi-día
-  - [ ] Persistencia temporal en memoria
-
-## Arquitectura y Stack Tecnológico
-
-### Frontend Web
-- **Framework**: React 18+
-- **Estándar ES**: ES2022+ con modules
-- **Bundler**: Vite (ya configurado)
-- **Gestión de Estado**: Context API + useReducer o Zustand
-- **Estilos**: CSS Modules o Styled Components
-- **Peticiones HTTP**: Axios o Fetch API
-
-### Mobile
-- **Framework**: React Native con Expo (managed workflow)
-- **Ventajas de Expo**: Setup rápido, test fácil con Expo Go, sin configuración nativa inicial
-- **Navegación**: React Navigation v6
-- **Gestión de Estado**: Mismo patrón que web
-- **Almacenamiento Local**: AsyncStorage + SQLite (Expo SQLite)
-
-### API Backend
-- **Framework**: Laravel 10+
-- **Lenguaje**: PHP 8.1+
-- **Servidor Web**: Nginx + PHP-FPM (producción)
-- **Autenticación**: JWT (Laravel Sanctum + tymon/jwt-auth)
-- **Validación**: Form Requests de Laravel
-- **Documentación**: Swagger/OpenAPI automático
-
-### Base de Datos
-- **SGBD**: MySQL 8.0+
-- **Charset**: utf8mb4_unicode_ci
-- **Engine**: InnoDB
-- **Migraciones**: Laravel Migrations
-- **Seeds**: Laravel Seeders
-
-### Autenticación
-**Flujo JWT**:
-1. Login → API retorna access_token + refresh_token
-2. Requests autenticadas → Header: `Authorization: Bearer {token}`
-3. Token expira → Usar refresh_token para renovar
-4. Logout → Invalidar tokens en el servidor
-
-### Internacionalización (i18n)
-- **Idioma base**: Español
-- **Estructura**: Archivos JSON por locale
-- **Localización**: `/locales/pt-BR.json`, `/locales/en-US.json`, `/locales/es-ES.json`
-- **Implementación**: 
-  - Web: react-i18next
-  - Mobile: react-i18next
-  - API: Laravel Localization
-
-
-### Sistema de Recurrencia Avanzado
-
-#### Tipos de Repetición
-1. **No repite** (por defecto)
-2. **Diariamente**
-3. **Semanalmente** (con selección de días)
-4. **Mensualmente** (mismo día del mes)
-5. **Anualmente** (misma fecha)
-6. **Personalizado** (reglas customizadas)
-
-
-#### Excepciones y Modificaciones
-- **Excluir ocurrencia**: Remueve una instancia específica
-- **Modificar ocurrencia**: Cambia solo una instancia (crea override)
-- **Modificar serie**: Cambia todas las ocurrencias futuras
-
-#### Eliminación de Eventos
-- **Modal de confirmación** con opciones:
-  1. "Eliminar solo este evento"
-  2. "Eliminar este y todos los futuros"
-  3. "Eliminar toda la serie"
-
-### Conflictos y Solapamientos
-- **Comportamiento**: Permitir solapamientos por defecto
-- **Aviso visual**: Indicador cuando hay conflicto de horario
-- **Resolución opcional**: Sugerir horarios alternativos
-
-### Sistema de Alarmas
-
-#### Tipos de Alarma
-1. **Local**: Notificación en el dispositivo
-2. **Push**: Notificación push (mobile)
-3. **Email**: Envío de email (futuro)
-
-
-## API - Contrato y Endpoints
-
+### estructura de tablas
 
 ## Modelo de Datos MySQL
 
@@ -518,148 +400,44 @@ CREATE TABLE user_achievements (
 ```
 
 
-### Diagrama de Relaciones (ASCII)
+## 🎯 Próximos Pasos - Recurrencia
 
-```
+### ✅ **LO QUE YA FUNCIONA:**
+- Modal de recurrencia completo en mobile
+- Generación de instancias recurrentes en frontend
+- Envío de datos de recurrencia a API
 
-## Internacionalización y Contenido Traducible
+### ❌ **LO QUE FALTA VERIFICAR:**
+- [ ] **Verificar que el API guarde correctamente** los campos de recurrencia
+- [ ] **Probar que los eventos recurrentes se muestren** al recargar la app
+- [ ] **Validar que la regla JSON se almacene** correctamente en la base de datos
 
-### Estructura de Archivos
+### 🔧 **Para verificar la recurrencia:**
 
-```
-/locales/
-├── pt-BR.json    # Português brasileiro (padrão)
-├── en-US.json    # Inglês americano
-└── es-ES.json    # Espanhol
-```
-
-### Ejemplo de Archivo de Traducción
-
-```json
-// /locales/pt-BR.json
-{
-  "common": {
-    "save": "Salvar",
-    "cancel": "Cancelar",
-    "delete": "Excluir",
-    "edit": "Editar",
-    "loading": "Carregando...",
-    "error": "Erro",
-    "success": "Sucesso"
-  },
-  "auth": {
-    "login": "Entrar",
-    "register": "Cadastrar",
-    "email": "E-mail",
-    "password": "Senha",
-    "forgot_password": "Esqueci minha senha",
-    "login_success": "Login realizado com sucesso",
-    "invalid_credentials": "Credenciais inválidas"
-  },
-  "calendar": {
-    "title": "Calendario",
-    "create_event": "Crear Evento",
-    "edit_event": "Editar Evento",
-    "delete_event": "Eliminar Evento",
-    "event_title": "Título del evento",
-    "event_description": "Descripción",
-    "start_time": "Hora de inicio",
-    "end_time": "Hora de término",
-    "all_day": "Todo el día",
-    "repeat": "Repetir",
-    "alarms": "Recordatorios",
-    "delete_confirm": "¿Seguro que deseas eliminar este evento?",
-    "delete_series_options": {
-      "this_only": "Apenas este evento",
-      "this_and_future": "Este e todos os futuros",
-      "entire_series": "Toda a série"
-    },
-    "views": {
-      "day": "Día",
-      "week": "Semana", 
-      "month": "Mes",
-      "year": "Año"
-    },
-    "repeat_options": {
-      "never": "Nunca",
-      "daily": "Diariamente",
-      "weekly": "Semanalmente",
-      "monthly": "Mensualmente",
-      "yearly": "Anualmente",
-      "custom": "Personalizado"
-    }
-  },
-  "gym": {
-    "title": "Gimnasio",
-    "add_workout": "Agregar Entrenamiento",
-    "activity": "Actividad",
-    "duration": "Duración (min)",
-    "calories": "Calorías",
-    "notes": "Notas"
-  }
-}
-```
-
-### Implementación
+1. **Crear un evento con recurrencia** (ej: cada 2 días)
+2. **Verificar en la base de datos** que se guarde:
+   - `is_recurring = 1`
+   - `recurrence_rule = {"frequency":"DAILY","interval":2}`
+   - `recurrence_end_date` (si se configuró)
+3. **Recargar la app** y verificar que aparezcan las instancias recurrentes
+4. **Navegar a fechas futuras** y verificar que se generen más instancias
 
 
-## Sincronización / Consistencia entre Mobile y Web
-
-### Estrategia de Sincronización
-
-#### 1. Autenticación Compartida
-- **JWT único**: Mismo token funciona en web y mobile
-- **Refresh automático**: Renovación transparente antes de la expiración
-- **Logout global**: Invalidar token en todas las plataformas
 
 
-#### 4. Soporte Offline Básico
-
-**Mobile**:
 
 
-### 2. Checklist de QA - Calendario
 
-#### Funcionalidades Básicas
-- [ ] Crear evento simple
-- [ ] Editar evento existente
-- [ ] Eliminar evento
-- [ ] Visualizar en diferentes vistas (día/semana/mes)
-- [ ] Navegación entre fechas
-- [ ] Arrastrar para redimensionar evento
-- [ ] Arrastrar para mover evento
 
-#### Recurrencia
-- [ ] Crear evento recurrente diario
-- [ ] Crear evento recurrente semanal
-- [ ] Crear evento recurrente mensual
-- [ ] Modificar una instancia de la serie
-- [ ] Eliminar una instancia de la serie
-- [ ] Eliminar serie completa
-- [ ] Reglas de recurrencia personalizadas
 
-#### Alarmas
-- [ ] Agregar alarma local
-- [ ] Agregar alarma push (mobile)
-- [ ] Múltiples alarmas por evento
-- [ ] Editar/remover alarmas
-- [ ] Probar disparo de notificaciones
 
-#### Husos Horarios
-- [ ] Crear evento en huso diferente
-- [ ] Mostrar correctamente en huso local
-- [ ] Viajar a otro huso (cambio temporal)
-- [ ] Eventos all-day
 
-#### Sincronización
-- [ ] Crear evento en web, ver en mobile
-- [ ] Crear evento en mobile, ver en web
-- [ ] Editar evento en una plataforma, sincronizar
-- [ ] Test offline básico (mobile)
-- [ ] Resolución de conflictos
 
-#### Performance
-- [ ] Cargar calendario con 100+ eventos
-- [ ] Navegación fluida entre meses
-- [ ] Búsqueda rápida por eventos
-- [ ] Scroll suave en la vista semanal
+
+
+
+
+
+
+
+

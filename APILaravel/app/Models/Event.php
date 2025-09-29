@@ -53,7 +53,7 @@ class Event extends Model
         'text_color' => 'string',
         'border_color' => 'string',
         'is_recurring' => 'boolean',
-        'recurrence_rule' => 'array',
+        'recurrence_rule' => 'string',
         'recurrence_end_date' => 'date',
         'version' => 'integer',
     ];
