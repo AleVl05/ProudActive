@@ -109,14 +109,6 @@ const getRecurrenceTitle = (config: RecurrenceConfig): string => {
 };
 
 const extractRecurrenceFromEvent = (event: any): RecurrenceConfig => {
-  // Debug: Log para ver qué datos está recibiendo
-  console.log('🔍 DEBUG - Evento recibido para extraer recurrencia:', {
-    id: event?.id,
-    is_recurring: event?.is_recurring,
-    recurrence_rule: event?.recurrence_rule,
-    recurrence_end_date: event?.recurrence_end_date
-  });
-
   if (!event || !event.is_recurring) {
     return createDefaultRecurrenceConfig();
   }
@@ -141,12 +133,75 @@ const extractRecurrenceFromEvent = (event: any): RecurrenceConfig => {
       endDate: event.recurrence_end_date || null,
     };
 
-    console.log('🔍 DEBUG - Configuración de recurrencia extraída:', config);
     return config;
   } catch (error) {
     console.warn('Error parsing recurrence rule:', error);
     return createDefaultRecurrenceConfig();
   }
+};
+
+// Función para ajustar start_utc según la regla de recurrencia
+const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any): Date => {
+  if (!rule || !rule.frequency) return originalStart;
+
+  const frequency = rule.frequency.toUpperCase();
+  const interval = rule.interval || 1;
+  let adjustedDate = new Date(originalStart);
+
+  // Debug solo si hay cambio de fecha
+  if (adjustedDate.getTime() !== originalStart.getTime()) {
+    console.log('🔧 AJUSTANDO FECHA INICIAL:', {
+      original: originalStart.toISOString(),
+      adjusted: adjustedDate.toISOString(),
+      frequency,
+      byWeekDays: rule.byWeekDays,
+      byMonthDays: rule.byMonthDays
+    });
+  }
+
+  switch (frequency) {
+    case 'WEEKLY':
+      if (rule.byWeekDays && rule.byWeekDays.length > 0) {
+        // Encontrar el próximo día de la semana especificado
+        const weekDayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+        const targetDays = rule.byWeekDays.map((day: string) => weekDayCodes.indexOf(day)).filter((d: number) => d !== -1);
+        
+        // Buscar el próximo día válido
+        for (let i = 0; i < 7; i++) {
+          if (targetDays.includes(adjustedDate.getDay())) {
+            break;
+          }
+          adjustedDate.setDate(adjustedDate.getDate() + 1);
+        }
+      }
+      break;
+      
+    case 'MONTHLY':
+      if (rule.byMonthDays && rule.byMonthDays.length > 0) {
+        const targetDays = rule.byMonthDays.sort((a: number, b: number) => a - b);
+        const currentDay = adjustedDate.getDate();
+        
+        let nextDay = targetDays.find((day: number) => day >= currentDay);
+        if (nextDay) {
+          adjustedDate.setDate(nextDay);
+        } else {
+          // Ir al próximo mes con el primer día especificado
+          adjustedDate.setMonth(adjustedDate.getMonth() + 1);
+          adjustedDate.setDate(targetDays[0]);
+        }
+      }
+      break;
+  }
+
+  // Solo mostrar debug si hubo cambio
+  if (adjustedDate.getTime() !== originalStart.getTime()) {
+    console.log('✅ FECHA AJUSTADA:', {
+      original: originalStart.toISOString(),
+      adjusted: adjustedDate.toISOString()
+    });
+  }
+
+  return adjustedDate;
 };
 
 // Función para generar instancias recurrentes bajo demanda
@@ -160,94 +215,64 @@ const generateRecurrentInstances = (
   }
 
   try {
-    console.log('🔍 DEBUG - masterEvent.recurrence_rule:', masterEvent.recurrence_rule);
-    
     const rule = typeof masterEvent.recurrence_rule === 'string'
       ? JSON.parse(masterEvent.recurrence_rule)
       : masterEvent.recurrence_rule;
 
-    console.log('🔍 DEBUG - rule parseado:', rule);
-
     if (!rule || !rule.frequency) {
-      console.log('🔍 DEBUG - Regla inválida o sin frecuencia:', rule);
       return [];
     }
 
     const instances: Event[] = [];
-    const eventStart = new Date(masterEvent.start_utc);
+    const originalStart = new Date(masterEvent.start_utc);
     const eventEnd = new Date(masterEvent.end_utc);
-    const duration = eventEnd.getTime() - eventStart.getTime();
+    const duration = eventEnd.getTime() - originalStart.getTime();
     
-    // Crear recurrenceEndDate de manera más robusta
+    // AJUSTAR LA FECHA INICIAL SEGÚN LA REGLA DE RECURRENCIA
+    const adjustedStart = adjustStartDateToRecurrenceRule(originalStart, rule);
+    
+    // Crear recurrenceEndDate
     let recurrenceEndDate = null;
     if (masterEvent.recurrence_end_date) {
       try {
-        // Parsear la fecha YYYY-MM-DD y crear fecha UTC al final del día
-        const [year, month, day] = masterEvent.recurrence_end_date.split('-').map(Number);
-        recurrenceEndDate = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+        let dateString = masterEvent.recurrence_end_date;
+        if (dateString.includes('T')) {
+          dateString = dateString.split('T')[0];
+        }
+        const [year, month, day] = dateString.split('-').map(Number);
+        if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+          recurrenceEndDate = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+        }
       } catch (error) {
-        console.error('Error al parsear recurrence_end_date:', error);
-        recurrenceEndDate = null;
+        console.warn('Error parsing recurrence_end_date:', error);
       }
     }
 
-    // Debug: Log para verificar las fechas de recurrencia
-    console.log('🔍 DEBUG - Generando instancias recurrentes:', {
-      eventStart: eventStart.toISOString(),
-      recurrenceEndDate: recurrenceEndDate?.toISOString(),
-      hasEndDate: !!masterEvent.recurrence_end_date,
-      endDateFromEvent: masterEvent.recurrence_end_date
-    });
-
     const frequency = rule.frequency.toUpperCase();
     const interval = rule.interval || 1;
-
-    let currentDate = new Date(eventStart);
+    let currentDate = new Date(adjustedStart);
     let instanceCount = 0;
-    const maxInstances = 1000; // Límite de seguridad
-
-    console.log('🔍 DEBUG - Iniciando bucle de recurrencia:', {
-      eventStart: eventStart.toISOString(),
-      endDate: endDate.toISOString(),
-      recurrenceEndDate: recurrenceEndDate?.toISOString(),
-      currentDate: currentDate.toISOString()
-    });
+    const maxInstances = 1000;
 
     while (
       currentDate <= endDate && 
       instanceCount < maxInstances &&
       (!recurrenceEndDate || currentDate <= recurrenceEndDate)
     ) {
-      // Debug: Log para verificar la condición del bucle
-      if (instanceCount < 5) { // Solo los primeros 5 para no spamear
-        console.log('🔍 DEBUG - Bucle recurrencia:', {
-          currentDate: currentDate.toISOString(),
-          endDate: endDate.toISOString(),
-          recurrenceEndDate: recurrenceEndDate?.toISOString(),
-          condition1: currentDate <= endDate,
-          condition2: instanceCount < maxInstances,
-          condition3: !recurrenceEndDate || currentDate <= recurrenceEndDate,
-          willContinue: currentDate <= endDate && instanceCount < maxInstances && (!recurrenceEndDate || currentDate <= recurrenceEndDate)
-        });
-      }
-      
       // Solo generar si la instancia está en el rango visible
       if (currentDate >= startDate) {
-        // Mantener las fechas en UTC para evitar problemas de zona horaria
         const instanceStart = new Date(currentDate);
         const instanceEnd = new Date(currentDate.getTime() + duration);
         
-        // Crear la instancia con ID único
         const instance: Event = {
           id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
           title: masterEvent.title,
           description: masterEvent.description,
           startTime: (instanceStart.getUTCHours() * 60 + instanceStart.getUTCMinutes()) - (START_HOUR * 60),
-          duration: Math.round(duration / (1000 * 60)), // minutos
+          duration: Math.round(duration / (1000 * 60)),
           color: masterEvent.color,
           category: masterEvent.category || 'General',
-          date: instanceStart.toISOString().slice(0, 10), // YYYY-MM-DD
-          // IMPORTANTE: Pasar los campos de recurrencia del evento master
+          date: instanceStart.toISOString().slice(0, 10),
           is_recurring: masterEvent.is_recurring,
           recurrence_rule: masterEvent.recurrence_rule,
           recurrence_end_date: masterEvent.recurrence_end_date,
@@ -264,14 +289,12 @@ const generateRecurrentInstances = (
         
         case 'WEEKLY':
           if (rule.byWeekDays && rule.byWeekDays.length > 0) {
-            // Encontrar el próximo día de la semana especificado
             const weekDayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
             const targetDays = rule.byWeekDays.map((day: string) => weekDayCodes.indexOf(day)).filter((d: number) => d !== -1);
             
             let nextDate = new Date(currentDate);
             nextDate.setDate(nextDate.getDate() + 1);
             
-            // Buscar el próximo día válido
             for (let i = 0; i < 7 * interval; i++) {
               if (targetDays.includes(nextDate.getDay())) {
                 currentDate = nextDate;
@@ -286,7 +309,6 @@ const generateRecurrentInstances = (
         
         case 'MONTHLY':
           if (rule.byMonthDays && rule.byMonthDays.length > 0) {
-            // Encontrar el próximo día del mes especificado
             const currentDay = currentDate.getDate();
             const targetDays = rule.byMonthDays.sort((a: number, b: number) => a - b);
             
@@ -294,7 +316,6 @@ const generateRecurrentInstances = (
             if (nextDay) {
               currentDate.setDate(nextDay);
             } else {
-              // Ir al próximo mes con el primer día especificado
               currentDate.setMonth(currentDate.getMonth() + interval);
               currentDate.setDate(targetDays[0]);
             }
@@ -304,26 +325,15 @@ const generateRecurrentInstances = (
           break;
         
         default:
-          // Si no reconocemos la frecuencia, salir para evitar bucle infinito
           return instances;
       }
 
       instanceCount++;
     }
-
+    
     return instances;
   } catch (error) {
-    console.warn('Error generating recurrent instances:', error);
-    console.log('🔍 DEBUG - Error context:', {
-      masterEvent: {
-        id: masterEvent.id,
-        start_utc: masterEvent.start_utc,
-        end_utc: masterEvent.end_utc,
-        recurrence_end_date: masterEvent.recurrence_end_date
-      },
-      rule: rule,
-      error: error
-    });
+    console.error('Error generating recurrent instances:', error);
     return [];
   }
 };
@@ -1116,28 +1126,6 @@ export default function CalendarView({}: CalendarViewProps) {
     };
   }, [toDateKey]);
 
-  // Función para refrescar eventos después de crear/editar
-  const refreshEvents = useCallback(async () => {
-    try {
-      const rangeStart = new Date(currentDate);
-      rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás
-      const rangeEnd = new Date(currentDate);
-      rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
-      
-      const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
-      if (fetched) {
-        // Evitar duplicados: solo agregar eventos que no existan ya
-        setEvents(prev => {
-          const existingIds = new Set(prev.map(e => e.id));
-          const newEvents = fetched.filter(e => !existingIds.has(e.id));
-          return [...prev, ...newEvents];
-        });
-      }
-    } catch (error) {
-      console.error('Error al refrescar eventos:', error);
-    }
-  }, [currentDate, fetchEventsForRange]);
-
   const fetchEventsForRange = useCallback(async (rangeStart: Date, rangeEnd: Date) => {
     try {
       // Expandir el rango para capturar eventos recurrentes que puedan generar instancias en el rango visible
@@ -1188,6 +1176,28 @@ export default function CalendarView({}: CalendarViewProps) {
       return null;
     }
   }, [normalizeApiEvent]);
+
+  // Función para refrescar eventos después de crear/editar
+  const refreshEvents = useCallback(async () => {
+    try {
+      const rangeStart = new Date(currentDate);
+      rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás
+      const rangeEnd = new Date(currentDate);
+      rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
+      
+      const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
+      if (fetched) {
+        // Evitar duplicados: solo agregar eventos que no existan ya
+        setEvents(prev => {
+          const existingIds = new Set(prev.map(e => e.id));
+          const newEvents = fetched.filter(e => !existingIds.has(e.id));
+          return [...prev, ...newEvents];
+        });
+      }
+    } catch (error) {
+      console.error('Error al refrescar eventos:', error);
+    }
+  }, [currentDate, fetchEventsForRange]);
 
   useEffect(() => {
     if (currentView !== 'week' && currentView !== 'day') return;
@@ -1367,41 +1377,62 @@ export default function CalendarView({}: CalendarViewProps) {
         dateKey = toDateKey(currentDate);
       }
 
-      const localId = Date.now().toString();
-      const newEvent: Event = {
-        id: localId,
-        title: eventTitle,
-        description: eventDescription,
-        startTime: selectedCell.startTime,
-        duration: 30,
-        color: eventColor,
-        category: 'General',
-        date: dateKey,
-        // Campos de recurrencia
-        is_recurring: recurrenceConfig.enabled,
-        recurrence_rule: recurrenceConfig.enabled ? JSON.stringify({
-          frequency: recurrenceConfig.mode.toUpperCase(),
-          interval: recurrenceConfig.interval,
-          ...(recurrenceConfig.mode === 'weekly' && recurrenceConfig.weekDays.length > 0 && { byWeekDays: recurrenceConfig.weekDays }),
-          ...(recurrenceConfig.mode === 'monthly' && recurrenceConfig.monthDays.length > 0 && { byMonthDays: recurrenceConfig.monthDays })
-        }) : null,
-        recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null
-      };
-      setEvents(prev => [...prev, newEvent]);
+      // NO crear el evento localmente si es recurrente - esperar respuesta del servidor
+      // para evitar mostrar el evento en la fecha incorrecta
+      let localId = null;
+      let newEvent: Event | null = null;
+      
+      if (!recurrenceConfig.enabled) {
+        // Solo crear evento local para eventos NO recurrentes
+        localId = Date.now().toString();
+        newEvent = {
+          id: localId,
+          title: eventTitle,
+          description: eventDescription,
+          startTime: selectedCell.startTime,
+          duration: 30,
+          color: eventColor,
+          category: 'General',
+          date: dateKey,
+          is_recurring: false,
+          recurrence_rule: null,
+          recurrence_end_date: null
+        };
+        setEvents(prev => [...prev, newEvent!]);
+      }
 
       // Persistencia API con reconciliación de ID
       try {
-        const startLocal = dateKeyToLocalDate(dateKey, newEvent.startTime);
-        const endLocal = dateKeyToLocalDate(dateKey, newEvent.startTime + newEvent.duration);
+        // Calcular fechas base
+        const baseStartLocal = dateKeyToLocalDate(dateKey, selectedCell.startTime);
+        const baseEndLocal = dateKeyToLocalDate(dateKey, selectedCell.startTime + 30);
         
-        // Debug: Verificar conversión de fechas
-        console.log('🔍 DEBUG - Conversión de fechas:', {
-          dateKey,
-          startTime: newEvent.startTime,
-          startLocal: startLocal.toISOString(),
-          endLocal: endLocal.toISOString(),
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-        });
+        // Ajustar start_utc si es un evento recurrente
+        let finalStartLocal = baseStartLocal;
+        let finalEndLocal = baseEndLocal;
+        
+        if (recurrenceConfig.enabled) {
+          const recurrenceRule = {
+            frequency: recurrenceConfig.mode.toUpperCase(),
+            interval: recurrenceConfig.interval,
+            byWeekDays: recurrenceConfig.weekDays,
+            byMonthDays: recurrenceConfig.monthDays
+          };
+          
+          const adjustedStart = adjustStartDateToRecurrenceRule(baseStartLocal, recurrenceRule);
+          const duration = baseEndLocal.getTime() - baseStartLocal.getTime();
+          finalStartLocal = adjustedStart;
+          finalEndLocal = new Date(adjustedStart.getTime() + duration);
+          
+          // Debug solo si hay cambio de fecha
+          if (finalStartLocal.getTime() !== baseStartLocal.getTime()) {
+            console.log('🔧 AJUSTANDO FECHA PARA EVENTO RECURRENTE:', {
+              original: baseStartLocal.toISOString(),
+              adjusted: finalStartLocal.toISOString(),
+              rule: recurrenceRule
+            });
+          }
+        }
         // Obtener calendar_id válido
         const calJson = await apiGetCalendars();
         const calendarId = calJson?.data?.[0]?.id;
@@ -1426,47 +1457,51 @@ export default function CalendarView({}: CalendarViewProps) {
 
         const payload = {
           calendar_id: calendarId,
-          title: newEvent.title,
-          description: newEvent.description,
-          start_utc: startLocal.toISOString(),
-          end_utc: endLocal.toISOString(),
-          color: newEvent.color,
+          title: eventTitle,
+          description: eventDescription,
+          start_utc: finalStartLocal.toISOString(),
+          end_utc: finalEndLocal.toISOString(),
+          color: eventColor,
           is_recurring: recurrenceConfig.enabled,
           recurrence_rule: recurrenceRule ? JSON.stringify(recurrenceRule) : null,
           recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null,
         };
         
-        // Debug: Log para verificar qué se está enviando
-        console.log('🔍 DEBUG - Payload enviado al API:', JSON.stringify(payload, null, 2));
+        console.log('📤 Enviando evento al API:', {
+          title: payload.title,
+          start_utc: payload.start_utc,
+          is_recurring: payload.is_recurring,
+          recurrence_rule: payload.recurrence_rule
+        });
         const res = await apiPostEvent(payload);
         const createdEvent = await res.json();
         
-        // En handleSaveEvent, reemplaza el bloque if (res.ok...) por este:
-      if (res.ok && createdEvent?.data?.id) {
-        // Construimos un objeto limpio que SÍ CUMPLE con la interfaz 'Event'
-        const finalEvent: Event = {
-            id: createdEvent.data.id.toString(), // Usamos el ID real del servidor
-            title: createdEvent.data.title,
-            description: createdEvent.data.description,
-            color: createdEvent.data.color,
-            // Mantenemos estos datos del evento temporal que creamos antes
-            date: dateKey,
-            startTime: newEvent.startTime,
-            duration: newEvent.duration,
-            category: 'General',
-        };
+        if (res.ok && createdEvent?.data?.id) {
+          if (recurrenceConfig.enabled) {
+            // Para eventos recurrentes, solo refrescar desde el servidor
+            await refreshEvents();
+          } else if (localId && newEvent) {
+            // Para eventos no recurrentes, reemplazar el evento temporal
+            const finalEvent: Event = {
+              id: createdEvent.data.id.toString(),
+              title: createdEvent.data.title,
+              description: createdEvent.data.description,
+              color: createdEvent.data.color,
+              date: dateKey,
+              startTime: selectedCell.startTime,
+              duration: 30,
+              category: 'General',
+              is_recurring: false,
+              recurrence_rule: null,
+              recurrence_end_date: null
+            };
 
-        // Reemplaza el evento temporal por el evento final con el ID correcto
-        setEvents(prev => [...prev.filter(e => e.id !== localId), finalEvent]);
-        
-        // Refrescar eventos para mostrar la recurrencia inmediatamente
-        await refreshEvents();
-
-      } else {
-        // Tu lógica de manejo de errores
-        console.log('POST event failed:', res.status, createdEvent);
-        Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
-      }
+            setEvents(prev => [...prev.filter(e => e.id !== localId), finalEvent]);
+          }
+        } else {
+          console.log('POST event failed:', res.status, createdEvent);
+          Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
+        }
       } catch (e) {
         console.log('POST event error:', (e as any)?.message || e);
         Alert.alert('Aviso', 'No se pudo crear el evento en el servidor.');

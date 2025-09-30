@@ -49,12 +49,38 @@
 - [x] **Zona horaria**: ✅ **RESUELTO** - Sin diferencias de horario
 
 ### ❌ **CALENDARIO - PENDIENTE**
-- [ ] **Recarga automática**: Mejorar para que no requiera navegar para ver nuevos eventos
+- [ ] **Personalidad de bloques**: Manejo correcto de edición vs creación de eventos recurrentes
+- [ ] **Excepciones de recurrencia**: Modificar/eliminar instancias específicas
+- [ ] **División de series**: Cambiar reglas de recurrencia para eventos futuros
 - [ ] **Cargar configuración al editar**: Mostrar configuración de recurrencia al editar eventos
 - [ ] **Mover bloques**: Drag & drop para cambiar horario
 - [ ] **Extensión horizontal**: Bloques multi-día en vista semanal
 - [ ] **Alarmas**: Sistema de notificaciones locales/push
-- [ ] **Excepciones de recurrencia**: Modificar/eliminar instancias específicas
+
+### 🎯 **ARQUITECTURA DE EXCEPCIONES Y DIVISIÓN DE SERIES - PENDIENTE**
+
+#### **Problema Identificado:**
+- **Edición vs Creación**: Al hacer clic en un evento recurrente, se abre modal de "crear" en lugar de "editar"
+- **Creación accidental**: Usuario puede crear eventos duplicados sin querer
+- **Falta de personalidad**: No se distingue entre instancia específica vs serie completa
+
+#### **Arquitectura Propuesta:**
+
+**1. Excepciones Puntuales (Override):**
+- **Uso**: Cambiar/eliminar una sola ocurrencia específica
+- **Implementación**: Tabla `recurrence_exceptions` con `is_deleted` o `override_event_id`
+- **Ejemplo**: Eliminar solo el evento del 15 de octubre
+
+**2. División de Series (Split Series):**
+- **Uso**: Cambiar reglas de recurrencia para eventos futuros
+- **Implementación**: 
+  - Acortar serie original: `recurrence_end_date = fecha_división - 1`
+  - Crear nueva serie: Nuevo evento con `recurrence_start_date = fecha_división`
+- **Ejemplo**: Cambiar de miércoles a martes a partir del 1 de noviembre
+
+**3. Modal de Edición Inteligente:**
+- **Detectar contexto**: ¿Es instancia específica o serie completa?
+- **Opciones claras**: "Solo este evento" vs "Todos los futuros" vs "Toda la serie"
 
 ### 🗑️ **ELIMINACIÓN DE EVENTOS - PENDIENTE**
 - [ ] **Modal de confirmación** con opciones:

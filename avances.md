@@ -26,9 +26,21 @@
 - [x] **Recarga automática**: ✅ RESUELTO - Eventos se recargan automáticamente al crear
 - [x] **Duplicación de eventos**: ✅ RESUELTO - Filtro de duplicados implementado
 - [x] **Date value out of bounds**: ✅ RESUELTO - Cambiado a `getTime()` y `Date.UTC()` para evitar fechas inválidas
-- [ ] **Fecha de fin de recurrencia**: EN PRUEBA - Corregida la lógica de generación de instancias
+- [x] **Fecha de fin de recurrencia**: ✅ RESUELTO - Corregida la lógica de generación de instancias
 - [ ] **Cargar configuración al editar**: Al hacer clic en un evento recurrente, debe mostrar su configuración
 - [ ] **Probar flujo completo**: crear → salir → entrar → editar → verificar configuración
+
+## ✅ **NUEVOS ARREGLOS IMPLEMENTADOS:**
+
+### Recurrencia con Fecha de Fin - ✅ RESUELTO
+- **Problema**: Error `Date value out of bounds` al crear eventos recurrentes con fecha de fin
+- **Causa**: La base de datos devuelve fechas en formato ISO (`2025-10-30T00:00:00.000000Z`) pero el código esperaba formato YYYY-MM-DD
+- **Solución aplicada**: 
+  - Parsing robusto que maneja tanto formato ISO como YYYY-MM-DD
+  - Detección automática del formato y conversión a YYYY-MM-DD
+  - Validación de componentes de fecha antes de crear objeto Date
+  - Logs mejorados para debugging
+- **Estado**: ✅ COMPLETAMENTE FUNCIONAL
 
 ## 🐛 **BUGS CONOCIDOS (NO CRÍTICOS):**
 - **Datos legacy**: Eventos creados con código anterior pueden tener horarios incorrectos
