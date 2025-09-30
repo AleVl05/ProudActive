@@ -148,6 +148,15 @@ const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any): Date =
   const interval = rule.interval || 1;
   let adjustedDate = new Date(originalStart);
 
+  console.log('🔍 DEBUG adjustStartDateToRecurrenceRule:', {
+    originalStart: originalStart.toISOString(),
+    frequency,
+    byWeekDays: rule.byWeekDays,
+    byMonthDays: rule.byMonthDays,
+    originalHour: originalStart.getUTCHours(),
+    originalMinute: originalStart.getUTCMinutes()
+  });
+
   // Debug solo si hay cambio de fecha
   if (adjustedDate.getTime() !== originalStart.getTime()) {
     console.log('🔧 AJUSTANDO FECHA INICIAL:', {
@@ -162,6 +171,12 @@ const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any): Date =
   switch (frequency) {
     case 'WEEKLY':
       if (rule.byWeekDays && rule.byWeekDays.length > 0) {
+        // Preservar la hora original
+        const originalHour = originalStart.getUTCHours();
+        const originalMinute = originalStart.getUTCMinutes();
+        const originalSecond = originalStart.getUTCSeconds();
+        const originalMillisecond = originalStart.getUTCMilliseconds();
+        
         // Encontrar el próximo día de la semana especificado
         const weekDayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
         const targetDays = rule.byWeekDays.map((day: string) => weekDayCodes.indexOf(day)).filter((d: number) => d !== -1);
@@ -173,11 +188,20 @@ const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any): Date =
           }
           adjustedDate.setDate(adjustedDate.getDate() + 1);
         }
+        
+        // Restaurar la hora original
+        adjustedDate.setUTCHours(originalHour, originalMinute, originalSecond, originalMillisecond);
       }
       break;
       
     case 'MONTHLY':
       if (rule.byMonthDays && rule.byMonthDays.length > 0) {
+        // Preservar la hora original
+        const originalHour = originalStart.getUTCHours();
+        const originalMinute = originalStart.getUTCMinutes();
+        const originalSecond = originalStart.getUTCSeconds();
+        const originalMillisecond = originalStart.getUTCMilliseconds();
+        
         const targetDays = rule.byMonthDays.sort((a: number, b: number) => a - b);
         const currentDay = adjustedDate.getDate();
         
@@ -189,6 +213,9 @@ const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any): Date =
           adjustedDate.setMonth(adjustedDate.getMonth() + 1);
           adjustedDate.setDate(targetDays[0]);
         }
+        
+        // Restaurar la hora original
+        adjustedDate.setUTCHours(originalHour, originalMinute, originalSecond, originalMillisecond);
       }
       break;
   }
@@ -228,8 +255,23 @@ const generateRecurrentInstances = (
     const eventEnd = new Date(masterEvent.end_utc);
     const duration = eventEnd.getTime() - originalStart.getTime();
     
+    console.log('🔍 DEBUG generateRecurrentInstances:', {
+      masterEventId: masterEvent.id,
+      masterEventTitle: masterEvent.title,
+      originalStart: originalStart.toISOString(),
+      eventEnd: eventEnd.toISOString(),
+      duration: duration,
+      rule: rule
+    });
+    
     // AJUSTAR LA FECHA INICIAL SEGÚN LA REGLA DE RECURRENCIA
     const adjustedStart = adjustStartDateToRecurrenceRule(originalStart, rule);
+    
+    console.log('🔍 DEBUG después de adjustStartDateToRecurrenceRule:', {
+      originalStart: originalStart.toISOString(),
+      adjustedStart: adjustedStart.toISOString(),
+      changed: adjustedStart.getTime() !== originalStart.getTime()
+    });
     
     // Crear recurrenceEndDate
     let recurrenceEndDate = null;
@@ -264,11 +306,24 @@ const generateRecurrentInstances = (
         const instanceStart = new Date(currentDate);
         const instanceEnd = new Date(currentDate.getTime() + duration);
         
+        const startTime = (instanceStart.getUTCHours() * 60 + instanceStart.getUTCMinutes()) - (START_HOUR * 60);
+        
+        console.log('🔍 DEBUG generando instancia:', {
+          currentDate: currentDate.toISOString(),
+          instanceStart: instanceStart.toISOString(),
+          instanceEnd: instanceEnd.toISOString(),
+          startTime: startTime,
+          originalHour: originalStart.getUTCHours(),
+          originalMinute: originalStart.getUTCMinutes(),
+          instanceHour: instanceStart.getUTCHours(),
+          instanceMinute: instanceStart.getUTCMinutes()
+        });
+        
         const instance: Event = {
           id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
           title: masterEvent.title,
           description: masterEvent.description,
-          startTime: (instanceStart.getUTCHours() * 60 + instanceStart.getUTCMinutes()) - (START_HOUR * 60),
+          startTime: startTime,
           duration: Math.round(duration / (1000 * 60)),
           color: masterEvent.color,
           category: masterEvent.category || 'General',
@@ -1153,14 +1208,8 @@ export default function CalendarView({}: CalendarViewProps) {
           const recurrentInstances = generateRecurrentInstances(item, rangeStart, rangeEnd);
           allEvents.push(...recurrentInstances);
           
-          // También incluir el evento maestro si está en el rango visible
-          const masterEvent = normalizeApiEvent(item);
-          if (masterEvent) {
-            const masterDate = new Date(masterEvent.date);
-            if (masterDate >= rangeStart && masterDate <= rangeEnd) {
-              allEvents.push(masterEvent);
-            }
-          }
+          // NO incluir el evento maestro para evitar duplicados
+          // Las instancias generadas ya representan las ocurrencias del evento
         } else {
           // Evento regular
           const normalizedEvent = normalizeApiEvent(item);

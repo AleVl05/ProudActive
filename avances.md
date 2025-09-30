@@ -42,6 +42,50 @@
   - Logs mejorados para debugging
 - **Estado**: ✅ COMPLETAMENTE FUNCIONAL
 
+## ✅ **DUPLICACIÓN DE EVENTOS RECURRENTES - RESUELTO**
+
+### Problema Identificado:
+- **Síntoma**: Eventos recurrentes aparecían duplicados con horarios incorrectos (ej: evento a las 12:00 PM se duplicaba a las 9:00 AM)
+- **Causa raíz**: En `fetchEventsForRange`, se incluían tanto las instancias generadas como el evento maestro
+- **Resultado**: Dos eventos visibles: el maestro (día de creación) + las instancias (días de repetición)
+
+### Solución Implementada:
+- **Eliminación del evento maestro**: En eventos recurrentes, solo se incluyen las instancias generadas
+- **Lógica corregida**: Las instancias ya representan las ocurrencias del evento, no se necesita el maestro
+- **Resultado**: Solo aparecen las instancias en los días correctos con horarios correctos
+
+### Código Corregido:
+```typescript
+// ANTES (causaba duplicados):
+if (item.is_recurring) {
+  const recurrentInstances = generateRecurrentInstances(item, rangeStart, rangeEnd);
+  allEvents.push(...recurrentInstances);
+  
+  // ❌ PROBLEMA: También incluía el evento maestro
+  const masterEvent = normalizeApiEvent(item);
+  if (masterEvent) {
+    const masterDate = new Date(masterEvent.date);
+    if (masterDate >= rangeStart && masterDate <= rangeEnd) {
+      allEvents.push(masterEvent);
+    }
+  }
+}
+
+// DESPUÉS (sin duplicados):
+if (item.is_recurring) {
+  const recurrentInstances = generateRecurrentInstances(item, rangeStart, rangeEnd);
+  allEvents.push(...recurrentInstances);
+  
+  // ✅ SOLUCIÓN: NO incluir el evento maestro para evitar duplicados
+  // Las instancias generadas ya representan las ocurrencias del evento
+}
+```
+
+### Estado: ✅ COMPLETAMENTE RESUELTO
+- **Verificación**: Eventos recurrentes aparecen solo en los días correctos
+- **Horarios correctos**: Sin duplicados con horarios incorrectos
+- **Persistencia**: Funciona correctamente al cerrar y abrir la app
+
 ## 🐛 **BUGS CONOCIDOS (NO CRÍTICOS):**
 - **Datos legacy**: Eventos creados con código anterior pueden tener horarios incorrectos
 - **Solución**: Eliminar eventos antiguos y crear nuevos (funcionan perfectamente)
