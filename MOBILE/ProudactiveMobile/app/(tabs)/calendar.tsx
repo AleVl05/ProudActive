@@ -160,11 +160,16 @@ const generateRecurrentInstances = (
   }
 
   try {
+    console.log('🔍 DEBUG - masterEvent.recurrence_rule:', masterEvent.recurrence_rule);
+    
     const rule = typeof masterEvent.recurrence_rule === 'string'
       ? JSON.parse(masterEvent.recurrence_rule)
       : masterEvent.recurrence_rule;
 
+    console.log('🔍 DEBUG - rule parseado:', rule);
+
     if (!rule || !rule.frequency) {
+      console.log('🔍 DEBUG - Regla inválida o sin frecuencia:', rule);
       return [];
     }
 
@@ -172,9 +177,27 @@ const generateRecurrentInstances = (
     const eventStart = new Date(masterEvent.start_utc);
     const eventEnd = new Date(masterEvent.end_utc);
     const duration = eventEnd.getTime() - eventStart.getTime();
-    const recurrenceEndDate = masterEvent.recurrence_end_date 
-      ? new Date(masterEvent.recurrence_end_date + 'T23:59:59')
-      : null;
+    
+    // Crear recurrenceEndDate de manera más robusta
+    let recurrenceEndDate = null;
+    if (masterEvent.recurrence_end_date) {
+      try {
+        // Parsear la fecha YYYY-MM-DD y crear fecha UTC al final del día
+        const [year, month, day] = masterEvent.recurrence_end_date.split('-').map(Number);
+        recurrenceEndDate = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+      } catch (error) {
+        console.error('Error al parsear recurrence_end_date:', error);
+        recurrenceEndDate = null;
+      }
+    }
+
+    // Debug: Log para verificar las fechas de recurrencia
+    console.log('🔍 DEBUG - Generando instancias recurrentes:', {
+      eventStart: eventStart.toISOString(),
+      recurrenceEndDate: recurrenceEndDate?.toISOString(),
+      hasEndDate: !!masterEvent.recurrence_end_date,
+      endDateFromEvent: masterEvent.recurrence_end_date
+    });
 
     const frequency = rule.frequency.toUpperCase();
     const interval = rule.interval || 1;
@@ -183,13 +206,34 @@ const generateRecurrentInstances = (
     let instanceCount = 0;
     const maxInstances = 1000; // Límite de seguridad
 
+    console.log('🔍 DEBUG - Iniciando bucle de recurrencia:', {
+      eventStart: eventStart.toISOString(),
+      endDate: endDate.toISOString(),
+      recurrenceEndDate: recurrenceEndDate?.toISOString(),
+      currentDate: currentDate.toISOString()
+    });
+
     while (
       currentDate <= endDate && 
       instanceCount < maxInstances &&
       (!recurrenceEndDate || currentDate <= recurrenceEndDate)
     ) {
+      // Debug: Log para verificar la condición del bucle
+      if (instanceCount < 5) { // Solo los primeros 5 para no spamear
+        console.log('🔍 DEBUG - Bucle recurrencia:', {
+          currentDate: currentDate.toISOString(),
+          endDate: endDate.toISOString(),
+          recurrenceEndDate: recurrenceEndDate?.toISOString(),
+          condition1: currentDate <= endDate,
+          condition2: instanceCount < maxInstances,
+          condition3: !recurrenceEndDate || currentDate <= recurrenceEndDate,
+          willContinue: currentDate <= endDate && instanceCount < maxInstances && (!recurrenceEndDate || currentDate <= recurrenceEndDate)
+        });
+      }
+      
       // Solo generar si la instancia está en el rango visible
       if (currentDate >= startDate) {
+        // Mantener las fechas en UTC para evitar problemas de zona horaria
         const instanceStart = new Date(currentDate);
         const instanceEnd = new Date(currentDate.getTime() + duration);
         
@@ -198,7 +242,7 @@ const generateRecurrentInstances = (
           id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
           title: masterEvent.title,
           description: masterEvent.description,
-          startTime: (instanceStart.getHours() * 60 + instanceStart.getMinutes()),
+          startTime: (instanceStart.getUTCHours() * 60 + instanceStart.getUTCMinutes()) - (START_HOUR * 60),
           duration: Math.round(duration / (1000 * 60)), // minutos
           color: masterEvent.color,
           category: masterEvent.category || 'General',
@@ -270,6 +314,16 @@ const generateRecurrentInstances = (
     return instances;
   } catch (error) {
     console.warn('Error generating recurrent instances:', error);
+    console.log('🔍 DEBUG - Error context:', {
+      masterEvent: {
+        id: masterEvent.id,
+        start_utc: masterEvent.start_utc,
+        end_utc: masterEvent.end_utc,
+        recurrence_end_date: masterEvent.recurrence_end_date
+      },
+      rule: rule,
+      error: error
+    });
     return [];
   }
 };
@@ -376,10 +430,10 @@ interface RecurrenceRule {
 // Utilidades fecha/UTC mínimas para API
 const dateKeyToLocalDate = (dateKey: string, minutesFromStart: number) => {
   const [y, m, d] = dateKey.split('-').map(Number);
-  const dt = new Date(y, (m - 1), d, 0, 0, 0, 0);
-  dt.setHours(START_HOUR, 0, 0, 0);
-  dt.setMinutes(dt.getMinutes() + minutesFromStart);
-  return dt; // local Date; toISOString() es UTC
+  // Crear fecha directamente en UTC para evitar problemas de zona horaria
+  const dt = new Date(Date.UTC(y, (m - 1), d, START_HOUR, 0, 0, 0));
+  dt.setUTCMinutes(dt.getUTCMinutes() + minutesFromStart);
+  return dt; // UTC Date
 };
 
 const dateKeyToDate = (dateKey: string) => {
@@ -1062,6 +1116,28 @@ export default function CalendarView({}: CalendarViewProps) {
     };
   }, [toDateKey]);
 
+  // Función para refrescar eventos después de crear/editar
+  const refreshEvents = useCallback(async () => {
+    try {
+      const rangeStart = new Date(currentDate);
+      rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás
+      const rangeEnd = new Date(currentDate);
+      rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
+      
+      const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
+      if (fetched) {
+        // Evitar duplicados: solo agregar eventos que no existan ya
+        setEvents(prev => {
+          const existingIds = new Set(prev.map(e => e.id));
+          const newEvents = fetched.filter(e => !existingIds.has(e.id));
+          return [...prev, ...newEvents];
+        });
+      }
+    } catch (error) {
+      console.error('Error al refrescar eventos:', error);
+    }
+  }, [currentDate, fetchEventsForRange]);
+
   const fetchEventsForRange = useCallback(async (rangeStart: Date, rangeEnd: Date) => {
     try {
       // Expandir el rango para capturar eventos recurrentes que puedan generar instancias en el rango visible
@@ -1382,6 +1458,9 @@ export default function CalendarView({}: CalendarViewProps) {
 
         // Reemplaza el evento temporal por el evento final con el ID correcto
         setEvents(prev => [...prev.filter(e => e.id !== localId), finalEvent]);
+        
+        // Refrescar eventos para mostrar la recurrencia inmediatamente
+        await refreshEvents();
 
       } else {
         // Tu lógica de manejo de errores

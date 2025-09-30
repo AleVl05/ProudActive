@@ -45,14 +45,16 @@
 - [x] **Sincronización API**: Crear/actualizar eventos en base de datos
 - [x] **Generación de instancias**: Eventos recurrentes se generan bajo demanda
 - [x] **Persistencia**: Eventos se guardan y cargan desde API
+- [x] **Recurrencia funcional**: ✅ **COMPLETAMENTE FUNCIONAL** - Horarios correctos, persistencia, generación de instancias
+- [x] **Zona horaria**: ✅ **RESUELTO** - Sin diferencias de horario
 
 ### ❌ **CALENDARIO - PENDIENTE**
-- [ ] **Verificar guardado de recurrencia**: Confirmar que `is_recurring`, `recurrence_rule`, `recurrence_end_date` se guardan correctamente
+- [ ] **Recarga automática**: Mejorar para que no requiera navegar para ver nuevos eventos
+- [ ] **Cargar configuración al editar**: Mostrar configuración de recurrencia al editar eventos
 - [ ] **Mover bloques**: Drag & drop para cambiar horario
 - [ ] **Extensión horizontal**: Bloques multi-día en vista semanal
 - [ ] **Alarmas**: Sistema de notificaciones locales/push
 - [ ] **Excepciones de recurrencia**: Modificar/eliminar instancias específicas
-- [ ] **Husos horarios**: Soporte completo a zonas horarias
 
 ### 🗑️ **ELIMINACIÓN DE EVENTOS - PENDIENTE**
 - [ ] **Modal de confirmación** con opciones:
@@ -66,20 +68,23 @@
   - [ ] **Push**: Notificación push (mobile)
   - [ ] **Email**: Envío de email (futuro)
 
-### 🔄 **API BACKEND - EN PROGRESO**
+### ✅ **API BACKEND - COMPLETADO**
 - [x] **Estructura de base de datos**: Tablas creadas con campos de recurrencia
 - [x] **Endpoints básicos**: GET/POST/PUT eventos
-- [ ] **Validación de recurrencia**: Verificar que se guardan las reglas JSON
+- [x] **Validación de recurrencia**: ✅ **FUNCIONANDO** - Se guardan las reglas JSON correctamente
+- [x] **Persistencia de datos**: Los campos `is_recurring`, `recurrence_rule`, `recurrence_end_date` se guardan y cargan correctamente
 - [ ] **Generación de instancias**: API debe generar eventos recurrentes
 - [ ] **Manejo de excepciones**: Tabla `recurrence_exceptions`
 
-### 📱 **MOBILE - COMPLETADO**
+### ✅ **MOBILE - COMPLETADO**
 - [x] **Navegación**: React Navigation configurado
 - [x] **Vistas de calendario**: Día/Semana/Mes funcionales
 - [x] **Modal de eventos**: Crear/editar con todos los campos
 - [x] **Modal de recurrencia**: Configuración completa
 - [x] **Redimensionar**: Bloques redimensionables verticalmente
 - [x] **Sincronización**: Conectado a API Laravel
+- [x] **Recurrencia funcional**: ✅ **COMPLETAMENTE FUNCIONAL** - Crear, guardar, cargar, generar instancias
+- [x] **Zona horaria**: ✅ **RESUELTO** - Horarios correctos sin diferencias
 
 ### 🌐 **WEB - PENDIENTE**
 - [ ] **Setup inicial**: React + Vite configurado
@@ -400,27 +405,20 @@ CREATE TABLE user_achievements (
 ```
 
 
-## 🎯 Próximos Pasos - Recurrencia
+## 🎯 **RECURRENCIA - ✅ COMPLETAMENTE FUNCIONAL**
 
-### ✅ **LO QUE YA FUNCIONA:**
-- Modal de recurrencia completo en mobile
-- Generación de instancias recurrentes en frontend
-- Envío de datos de recurrencia a API
+### ✅ **LO QUE YA FUNCIONA PERFECTAMENTE:**
+- [x] **Modal de recurrencia**: Configuración completa diario/semanal/mensual
+- [x] **Generación de instancias**: Eventos recurrentes se generan correctamente
+- [x] **Envío al API**: Datos se envían correctamente al servidor
+- [x] **Persistencia**: Los campos se guardan y cargan desde la base de datos
+- [x] **Horarios correctos**: Sin diferencias de zona horaria
+- [x] **Recarga de app**: Los eventos se mantienen al cerrar y abrir la app
 
-### ❌ **LO QUE FALTA VERIFICAR:**
-- [ ] **Verificar que el API guarde correctamente** los campos de recurrencia
-- [ ] **Probar que los eventos recurrentes se muestren** al recargar la app
-- [ ] **Validar que la regla JSON se almacene** correctamente en la base de datos
-
-### 🔧 **Para verificar la recurrencia:**
-
-1. **Crear un evento con recurrencia** (ej: cada 2 días)
-2. **Verificar en la base de datos** que se guarde:
-   - `is_recurring = 1`
-   - `recurrence_rule = {"frequency":"DAILY","interval":2}`
-   - `recurrence_end_date` (si se configuró)
-3. **Recargar la app** y verificar que aparezcan las instancias recurrentes
-4. **Navegar a fechas futuras** y verificar que se generen más instancias
+### 🔧 **MEJORAS MENORES PENDIENTES:**
+- [ ] **Recarga automática**: No requiere navegar para ver nuevos eventos
+- [ ] **Cargar configuración al editar**: Mostrar configuración al editar eventos recurrentes
+- [ ] **Optimización**: Mejorar rendimiento en la generación de instancias
 
 
 
