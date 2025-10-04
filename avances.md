@@ -150,18 +150,21 @@ const totalStartMinutes = startDate.getUTCHours() * 60 + startDate.getUTCMinutes
 - **Eventos recurrentes**: No se ven afectados (ya funcionaban correctamente)
 - **Consistencia**: Todos los eventos mantienen horarios correctos
 
-## 🔧 **LIBERACIÓN DE EVENTOS DE SERIE - EN INVESTIGACIÓN**
+## ✅ **LIBERACIÓN DE EVENTOS DE SERIE - RESUELTO**
 
 ### Problema Identificado:
 - **Síntoma**: Al editar la recurrencia de un evento que viene de una serie (override), no se puede aplicar nueva recurrencia
-- **Causa**: El evento mantiene `series_id` y `original_start_utc`, impidiendo crear nueva serie
-- **Estado**: ❌ **NO FUNCIONA** - La lógica implementada no se está ejecutando
+- **Causa**: El evento liberado no tenía `series_id` local, por lo que no se detectaba como evento de serie
+- **Estado**: ✅ **COMPLETAMENTE FUNCIONAL**
 
-### Investigación en Curso:
-- **Problema principal**: No se está detectando correctamente cuando estamos editando un evento existente vs creando uno nuevo
-- **Log faltante**: No aparece `🎯 LIBERANDO EVENTO DE SERIE - Creando nueva serie independiente`
-- **Causa probable**: La detección de `selectedEvent` o la lógica de `isNewEvent` no está funcionando correctamente
-- **Próximo paso**: Debuggear el flujo de detección de eventos existentes vs nuevos
+### Solución Implementada:
+- **Detección correcta**: Eventos liberados (sin `series_id` local) que se les aplica recurrencia crean nueva serie independiente
+- **Lógica diferenciada**: 
+  - Evento liberado + recurrencia → Crear nueva serie independiente
+  - Evento de serie + recurrencia → Liberar de serie original
+  - Evento único + recurrencia → Actualizar normal
+- **Limpieza automática**: El evento liberado original se elimina automáticamente
+- **Resultado**: ✅ **FUNCIONA PERFECTAMENTE** - Se crean series independientes correctamente
 
 ## 🐛 **BUGS CONOCIDOS (NO CRÍTICOS):**
 - **Datos legacy**: Eventos creados con código anterior pueden tener horarios incorrectos

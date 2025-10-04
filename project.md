@@ -50,6 +50,7 @@
 - [x] **Zona horaria**: ✅ **RESUELTO** - Sin diferencias de horario
 - [x] **Drag & drop**: ✅ **COMPLETAMENTE FUNCIONAL** - Click corto para editar, long press para mover
 - [x] **Liberación de series**: ✅ **COMPLETAMENTE FUNCIONAL** - Eventos de serie se pueden liberar y crear nueva serie independiente
+- [x] **Edición de eventos liberados**: ✅ **COMPLETAMENTE FUNCIONAL** - Eventos liberados pueden aplicar nueva recurrencia creando serie independiente
 
 ### ❌ **CALENDARIO - PENDIENTE**
 - [ ] **Personalidad de bloques**: Manejo correcto de edición vs creación de eventos recurrentes
@@ -230,6 +231,9 @@ CREATE TABLE calendars (
 -- =============================================
 -- TABLA: events
 -- Eventos del calendario (serie master o evento único)
+-- 
+-- NOTA: Campos simples (título, descripción, fecha/hora, color) se actualizan directamente.
+-- Campos complejos (recurrencia, series_id, etc.) requieren crear nuevo evento.
 -- =============================================
 CREATE TABLE events (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

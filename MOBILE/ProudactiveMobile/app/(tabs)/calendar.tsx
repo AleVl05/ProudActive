@@ -515,6 +515,16 @@ async function apiPutEventTimes(eventId: string, startUtcIso: string, endUtcIso:
   return res;
 }
 
+async function apiPutEvent(eventId: string, payload: any) {
+  const url = `${API_BASE}/events/${eventId}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return res;
+}
+
 async function apiGetCalendars() {
   const res = await fetch(`${API_BASE}/calendars`);
   return res.json();
@@ -1137,6 +1147,7 @@ export default function CalendarView({}: CalendarViewProps) {
   const [recurrenceConfig, setRecurrenceConfig] = useState<RecurrenceConfig>(() => createDefaultRecurrenceConfig());
   const [recurrenceModalVisible, setRecurrenceModalVisible] = useState(false);
   const [tempRecurrenceConfig, setTempRecurrenceConfig] = useState<RecurrenceConfig | null>(null);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [recurrenceCalendarMonth, setRecurrenceCalendarMonth] = useState<Date>(new Date());
 
   const handleOpenRecurrenceModal = useCallback(() => {
@@ -1157,6 +1168,17 @@ export default function CalendarView({}: CalendarViewProps) {
     setSelectedCell(null);
     setSelectedMonthCell(null);
     setRecurrenceConfig(createDefaultRecurrenceConfig());
+  }, []);
+
+  const handleDeleteEvent = useCallback(() => {
+    if (!selectedEvent) return;
+    setDeleteModalVisible(true);
+  }, [selectedEvent]);
+
+  const handleDeleteConfirm = useCallback((deleteType: 'single' | 'series') => {
+    console.log('🎯 DEBUG BORRAR - Opción seleccionada:', deleteType);
+    setDeleteModalVisible(false);
+    // TODO: Implementar lógica de borrado
   }, []);
 
   // Lock para evitar commits duplicados por el mismo evento en paralelo
@@ -1270,6 +1292,16 @@ export default function CalendarView({}: CalendarViewProps) {
   const normalizeApiEvent = useCallback((apiEvent: any): Event | null => {
     if (!apiEvent?.id || !apiEvent?.start_utc || !apiEvent?.end_utc) return null;
 
+    // 🔥 DEBUG: Verificar datos del servidor para eventos con series_id
+    if (apiEvent.series_id || apiEvent.original_start_utc) {
+      console.log('🎯 DEBUG RECURRENCIA - Evento con serie del servidor:', {
+        id: apiEvent.id,
+        series_id: apiEvent.series_id,
+        original_start_utc: apiEvent.original_start_utc,
+        title: apiEvent.title
+      });
+    }
+
     const startDate = new Date(apiEvent.start_utc);
     const endDate = new Date(apiEvent.end_utc);
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
@@ -1363,6 +1395,7 @@ export default function CalendarView({}: CalendarViewProps) {
   // Función para refrescar eventos después de crear/editar
   const refreshEvents = useCallback(async () => {
     try {
+      console.log('🎯 DEBUG RECURRENCIA - Refrescando eventos...');
       const rangeStart = new Date(currentDate);
       rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás
       const rangeEnd = new Date(currentDate);
@@ -1370,6 +1403,7 @@ export default function CalendarView({}: CalendarViewProps) {
       
       const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
       if (fetched) {
+        console.log('🎯 DEBUG RECURRENCIA - Eventos refrescados:', fetched.length);
         // Evitar duplicados: solo agregar eventos que no existan ya
         setEvents(prev => {
           const existingIds = new Set(prev.map(e => e.id));
@@ -1526,7 +1560,19 @@ export default function CalendarView({}: CalendarViewProps) {
     const tempId = selectedEvent?.id; 
     const isNewEvent = !selectedEvent;
 
+    // 🔥 DEBUG: Verificar campos del evento para detectar serie
+    if (!isNewEvent && selectedEvent && 'startTime' in selectedEvent) {
+      console.log('🎯 DEBUG RECURRENCIA - Campos del evento:', {
+        id: selectedEvent.id,
+        series_id: selectedEvent.series_id,
+        original_start_utc: selectedEvent.original_start_utc,
+        hasStartTime: 'startTime' in selectedEvent,
+        recurrenceEnabled: recurrenceConfig.enabled
+      });
+    }
+
     // 🔥 NUEVA LÓGICA: Detectar si estamos editando recurrencia en un evento que viene de una serie
+    // NOTA: Un evento liberado (sin series_id local) que se le aplica recurrencia debe crear nueva serie independiente
     const isEditingRecurrenceOnSeriesEvent = !isNewEvent && 
       selectedEvent && 
       'startTime' in selectedEvent && 
@@ -1615,20 +1661,86 @@ export default function CalendarView({}: CalendarViewProps) {
     }
 
     if (tempId && !isNewEvent) {
+      // 🔥 NUEVA LÓGICA: Si es un evento liberado (sin series_id local), cualquier edición
+      // debe crear una nueva serie independiente en lugar de solo actualizar
+      if ('startTime' in selectedEvent && 
+          !selectedEvent.series_id && 
+          !selectedEvent.original_start_utc) {
+        
+        console.log('🎯 DEBUG RECURRENCIA - Evento liberado editado - Creando serie independiente');
+        
+        try {
+          // 1. Crear nuevo evento (con o sin recurrencia)
+          const baseStartLocal = dateKeyToLocalDate(selectedEvent.date, selectedEvent.startTime);
+          const baseEndLocal = dateKeyToLocalDate(selectedEvent.date, selectedEvent.startTime + selectedEvent.duration);
+          
+          let recurrenceRule = null;
+          if (recurrenceConfig.enabled) {
+            recurrenceRule = {
+              frequency: recurrenceConfig.mode.toUpperCase(),
+              interval: recurrenceConfig.interval,
+              ...(recurrenceConfig.mode === 'weekly' && recurrenceConfig.weekDays.length > 0 && { byWeekDays: recurrenceConfig.weekDays }),
+              ...(recurrenceConfig.mode === 'monthly' && recurrenceConfig.monthDays.length > 0 && { byMonthDays: recurrenceConfig.monthDays })
+            };
+          }
+
+          const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+          if (!calendarId) throw new Error('No hay calendars disponibles');
+
+          const payload = {
+            calendar_id: calendarId,
+            title: eventTitle,
+            description: eventDescription,
+            start_utc: baseStartLocal.toISOString(),
+            end_utc: baseEndLocal.toISOString(),
+            color: eventColor,
+            is_recurring: recurrenceConfig.enabled,
+            recurrence_rule: recurrenceRule ? JSON.stringify(recurrenceRule) : null,
+            recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null,
+          };
+
+          const postRes = await apiPostEvent(payload);
+          const created = await postRes.json();
+
+          if (postRes.ok && created?.data?.id) {
+            console.log('🎯 DEBUG RECURRENCIA - Evento liberado convertido a serie independiente:', created.data.id);
+            
+            // 2. Eliminar el evento liberado original
+            await apiDeleteEvent(String(selectedEvent.id));
+            
+            // 3. Refrescar eventos para mostrar la nueva serie
+            await refreshEvents();
+            
+            // 4. Cerrar modal
+            setModalVisible(false);
+            setEventTitle('');
+            setEventDescription('');
+            setSelectedEvent(null);
+            setSelectedCell(null);
+            setSelectedMonthCell(null);
+            setRecurrenceConfig(createDefaultRecurrenceConfig());
+            
+            return;
+          } else {
+            throw new Error('No se pudo crear la nueva serie independiente');
+          }
+        } catch (error) {
+          console.log('🎯 DEBUG RECURRENCIA - Error al crear serie independiente:', error);
+          Alert.alert('Error', 'No se pudo crear la nueva serie independiente');
+          return;
+        }
+      }
+      
       // Lógica para actualizar un evento existente
       if ('startTime' in selectedEvent) {
         // 🔥 DEBUG: Verificar que se está actualizando la recurrencia
         console.log('🎯 DEBUG RECURRENCIA - Actualizando evento existente:', {
           eventId: selectedEvent.id,
           enabled: recurrenceConfig.enabled,
-          mode: recurrenceConfig.mode,
-          interval: recurrenceConfig.interval,
-          weekDays: recurrenceConfig.weekDays,
-          monthDays: recurrenceConfig.monthDays,
-          hasEndDate: recurrenceConfig.hasEndDate,
-          endDate: recurrenceConfig.endDate
+          mode: recurrenceConfig.mode
         });
         
+        // Actualizar localmente primero
         setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { 
           ...ev, 
           title: eventTitle, 
@@ -1644,6 +1756,52 @@ export default function CalendarView({}: CalendarViewProps) {
           }) : null,
           recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null
         } : ev));
+        
+        // 🔥 NUEVO: Enviar actualización al servidor
+        try {
+          const baseStartLocal = dateKeyToLocalDate(selectedEvent.date, selectedEvent.startTime);
+          const baseEndLocal = dateKeyToLocalDate(selectedEvent.date, selectedEvent.startTime + selectedEvent.duration);
+          
+          let recurrenceRule: RecurrenceRule | null = null;
+          if (recurrenceConfig.enabled) {
+            recurrenceRule = {
+              frequency: recurrenceConfig.mode.toUpperCase(),
+              interval: recurrenceConfig.interval,
+            };
+
+            if (recurrenceConfig.mode === 'weekly' && recurrenceConfig.weekDays.length > 0) {
+              recurrenceRule.byWeekDays = recurrenceConfig.weekDays;
+            }
+
+            if (recurrenceConfig.mode === 'monthly' && recurrenceConfig.monthDays.length > 0) {
+              recurrenceRule.byMonthDays = recurrenceConfig.monthDays;
+            }
+          }
+          
+          const updatePayload = {
+            title: eventTitle,
+            description: eventDescription,
+            start_utc: baseStartLocal.toISOString(),
+            end_utc: baseEndLocal.toISOString(),
+            color: eventColor,
+            is_recurring: recurrenceConfig.enabled,
+            recurrence_rule: recurrenceRule ? JSON.stringify(recurrenceRule) : null,
+            recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null,
+          };
+          
+          console.log('🎯 DEBUG RECURRENCIA - Enviando actualización al servidor:', updatePayload);
+          
+          const updateRes = await apiPutEvent(String(selectedEvent.id), updatePayload);
+          if (updateRes.ok) {
+            console.log('🎯 DEBUG RECURRENCIA - Evento actualizado exitosamente en servidor');
+            await refreshEvents(); // Refrescar para sincronizar
+            console.log('🎯 DEBUG RECURRENCIA - Interfaz refrescada');
+          } else {
+            console.log('🎯 DEBUG RECURRENCIA - Error al actualizar en servidor');
+          }
+        } catch (error) {
+          console.log('🎯 DEBUG RECURRENCIA - Error al actualizar:', error);
+        }
       } else {
         setMonthEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
       }
@@ -2404,6 +2562,14 @@ export default function CalendarView({}: CalendarViewProps) {
             </TouchableOpacity>
 
             <Text style={styles.subtasksDescription}>As subtarefas podem ser definidas como sua rotina ou lista de verificação diária</Text>
+
+            {/* Botón de borrar - solo visible cuando se está editando un evento */}
+            {selectedEvent && (
+              <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteEvent}>
+                <Ionicons name="trash-outline" size={20} color="#ff4444" />
+                <Text style={styles.deleteButtonText}>Borrar evento</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -2428,6 +2594,46 @@ export default function CalendarView({}: CalendarViewProps) {
           calendarMonth={recurrenceCalendarMonth}
           onCalendarMonthChange={setRecurrenceCalendarMonth}
         />
+      </Modal>
+
+      {/* Modal de confirmación de borrado */}
+      <Modal
+        visible={deleteModalVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setDeleteModalVisible(false)}
+      >
+        <View style={styles.deleteModalOverlay}>
+          <View style={styles.deleteModalContent}>
+            <Text style={styles.deleteModalTitle}>¿Borrar evento?</Text>
+            <Text style={styles.deleteModalMessage}>
+              ¿Quieres borrar solo este evento o toda la secuencia?
+            </Text>
+            
+            <View style={styles.deleteModalButtons}>
+              <TouchableOpacity 
+                style={[styles.deleteModalButton, styles.deleteModalButtonSecondary]}
+                onPress={() => handleDeleteConfirm('single')}
+              >
+                <Text style={styles.deleteModalButtonTextSecondary}>Solo este evento</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.deleteModalButton, styles.deleteModalButtonPrimary]}
+                onPress={() => handleDeleteConfirm('series')}
+              >
+                <Text style={styles.deleteModalButtonTextPrimary}>Toda la secuencia</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.deleteModalCancel}
+              onPress={() => setDeleteModalVisible(false)}
+            >
+              <Text style={styles.deleteModalCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -2485,6 +2691,90 @@ const styles = StyleSheet.create({
   subtasksCard: { backgroundColor: 'white', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   subtasksLabel: { fontSize: 16, color: Colors.light.text, marginLeft: 12 },
   subtasksDescription: { fontSize: 12, color: '#666', textAlign: 'center', lineHeight: 16 },
+  
+  // Estilos para botón de borrar
+  deleteButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    backgroundColor: '#fff5f5', 
+    borderRadius: 12, 
+    padding: 16, 
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: '#ff4444'
+  },
+  deleteButtonText: { 
+    fontSize: 16, 
+    fontWeight: '600', 
+    color: '#ff4444', 
+    marginLeft: 8 
+  },
+  
+  // Estilos para modal de confirmación de borrado
+  deleteModalOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  deleteModalContent: { 
+    backgroundColor: 'white', 
+    borderRadius: 16, 
+    padding: 24, 
+    margin: 20, 
+    minWidth: 280 
+  },
+  deleteModalTitle: { 
+    fontSize: 20, 
+    fontWeight: 'bold', 
+    color: Colors.light.text, 
+    textAlign: 'center', 
+    marginBottom: 8 
+  },
+  deleteModalMessage: { 
+    fontSize: 16, 
+    color: '#666', 
+    textAlign: 'center', 
+    marginBottom: 24 
+  },
+  deleteModalButtons: { 
+    flexDirection: 'row', 
+    gap: 12, 
+    marginBottom: 16 
+  },
+  deleteModalButton: { 
+    flex: 1, 
+    paddingVertical: 12, 
+    paddingHorizontal: 16, 
+    borderRadius: 8 
+  },
+  deleteModalButtonSecondary: { 
+    backgroundColor: '#f5f5f5', 
+    borderWidth: 1, 
+    borderColor: '#ddd' 
+  },
+  deleteModalButtonPrimary: { 
+    backgroundColor: '#ff4444' 
+  },
+  deleteModalButtonTextSecondary: { 
+    color: Colors.light.text, 
+    textAlign: 'center', 
+    fontWeight: '600' 
+  },
+  deleteModalButtonTextPrimary: { 
+    color: 'white', 
+    textAlign: 'center', 
+    fontWeight: '600' 
+  },
+  deleteModalCancel: { 
+    paddingVertical: 8 
+  },
+  deleteModalCancelText: { 
+    color: '#666', 
+    textAlign: 'center', 
+    fontSize: 16 
+  },
 });
 
 // Estilos para el Modal de Repetición
