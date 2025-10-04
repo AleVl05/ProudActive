@@ -86,6 +86,83 @@ if (item.is_recurring) {
 - **Horarios correctos**: Sin duplicados con horarios incorrectos
 - **Persistencia**: Funciona correctamente al cerrar y abrir la app
 
+## ✅ **DRAG & DROP - COMPLETAMENTE FUNCIONAL**
+
+### Problema Resuelto:
+- **Síntoma**: Al hacer click en un evento existente, ya no se abría el modal de edición
+- **Causa**: El `PanResponder` estaba capturando inmediatamente el touch, impidiendo que el `TouchableOpacity` padre recibiera el `onPress`
+- **Solución implementada**: 
+  - **Click corto (< 1 segundo)**: Abre modal de edición del evento
+  - **Long press (≥ 1 segundo)**: Activa modo drag & drop para mover el evento
+  - **Timer manual**: Implementado con `setTimeout` para detectar long press
+  - **Lógica diferenciada**: `onPanResponderRelease` detecta si fue click o drag basado en `allowDragRef`
+
+### Código de la Solución:
+```typescript
+// PanResponder que maneja tanto click como drag
+const moveResponder = useRef(PanResponder.create({
+  onStartShouldSetPanResponder: () => true, // Siempre capturar
+  onPanResponderGrant: () => {
+    // Iniciar timer de long press (1 segundo)
+    longPressTimer.current = setTimeout(() => {
+      allowDragRef.current = true; // Activar drag mode
+      setShowGhost(true);
+      setIsMoving(true);
+    }, 1000);
+  },
+  onPanResponderRelease: (_, gesture) => {
+    // Si no se activó drag mode, es click corto - abrir modal
+    if (!allowDragRef.current) {
+      onQuickPress(ev); // Abrir modal
+      return;
+    }
+    // Si está en drag mode, procesar movimiento
+    // ... lógica de drag
+  }
+}));
+```
+
+### Estado: ✅ COMPLETAMENTE FUNCIONAL
+- **Click rápido**: Abre modal de edición correctamente
+- **Long press**: Activa drag & drop con ghost visual
+- **Drag & drop**: Funciona perfectamente en todas las vistas
+- **Resize**: Los handles superior/inferior siguen funcionando
+- **Cross-platform**: Funciona en Android e iOS
+
+## ✅ **PROBLEMA DE TIMEZONE EN EVENTOS ÚNICOS - RESUELTO**
+
+### Problema Identificado:
+- **Síntoma**: Eventos únicos se movían 3 horas al cerrar/abrir la app (ej: 8:00 AM → 5:00 AM)
+- **Causa**: En `normalizeApiEvent`, se usaba `startDate.getHours()` en lugar de `startDate.getUTCHours()`
+- **Resultado**: Las fechas UTC se interpretaban en zona horaria local, causando desfase
+
+### Solución Implementada:
+```typescript
+// ANTES (causaba desfase de 3 horas):
+const totalStartMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+
+// DESPUÉS (funciona correctamente):
+const totalStartMinutes = startDate.getUTCHours() * 60 + startDate.getUTCMinutes();
+```
+
+### Estado: ✅ COMPLETAMENTE RESUELTO
+- **Eventos únicos**: Mantienen horario correcto al cerrar/abrir app
+- **Eventos recurrentes**: No se ven afectados (ya funcionaban correctamente)
+- **Consistencia**: Todos los eventos mantienen horarios correctos
+
+## 🔧 **LIBERACIÓN DE EVENTOS DE SERIE - EN INVESTIGACIÓN**
+
+### Problema Identificado:
+- **Síntoma**: Al editar la recurrencia de un evento que viene de una serie (override), no se puede aplicar nueva recurrencia
+- **Causa**: El evento mantiene `series_id` y `original_start_utc`, impidiendo crear nueva serie
+- **Estado**: ❌ **NO FUNCIONA** - La lógica implementada no se está ejecutando
+
+### Investigación en Curso:
+- **Problema principal**: No se está detectando correctamente cuando estamos editando un evento existente vs creando uno nuevo
+- **Log faltante**: No aparece `🎯 LIBERANDO EVENTO DE SERIE - Creando nueva serie independiente`
+- **Causa probable**: La detección de `selectedEvent` o la lógica de `isNewEvent` no está funcionando correctamente
+- **Próximo paso**: Debuggear el flujo de detección de eventos existentes vs nuevos
+
 ## 🐛 **BUGS CONOCIDOS (NO CRÍTICOS):**
 - **Datos legacy**: Eventos creados con código anterior pueden tener horarios incorrectos
 - **Solución**: Eliminar eventos antiguos y crear nuevos (funcionan perfectamente)

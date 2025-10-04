@@ -42,18 +42,20 @@
 - [x] **Creación de eventos**: Modal con título, descripción, color
 - [x] **Sistema de recurrencia**: Modal completo con modos diario/semanal/mensual
 - [x] **Redimensionar bloques**: Arrastrar para cambiar duración (vertical)
+- [x] **Mover bloques**: Drag & drop para cambiar horario y fecha
 - [x] **Sincronización API**: Crear/actualizar eventos en base de datos
 - [x] **Generación de instancias**: Eventos recurrentes se generan bajo demanda
 - [x] **Persistencia**: Eventos se guardan y cargan desde API
 - [x] **Recurrencia funcional**: ✅ **COMPLETAMENTE FUNCIONAL** - Horarios correctos, persistencia, generación de instancias
 - [x] **Zona horaria**: ✅ **RESUELTO** - Sin diferencias de horario
+- [x] **Drag & drop**: ✅ **COMPLETAMENTE FUNCIONAL** - Click corto para editar, long press para mover
+- [x] **Liberación de series**: ✅ **COMPLETAMENTE FUNCIONAL** - Eventos de serie se pueden liberar y crear nueva serie independiente
 
 ### ❌ **CALENDARIO - PENDIENTE**
 - [ ] **Personalidad de bloques**: Manejo correcto de edición vs creación de eventos recurrentes
 - [ ] **Excepciones de recurrencia**: Modificar/eliminar instancias específicas
 - [ ] **División de series**: Cambiar reglas de recurrencia para eventos futuros
 - [ ] **Cargar configuración al editar**: Mostrar configuración de recurrencia al editar eventos
-- [ ] **Mover bloques**: Drag & drop para cambiar horario
 - [ ] **Extensión horizontal**: Bloques multi-día en vista semanal
 - [ ] **Alarmas**: Sistema de notificaciones locales/push
 

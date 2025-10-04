@@ -6,6 +6,7 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Pressable,
   Dimensions,
   Modal,
   TextInput,
@@ -23,12 +24,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from '../../src/config/api';
+// import { DateTime } from 'luxon'; // No está instalado, usar funciones nativas
 
 
 const { width } = Dimensions.get('window');
 const CELL_HEIGHT = 50; // 30 minutos = 50px
 const START_HOUR = 6;
 const END_HOUR = 22;
+const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
 const WEEK_DAY_ITEMS = [
   { code: 'SU', short: 'D', label: 'Dom' },
@@ -148,25 +151,7 @@ const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any): Date =
   const interval = rule.interval || 1;
   let adjustedDate = new Date(originalStart);
 
-  console.log('🔍 DEBUG adjustStartDateToRecurrenceRule:', {
-    originalStart: originalStart.toISOString(),
-    frequency,
-    byWeekDays: rule.byWeekDays,
-    byMonthDays: rule.byMonthDays,
-    originalHour: originalStart.getUTCHours(),
-    originalMinute: originalStart.getUTCMinutes()
-  });
 
-  // Debug solo si hay cambio de fecha
-  if (adjustedDate.getTime() !== originalStart.getTime()) {
-    console.log('🔧 AJUSTANDO FECHA INICIAL:', {
-      original: originalStart.toISOString(),
-      adjusted: adjustedDate.toISOString(),
-      frequency,
-      byWeekDays: rule.byWeekDays,
-      byMonthDays: rule.byMonthDays
-    });
-  }
 
   switch (frequency) {
     case 'WEEKLY':
@@ -222,10 +207,6 @@ const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any): Date =
 
   // Solo mostrar debug si hubo cambio
   if (adjustedDate.getTime() !== originalStart.getTime()) {
-    console.log('✅ FECHA AJUSTADA:', {
-      original: originalStart.toISOString(),
-      adjusted: adjustedDate.toISOString()
-    });
   }
 
   return adjustedDate;
@@ -235,7 +216,8 @@ const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any): Date =
 const generateRecurrentInstances = (
   masterEvent: any, 
   startDate: Date, 
-  endDate: Date
+  endDate: Date,
+  overridesMap?: Map<string, any>
 ): Event[] => {
   if (!masterEvent || !masterEvent.is_recurring) {
     return [];
@@ -255,23 +237,10 @@ const generateRecurrentInstances = (
     const eventEnd = new Date(masterEvent.end_utc);
     const duration = eventEnd.getTime() - originalStart.getTime();
     
-    console.log('🔍 DEBUG generateRecurrentInstances:', {
-      masterEventId: masterEvent.id,
-      masterEventTitle: masterEvent.title,
-      originalStart: originalStart.toISOString(),
-      eventEnd: eventEnd.toISOString(),
-      duration: duration,
-      rule: rule
-    });
     
     // AJUSTAR LA FECHA INICIAL SEGÚN LA REGLA DE RECURRENCIA
     const adjustedStart = adjustStartDateToRecurrenceRule(originalStart, rule);
     
-    console.log('🔍 DEBUG después de adjustStartDateToRecurrenceRule:', {
-      originalStart: originalStart.toISOString(),
-      adjustedStart: adjustedStart.toISOString(),
-      changed: adjustedStart.getTime() !== originalStart.getTime()
-    });
     
     // Crear recurrenceEndDate
     let recurrenceEndDate = null;
@@ -306,34 +275,49 @@ const generateRecurrentInstances = (
         const instanceStart = new Date(currentDate);
         const instanceEnd = new Date(currentDate.getTime() + duration);
         
-        const startTime = (instanceStart.getUTCHours() * 60 + instanceStart.getUTCMinutes()) - (START_HOUR * 60);
+        // Calcular la clave UTC para verificar overrides
+        const instanceUtcKey = instanceStart.toISOString();
         
-        console.log('🔍 DEBUG generando instancia:', {
-          currentDate: currentDate.toISOString(),
-          instanceStart: instanceStart.toISOString(),
-          instanceEnd: instanceEnd.toISOString(),
-          startTime: startTime,
-          originalHour: originalStart.getUTCHours(),
-          originalMinute: originalStart.getUTCMinutes(),
-          instanceHour: instanceStart.getUTCHours(),
-          instanceMinute: instanceStart.getUTCMinutes()
-        });
         
-        const instance: Event = {
-          id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
-          title: masterEvent.title,
-          description: masterEvent.description,
-          startTime: startTime,
-          duration: Math.round(duration / (1000 * 60)),
-          color: masterEvent.color,
-          category: masterEvent.category || 'General',
-          date: instanceStart.toISOString().slice(0, 10),
-          is_recurring: masterEvent.is_recurring,
-          recurrence_rule: masterEvent.recurrence_rule,
-          recurrence_end_date: masterEvent.recurrence_end_date,
-        };
+        // Verificar si existe un override para esta instancia
+        if (overridesMap && overridesMap.has(instanceUtcKey)) {
+          const override = overridesMap.get(instanceUtcKey);
+          
+          // Convertir override a formato Event (normalizeApiEvent se define más abajo)
+          // Por ahora, crear un Event básico del override
+          const overrideEvent: Event = {
+            id: String(override.id),
+            title: override.title,
+            description: override.description,
+            startTime: (new Date(override.start_utc).getUTCHours() * 60 + new Date(override.start_utc).getUTCMinutes()) - (START_HOUR * 60),
+            duration: Math.round((new Date(override.end_utc).getTime() - new Date(override.start_utc).getTime()) / (1000 * 60)),
+            color: override.color,
+            category: override.category || 'General',
+            date: new Date(override.start_utc).toISOString().slice(0, 10),
+            is_recurring: false, // Override no es recurrente
+          };
+          instances.push(overrideEvent);
+        } else {
+          // Generar instancia normal
+          const startTime = (instanceStart.getUTCHours() * 60 + instanceStart.getUTCMinutes()) - (START_HOUR * 60);
+          
+          
+          const instance: Event = {
+            id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
+            title: masterEvent.title,
+            description: masterEvent.description,
+            startTime: startTime,
+            duration: Math.round(duration / (1000 * 60)),
+            color: masterEvent.color,
+            category: masterEvent.category || 'General',
+            date: instanceStart.toISOString().slice(0, 10),
+            is_recurring: masterEvent.is_recurring,
+            recurrence_rule: masterEvent.recurrence_rule,
+            recurrence_end_date: masterEvent.recurrence_end_date,
+          };
 
-        instances.push(instance);
+          instances.push(instance);
+        }
       }
 
       // Calcular la próxima fecha según la frecuencia
@@ -462,6 +446,7 @@ interface Event {
   id: string;
   title: string;
   description?: string;
+  location?: string;
   startTime: number; // minutos desde las 6 AM
   duration: number; // minutos
   color: string;
@@ -471,6 +456,9 @@ interface Event {
   is_recurring?: boolean;
   recurrence_rule?: string | object | null;
   recurrence_end_date?: string | null;
+  // Campos para detectar si viene de una serie
+  series_id?: string | number | null;
+  original_start_utc?: string | null;
 }
 
 type RecurrenceMode = 'daily' | 'weekly' | 'monthly';
@@ -541,6 +529,11 @@ async function apiPostEvent(payload: any) {
   return res;
 }
 
+async function apiDeleteEvent(eventId: string) {
+  const res = await fetch(`${API_BASE}/events/${eventId}`, { method: 'DELETE' });
+  return res;
+}
+
 async function apiFetchEvents(startIso: string, endIso: string) {
   const params = new URLSearchParams({ start: startIso, end: endIso });
   const res = await fetch(`${API_BASE}/events?${params.toString()}`);
@@ -550,13 +543,30 @@ async function apiFetchEvents(startIso: string, endIso: string) {
 interface EventResizableBlockProps {
   ev: Event;
   onResizeCommit: (event: Event, newStartTime: number, newDuration: number) => void;
+  onMoveCommit: (event: Event, newStartTime: number, newDate: string) => void;
+  cellWidth: number;
+  onQuickPress?: (ev: Event) => void; // <-- NEW
 }
 
-const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit }: EventResizableBlockProps) {
+const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit, onMoveCommit, onQuickPress, cellWidth }: EventResizableBlockProps) {
   const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
   const ghostTopOffset = useRef(new Animated.Value(0)).current;
+  const ghostLeftOffset = useRef(new Animated.Value(0)).current;
   const [showGhost, setShowGhost] = useState(false);
-  const initial = useRef({ startTime: ev.startTime, duration: ev.duration }).current;
+  const [isMoving, setIsMoving] = useState(false);
+  const allowDragRef = useRef(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initial = useRef({ startTime: ev.startTime, duration: ev.duration, date: ev.date }).current;
+
+  useEffect(() => {
+    return () => {
+      allowDragRef.current = false;
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    };
+  }, []);
 
   const commitResize = useCallback((newStartTime: number, newDuration: number) => {
     const minDuration = 30;
@@ -564,6 +574,11 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
     if (newStartTime < 0) return;
     onResizeCommit(ev, newStartTime, newDuration);
   }, [ev, onResizeCommit]);
+
+  const commitMove = useCallback((newStartTime: number, newDate: string) => {
+    if (newStartTime < 0) return;
+    onMoveCommit(ev, newStartTime, newDate);
+  }, [ev, onMoveCommit]);
 
   const topResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -620,6 +635,102 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
     onPanResponderTerminate: () => setShowGhost(false),
   })).current;
 
+  // PanResponder para mover el bloque completo
+  const moveResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => {
+      return true; // Siempre capturar para manejar click y long press
+    },
+    onStartShouldSetPanResponderCapture: () => {
+      return true;
+    },
+    onMoveShouldSetPanResponder: (_, gesture) => {
+      const dx = Math.abs(gesture.dx || 0);
+      const dy = Math.abs(gesture.dy || 0);
+      const MOVE_THRESHOLD = 8;
+      const shouldCapture = allowDragRef.current || dx >= MOVE_THRESHOLD || dy >= MOVE_THRESHOLD;
+      
+      return shouldCapture;
+    },
+    onPanResponderGrant: () => {
+      // Iniciar timer de long press (1 segundo)
+      longPressTimer.current = setTimeout(() => {
+        allowDragRef.current = true;
+        setShowGhost(true);
+        setIsMoving(true);
+        ghostTopOffset.setValue(0);
+        ghostLeftOffset.setValue(0);
+        ghostHeight.setValue((initial.duration / 30) * CELL_HEIGHT - 2);
+      }, 1000);
+    },
+    onPanResponderMove: (_, gesture) => {
+      const deltaY = gesture.dy;
+      const deltaX = gesture.dx;
+      
+      // Calcular movimiento vertical (cambio de horario)
+      const deltaSlotsY = Math.round(deltaY / CELL_HEIGHT);
+      const deltaMinY = deltaSlotsY * 30;
+      const newStartTime = Math.max(0, initial.startTime + deltaMinY);
+      
+      // Calcular movimiento horizontal (cambio de fecha)
+      const deltaSlotsX = Math.round(deltaX / cellWidth);
+      const newDate = new Date(initial.date);
+      newDate.setDate(newDate.getDate() + deltaSlotsX);
+      const newDateString = newDate.toISOString().slice(0, 10);
+      
+      // Actualizar posición del ghost
+      ghostTopOffset.setValue(deltaSlotsY * CELL_HEIGHT);
+      ghostLeftOffset.setValue(deltaSlotsX * cellWidth);
+    },
+    onPanResponderRelease: (_, gesture) => {
+      // Limpiar timer si existe
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      
+      const deltaY = gesture.dy;
+      const deltaX = gesture.dx;
+      
+      // Si no se activó el drag mode, es un click corto - abrir modal
+      if (!allowDragRef.current) {
+        if (typeof onQuickPress === 'function') {
+          onQuickPress(ev);
+        }
+        return;
+      }
+      
+      // Si está en drag mode, procesar el movimiento
+      const deltaSlotsY = Math.round(deltaY / CELL_HEIGHT);
+      const deltaMinY = deltaSlotsY * 30;
+      const newStartTime = Math.max(0, initial.startTime + deltaMinY);
+      
+      const deltaSlotsX = Math.round(deltaX / cellWidth);
+      const newDate = new Date(initial.date);
+      newDate.setDate(newDate.getDate() + deltaSlotsX);
+      const newDateString = newDate.toISOString().slice(0, 10);
+      
+      setShowGhost(false);
+      setIsMoving(false);
+      allowDragRef.current = false; // reset gate
+      
+      // Solo mover si hay cambio significativo
+      if (newStartTime !== initial.startTime || newDateString !== initial.date) {
+        commitMove(newStartTime, newDateString);
+      }
+    },
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderTerminate: () => {
+      // Limpiar timer si existe
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      setShowGhost(false);
+      setIsMoving(false);
+      allowDragRef.current = false;
+    },
+  })).current;
+
   return (
     <View style={{ flex: 1 }}>
       {showGhost && (
@@ -630,7 +741,10 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
             top: 2,
             left: 2,
             right: 2,
-            transform: [{ translateY: ghostTopOffset }],
+            transform: [
+              { translateY: ghostTopOffset },
+              { translateX: ghostLeftOffset }
+            ],
             height: ghostHeight,
             borderWidth: 1,
             borderStyle: 'dashed',
@@ -647,6 +761,8 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
         {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
         <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
         <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
+        {/* Área central para mover el bloque completo */}
+        <View {...moveResponder.panHandlers} style={{ position: 'absolute', top: 12, left: 0, right: 0, bottom: 12 }} />
       </View>
     </View>
   );
@@ -1158,12 +1274,13 @@ export default function CalendarView({}: CalendarViewProps) {
     const endDate = new Date(apiEvent.end_utc);
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
 
-    const totalStartMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+    const totalStartMinutes = startDate.getUTCHours() * 60 + startDate.getUTCMinutes();
     const minutesFromCalendarStart = totalStartMinutes - START_HOUR * 60;
     const snappedStart = Math.max(0, Math.floor(minutesFromCalendarStart / 30) * 30);
 
     const rawDuration = Math.max(30, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
     const snappedDuration = Math.max(30, Math.round(rawDuration / 30) * 30);
+
 
     return {
       id: String(apiEvent.id),
@@ -1178,6 +1295,9 @@ export default function CalendarView({}: CalendarViewProps) {
       is_recurring: apiEvent.is_recurring || false,
       recurrence_rule: apiEvent.recurrence_rule || null,
       recurrence_end_date: apiEvent.recurrence_end_date || null,
+      // Campos para detectar si viene de una serie
+      series_id: apiEvent.series_id || null,
+      original_start_utc: apiEvent.original_start_utc || null,
     };
   }, [toDateKey]);
 
@@ -1189,27 +1309,26 @@ export default function CalendarView({}: CalendarViewProps) {
       
       const response = await apiFetchEvents(expandedStart.toISOString(), rangeEnd.toISOString());
       if (!response.ok) {
-        console.log('GET events failed:', response.status);
         return null;
       }
 
       const body = await response.json();
       if (!body?.success || !Array.isArray(body.data)) {
-        console.log('GET events unexpected body:', body);
         return null;
       }
 
       const allEvents: Event[] = [];
+      const overrides: any[] = [];
+      const series: any[] = [];
       
-      // Procesar eventos regulares y recurrentes
+      // Separar eventos en categorías
       for (const item of body.data) {
-        if (item.is_recurring) {
-          // Generar instancias recurrentes solo para el rango visible
-          const recurrentInstances = generateRecurrentInstances(item, rangeStart, rangeEnd);
-          allEvents.push(...recurrentInstances);
-          
-          // NO incluir el evento maestro para evitar duplicados
-          // Las instancias generadas ya representan las ocurrencias del evento
+        if (item.series_id && item.original_start_utc) {
+          // Es un override
+          overrides.push(item);
+        } else if (item.is_recurring) {
+          // Es una serie recurrente
+          series.push(item);
         } else {
           // Evento regular
           const normalizedEvent = normalizeApiEvent(item);
@@ -1217,6 +1336,21 @@ export default function CalendarView({}: CalendarViewProps) {
             allEvents.push(normalizedEvent);
           }
         }
+      }
+
+      // Crear mapa de overrides para consulta rápida
+      const overridesMap = new Map<string, any>();
+      overrides.forEach(override => {
+        // Normalizar original_start_utc a ISO UTC para comparación
+        const originalStartUtc = new Date(override.original_start_utc).toISOString();
+        overridesMap.set(originalStartUtc, override);
+      });
+
+      
+      // Procesar series recurrentes con overrides
+      for (const seriesItem of series) {
+        const recurrentInstances = generateRecurrentInstances(seriesItem, rangeStart, rangeEnd, overridesMap);
+        allEvents.push(...recurrentInstances);
       }
 
       return allEvents;
@@ -1392,9 +1526,109 @@ export default function CalendarView({}: CalendarViewProps) {
     const tempId = selectedEvent?.id; 
     const isNewEvent = !selectedEvent;
 
+    // 🔥 NUEVA LÓGICA: Detectar si estamos editando recurrencia en un evento que viene de una serie
+    const isEditingRecurrenceOnSeriesEvent = !isNewEvent && 
+      selectedEvent && 
+      'startTime' in selectedEvent && 
+      (selectedEvent.series_id || selectedEvent.original_start_utc) && 
+      recurrenceConfig.enabled;
+
+
+    if (isEditingRecurrenceOnSeriesEvent) {
+      // 🔥 DEBUG: Verificar que se está liberando un evento de serie
+      console.log('🎯 DEBUG RECURRENCIA - Liberando evento de serie:', {
+        originalEventId: selectedEvent.id,
+        seriesId: selectedEvent.series_id,
+        originalStartUtc: selectedEvent.original_start_utc,
+        enabled: recurrenceConfig.enabled,
+        mode: recurrenceConfig.mode,
+        interval: recurrenceConfig.interval,
+        weekDays: recurrenceConfig.weekDays,
+        monthDays: recurrenceConfig.monthDays,
+        hasEndDate: recurrenceConfig.hasEndDate,
+        endDate: recurrenceConfig.endDate
+      });
+      
+      try {
+        // 1. Crear nuevo evento recurrente independiente
+        const baseStartLocal = dateKeyToLocalDate(selectedEvent.date, selectedEvent.startTime);
+        const baseEndLocal = dateKeyToLocalDate(selectedEvent.date, selectedEvent.startTime + selectedEvent.duration);
+        
+        const recurrenceRule = {
+          frequency: recurrenceConfig.mode.toUpperCase(),
+          interval: recurrenceConfig.interval,
+          ...(recurrenceConfig.mode === 'weekly' && recurrenceConfig.weekDays.length > 0 && { byWeekDays: recurrenceConfig.weekDays }),
+          ...(recurrenceConfig.mode === 'monthly' && recurrenceConfig.monthDays.length > 0 && { byMonthDays: recurrenceConfig.monthDays })
+        };
+
+        const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+        if (!calendarId) throw new Error('No hay calendars disponibles');
+
+        const payload = {
+          calendar_id: calendarId,
+          title: eventTitle,
+          description: eventDescription,
+          start_utc: baseStartLocal.toISOString(),
+          end_utc: baseEndLocal.toISOString(),
+          color: eventColor,
+          is_recurring: true,
+          recurrence_rule: JSON.stringify(recurrenceRule),
+          recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null,
+        };
+
+        const postRes = await apiPostEvent(payload);
+        const created = await postRes.json();
+
+        if (postRes.ok && created?.data?.id) {
+          // 🔥 DEBUG: Verificar que la nueva serie se creó correctamente
+          console.log('🎯 DEBUG RECURRENCIA - Nueva serie creada exitosamente:', {
+            newEventId: created.data.id,
+            title: eventTitle,
+            isRecurring: true,
+            recurrenceRule: recurrenceRule,
+            originalEventId: selectedEvent.id
+          });
+          
+          // 2. Eliminar el evento original que venía de la serie
+          await apiDeleteEvent(String(selectedEvent.id));
+          
+          // 3. Refrescar eventos para mostrar la nueva serie
+          await refreshEvents();
+          
+          // 4. Cerrar modal
+          setModalVisible(false);
+          setEventTitle('');
+          setEventDescription('');
+          setSelectedEvent(null);
+          setSelectedCell(null);
+          setSelectedMonthCell(null);
+          setRecurrenceConfig(createDefaultRecurrenceConfig());
+          
+          return;
+        } else {
+          throw new Error('No se pudo crear la nueva serie recurrente');
+        }
+      } catch (error) {
+        Alert.alert('Error', 'No se pudo crear la nueva serie recurrente');
+        return;
+      }
+    }
+
     if (tempId && !isNewEvent) {
       // Lógica para actualizar un evento existente
       if ('startTime' in selectedEvent) {
+        // 🔥 DEBUG: Verificar que se está actualizando la recurrencia
+        console.log('🎯 DEBUG RECURRENCIA - Actualizando evento existente:', {
+          eventId: selectedEvent.id,
+          enabled: recurrenceConfig.enabled,
+          mode: recurrenceConfig.mode,
+          interval: recurrenceConfig.interval,
+          weekDays: recurrenceConfig.weekDays,
+          monthDays: recurrenceConfig.monthDays,
+          hasEndDate: recurrenceConfig.hasEndDate,
+          endDate: recurrenceConfig.endDate
+        });
+        
         setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { 
           ...ev, 
           title: eventTitle, 
@@ -1473,14 +1707,6 @@ export default function CalendarView({}: CalendarViewProps) {
           finalStartLocal = adjustedStart;
           finalEndLocal = new Date(adjustedStart.getTime() + duration);
           
-          // Debug solo si hay cambio de fecha
-          if (finalStartLocal.getTime() !== baseStartLocal.getTime()) {
-            console.log('🔧 AJUSTANDO FECHA PARA EVENTO RECURRENTE:', {
-              original: baseStartLocal.toISOString(),
-              adjusted: finalStartLocal.toISOString(),
-              rule: recurrenceRule
-            });
-          }
         }
         // Obtener calendar_id válido
         const calJson = await apiGetCalendars();
@@ -1502,6 +1728,20 @@ export default function CalendarView({}: CalendarViewProps) {
           if (recurrenceConfig.mode === 'monthly' && recurrenceConfig.monthDays.length > 0) {
             recurrenceRule.byMonthDays = recurrenceConfig.monthDays;
           }
+          
+          // 🔥 DEBUG: Verificar que se está creando la regla de recurrencia
+          console.log('🎯 DEBUG RECURRENCIA - Creando evento con recurrencia:', {
+            enabled: recurrenceConfig.enabled,
+            mode: recurrenceConfig.mode,
+            interval: recurrenceConfig.interval,
+            weekDays: recurrenceConfig.weekDays,
+            monthDays: recurrenceConfig.monthDays,
+            hasEndDate: recurrenceConfig.hasEndDate,
+            endDate: recurrenceConfig.endDate,
+            recurrenceRule: recurrenceRule
+          });
+        } else {
+          console.log('🎯 DEBUG RECURRENCIA - Creando evento SIN recurrencia');
         }
 
         const payload = {
@@ -1516,16 +1756,19 @@ export default function CalendarView({}: CalendarViewProps) {
           recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null,
         };
         
-        console.log('📤 Enviando evento al API:', {
-          title: payload.title,
-          start_utc: payload.start_utc,
-          is_recurring: payload.is_recurring,
-          recurrence_rule: payload.recurrence_rule
-        });
         const res = await apiPostEvent(payload);
         const createdEvent = await res.json();
         
         if (res.ok && createdEvent?.data?.id) {
+          // 🔥 DEBUG: Verificar que el evento se creó correctamente con recurrencia
+          console.log('🎯 DEBUG RECURRENCIA - Evento creado exitosamente:', {
+            eventId: createdEvent.data.id,
+            title: eventTitle,
+            isRecurring: recurrenceConfig.enabled,
+            recurrenceRule: recurrenceRule,
+            payload: payload
+          });
+          
           if (recurrenceConfig.enabled) {
             // Para eventos recurrentes, solo refrescar desde el servidor
             await refreshEvents();
@@ -1548,11 +1791,9 @@ export default function CalendarView({}: CalendarViewProps) {
             setEvents(prev => [...prev.filter(e => e.id !== localId), finalEvent]);
           }
         } else {
-          console.log('POST event failed:', res.status, createdEvent);
           Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
         }
       } catch (e) {
-        console.log('POST event error:', (e as any)?.message || e);
         Alert.alert('Aviso', 'No se pudo crear el evento en el servidor.');
       }
 
@@ -1664,54 +1905,225 @@ export default function CalendarView({}: CalendarViewProps) {
     const endLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime + newDuration);
 
     try {
-        console.log(`PATCH attempt eventId: ${eventId} start: ${startLocal.toISOString()} end: ${endLocal.toISOString()}`);
-        const res = await apiPutEventTimes(eventId, startLocal.toISOString(), endLocal.toISOString());
-        console.log('Resize PATCH status:', res.status);
+        // 🔍 DETECTAR SI ES INSTANCIA GENERADA DE SERIE RECURRENTE
+        const match = String(eventToUpdate.id).match(/^(\d+)_(\d{4}-\d{2}-\d{2})$/);
+        const isGeneratedInstance = !!match;
 
-        if (res.status === 404) {
-            // FALLBACK: El evento no existía en el servidor, lo creamos
-            console.log('Fallback: Event not found, creating it...');
+        if (isGeneratedInstance) {
+            // 📝 CREAR OVERRIDE PARA INSTANCIA GENERADA
+            
+            const seriesId = parseInt(match[1], 10);
+            
+            // Calcular original_start_utc usando zona horaria de la serie
+            // Por ahora usar zona horaria por defecto hasta obtener la serie
+            const seriesTimezone = DEFAULT_TIMEZONE;
+            const originalDate = eventToUpdate.date; // YYYY-MM-DD
+            const originalHour = Math.floor(eventToUpdate.startTime / 60);
+            const originalMinute = eventToUpdate.startTime % 60;
+            
+            // Crear fecha en zona horaria local y convertir a UTC
+            const originalLocalDate = new Date(`${originalDate}T${originalHour.toString().padStart(2, '0')}:${originalMinute.toString().padStart(2, '0')}:00`);
+            // Ajustar por zona horaria (America/Sao_Paulo es UTC-3)
+            const timezoneOffset = -3 * 60; // UTC-3 en minutos
+            const originalStartUtc = new Date(originalLocalDate.getTime() - (timezoneOffset * 60 * 1000)).toISOString();
+            
+
+            // Obtener calendar_id
             const calJson = await apiGetCalendars();
             const calendarId = calJson?.data?.[0]?.id;
             if (!calendarId) throw new Error('No calendars available');
 
-            const payload = {
+            // Crear payload para override
+            const overridePayload = {
                 calendar_id: calendarId,
                 title: eventToUpdate.title,
                 description: eventToUpdate.description,
                 start_utc: startLocal.toISOString(),
                 end_utc: endLocal.toISOString(),
                 color: eventToUpdate.color,
+                location: eventToUpdate.location || null,
+                is_recurring: false, // Override no es recurrente
+                series_id: seriesId,
+                original_start_utc: originalStartUtc
             };
-            const createRes = await apiPostEvent(payload);
+
+            const createRes = await apiPostEvent(overridePayload);
             const body = await createRes.json();
 
             if (createRes.ok && body?.data?.id) {
-                const serverId = String(body.data.id);
-                console.log(`Fallback POST created event id: ${serverId}, replacing old id: ${eventId}`);
+                const overrideId = String(body.data.id);
 
-                // Reemplazamos el ID temporal por el ID del servidor EN el evento que ya habíamos actualizado
-                setEvents(prev => prev.map(e => (e.id === eventId ? { ...e, id: serverId } : e)));
-
-                // Reintentamos el guardado de la hora correcta con el nuevo ID
-                const retryRes = await apiPutEventTimes(serverId, startLocal.toISOString(), endLocal.toISOString());
-                console.log('Re-try PUT after create status:', retryRes.status);
-                if (!retryRes.ok) throw new Error('Failed to update after fallback create');
+                // Reemplazar la instancia temporal con el override del servidor
+                setEvents(prev => prev.map(e => 
+                    e.id === eventId 
+                        ? { ...e, id: overrideId, is_recurring: false } // Marcar como no recurrente
+                        : e
+                ));
             } else {
-                throw new Error('Fallback POST failed');
+                throw new Error(`Override creation failed: ${JSON.stringify(body)}`);
             }
-        } else if (!res.ok) {
-            throw new Error(`API error: ${res.status}`);
+        } else {
+            // 🔄 FLUJO NORMAL: Evento existente en servidor
+            const res = await apiPutEventTimes(eventId, startLocal.toISOString(), endLocal.toISOString());
+
+            if (res.status === 404) {
+                // FALLBACK: El evento no existía en el servidor, lo creamos
+                const calJson = await apiGetCalendars();
+                const calendarId = calJson?.data?.[0]?.id;
+                if (!calendarId) throw new Error('No calendars available');
+
+                const payload = {
+                    calendar_id: calendarId,
+                    title: eventToUpdate.title,
+                    description: eventToUpdate.description,
+                    start_utc: startLocal.toISOString(),
+                    end_utc: endLocal.toISOString(),
+                    color: eventToUpdate.color,
+                };
+                const createRes = await apiPostEvent(payload);
+                const body = await createRes.json();
+
+                if (createRes.ok && body?.data?.id) {
+                    const serverId = String(body.data.id);
+
+                    // Reemplazamos el ID temporal por el ID del servidor EN el evento que ya habíamos actualizado
+                    setEvents(prev => prev.map(e => (e.id === eventId ? { ...e, id: serverId } : e)));
+
+                    // Reintentamos el guardado de la hora correcta con el nuevo ID
+                    const retryRes = await apiPutEventTimes(serverId, startLocal.toISOString(), endLocal.toISOString());
+                    if (!retryRes.ok) throw new Error('Failed to update after fallback create');
+                } else {
+                    throw new Error('Fallback POST failed');
+                }
+            } else if (!res.ok) {
+                throw new Error(`API error: ${res.status}`);
+            }
         }
     } catch (e) {
-        console.log('Error during resize commit:', (e as Error).message);
         Alert.alert('Error', 'No se pudo guardar el cambio. Reintentando...');
         // Revertimos al estado original del bloque antes del estiramiento
         setEvents(prev => prev.map(ev => ev.id === eventId ? eventToUpdate : ev));
     } finally {
         resizeLockRef.current.delete(eventId);
     }
-}, []); // <-- La dependencia vacía [] es clave, ahora no sufre de "estado obsoleto"
+  }, []); // <-- La dependencia vacía [] es clave, ahora no sufre de "estado obsoleto"
+
+  // Callback para abrir modal al hacer click rápido en evento
+  const onQuickPress = useCallback((event: Event) => {
+    setSelectedEvent(event);
+    setEventTitle(event.title);
+    setEventDescription(event.description || '');
+    setEventColor(event.color);
+    setRecurrenceConfig(extractRecurrenceFromEvent(event));
+    setModalVisible(true);
+  }, []);
+
+  // Callback de commit desde bloque movible
+  const onMoveCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDate: string) => {
+    const eventId = eventToUpdate.id;
+
+
+    // Actualización optimista de la UI
+    setEvents(prev => prev.map(ev => 
+      ev.id === eventId 
+        ? { ...ev, startTime: newStartTime, date: newDate }
+        : ev
+    ));
+
+    // Calcular nuevos timestamps UTC
+    const startLocal = dateKeyToLocalDate(newDate, newStartTime);
+    const endLocal = dateKeyToLocalDate(newDate, newStartTime + eventToUpdate.duration);
+
+    try {
+      // Detectar si es instancia generada
+      const match = String(eventToUpdate.id).match(/^(\d+)_(\d{4}-\d{2}-\d{2})$/);
+      const isGeneratedInstance = !!match;
+
+      if (isGeneratedInstance) {
+        // Crear override para instancia generada
+        
+        const seriesId = parseInt(match[1], 10);
+        
+        // Calcular original_start_utc usando zona horaria correcta
+        const originalDate = eventToUpdate.date; // YYYY-MM-DD
+        const originalHour = Math.floor(eventToUpdate.startTime / 60);
+        const originalMinute = eventToUpdate.startTime % 60;
+        
+        // Crear fecha en zona horaria local y convertir a UTC
+        const originalLocalDate = new Date(`${originalDate}T${originalHour.toString().padStart(2, '0')}:${originalMinute.toString().padStart(2, '0')}:00`);
+        // Ajustar por zona horaria (America/Sao_Paulo es UTC-3)
+        const timezoneOffset = -3 * 60; // UTC-3 en minutos
+        const originalStartUtc = new Date(originalLocalDate.getTime() - (timezoneOffset * 60 * 1000)).toISOString();
+        
+        
+        const calJson = await apiGetCalendars();
+        const calendarId = calJson?.data?.[0]?.id;
+        if (!calendarId) throw new Error('No calendars available');
+
+        const overridePayload = {
+          calendar_id: calendarId,
+          title: eventToUpdate.title,
+          description: eventToUpdate.description,
+          start_utc: startLocal.toISOString(),
+          end_utc: endLocal.toISOString(),
+          color: eventToUpdate.color,
+          location: eventToUpdate.location || null,
+          is_recurring: false,
+          series_id: seriesId,
+          original_start_utc: originalStartUtc
+        };
+
+        const createRes = await apiPostEvent(overridePayload);
+        const body = await createRes.json();
+
+        if (createRes.ok && body?.data?.id) {
+          const overrideId = String(body.data.id);
+          setEvents(prev => prev.map(e => 
+            e.id === eventId 
+              ? { ...e, id: overrideId, is_recurring: false }
+              : e
+          ));
+        } else {
+          throw new Error(`Move override creation failed: ${JSON.stringify(body)}`);
+        }
+      } else {
+        // Evento existente - actualizar directamente
+        const res = await apiPutEventTimes(eventId, startLocal.toISOString(), endLocal.toISOString());
+        
+        if (res.status === 404) {
+          // Fallback: crear nuevo evento
+          const calJson = await apiGetCalendars();
+          const calendarId = calJson?.data?.[0]?.id;
+          if (!calendarId) throw new Error('No calendars available');
+
+          const payload = {
+            calendar_id: calendarId,
+            title: eventToUpdate.title,
+            description: eventToUpdate.description,
+            start_utc: startLocal.toISOString(),
+            end_utc: endLocal.toISOString(),
+            color: eventToUpdate.color,
+          };
+          
+          const createRes = await apiPostEvent(payload);
+          const body = await createRes.json();
+
+          if (createRes.ok && body?.data?.id) {
+            const serverId = String(body.data.id);
+            setEvents(prev => prev.map(e => (e.id === eventId ? { ...e, id: serverId } : e)));
+          } else {
+            throw new Error('Fallback POST failed');
+          }
+        } else if (!res.ok) {
+          throw new Error(`API error: ${res.status}`);
+        }
+      }
+    } catch (e) {
+      Alert.alert('Error', 'No se pudo mover el evento. Reintentando...');
+      // Revertir cambios
+      setEvents(prev => prev.map(ev => ev.id === eventId ? eventToUpdate : ev));
+    }
+  }, []);
 
   // Renderizado principal
   return (
@@ -1838,7 +2250,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 </View>
                 <TouchableOpacity style={[styles.cell, { width: getCellWidth() }]} onPress={() => handleCellPress(0, timeIndex)}>
                 {event && (
-                    <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} />
+                    <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} />
                 )}
                 </TouchableOpacity>
               </View>
@@ -1901,7 +2313,7 @@ export default function CalendarView({}: CalendarViewProps) {
                             onPress={() => handleCellPress(dayIndex, timeIndex)}
                           >
                             {event && (
-                                <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} />
+                                <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} />
                             )}
                           </TouchableOpacity>
                         );
@@ -1924,7 +2336,7 @@ export default function CalendarView({}: CalendarViewProps) {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.createButton} onPress={handleSaveEvent}>
-              <Text style={styles.createButtonText}>Crear</Text>
+              <Text style={styles.createButtonText}>{selectedEvent ? 'Editar' : 'Crear'}</Text>
             </TouchableOpacity>
           </View>
 

@@ -69,6 +69,8 @@ class EventController extends Controller
             'is_recurring' => 'boolean',
             'recurrence_rule' => 'nullable|string',
             'recurrence_end_date' => 'nullable|date|after_or_equal:start_utc',
+            'series_id' => 'nullable|exists:events,id',
+            'original_start_utc' => 'nullable|date',
             'alarms' => 'nullable|array',
             'alarms.*.trigger_minutes_before' => 'required_with:alarms|integer|min:1',
             'alarms.*.method' => 'required_with:alarms|in:local,push,email',
@@ -86,6 +88,17 @@ class EventController extends Controller
         try {
             DB::beginTransaction();
 
+            // Log para debugging de overrides
+            if ($request->series_id && $request->original_start_utc) {
+                \Log::info('🎯 Creating override for series', [
+                    'series_id' => $request->series_id,
+                    'original_start_utc' => $request->original_start_utc,
+                    'new_start_utc' => $request->start_utc,
+                    'new_end_utc' => $request->end_utc,
+                    'title' => $request->title
+                ]);
+            }
+
             $event = Event::create([
                 'uuid' => Str::uuid(),
                 'calendar_id' => $request->calendar_id,
@@ -102,6 +115,8 @@ class EventController extends Controller
                 'is_recurring' => $request->is_recurring ?? false,
                 'recurrence_rule' => $request->recurrence_rule,
                 'recurrence_end_date' => $request->recurrence_end_date,
+                'series_id' => $request->series_id,
+                'original_start_utc' => $request->original_start_utc,
                 'version' => 1,
             ]);
 
@@ -117,6 +132,16 @@ class EventController extends Controller
             }
 
             DB::commit();
+
+            // Log de confirmación para overrides
+            if ($request->series_id && $request->original_start_utc) {
+                \Log::info('✅ Override created successfully', [
+                    'override_id' => $event->id,
+                    'series_id' => $event->series_id,
+                    'original_start_utc' => $event->original_start_utc,
+                    'new_start_utc' => $event->start_utc
+                ]);
+            }
 
             return response()->json([
                 'success' => true,
