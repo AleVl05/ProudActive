@@ -233,7 +233,7 @@ CREATE TABLE calendars (
 -- Eventos del calendario (serie master o evento único)
 -- 
 -- NOTA: Campos simples (título, descripción, fecha/hora, color) se actualizan directamente.
--- Campos complejos (recurrencia, series_id, etc.) requieren crear nuevo evento.
+-- Campos complejos (recurrencia, series_id, etc.) eliminan el evento y crean uno nuevo.
 -- =============================================
 CREATE TABLE events (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

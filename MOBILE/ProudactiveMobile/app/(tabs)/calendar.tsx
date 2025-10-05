@@ -138,7 +138,6 @@ const extractRecurrenceFromEvent = (event: any): RecurrenceConfig => {
 
     return config;
   } catch (error) {
-    console.warn('Error parsing recurrence rule:', error);
     return createDefaultRecurrenceConfig();
   }
 };
@@ -255,7 +254,6 @@ const generateRecurrentInstances = (
           recurrenceEndDate = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
         }
       } catch (error) {
-        console.warn('Error parsing recurrence_end_date:', error);
       }
     }
 
@@ -375,7 +373,6 @@ const generateRecurrentInstances = (
     
     return instances;
   } catch (error) {
-    console.error('Error generating recurrent instances:', error);
     return [];
   }
 };
@@ -1176,37 +1173,27 @@ export default function CalendarView({}: CalendarViewProps) {
   // Función para refrescar eventos después de crear/editar
   const refreshEvents = useCallback(async () => {
     try {
-      console.log('🎯 DEBUG RECURRENCIA - Refrescando eventos...');
       const rangeStart = new Date(currentDate);
       rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás
       const rangeEnd = new Date(currentDate);
       rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
       
-      console.log('🎯 DEBUG RECURRENCIA - Rango de fechas consultado:', {
-        rangeStart: rangeStart.toISOString(),
-        rangeEnd: rangeEnd.toISOString(),
-        currentDate: currentDate.toISOString()
-      });
       
       const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
       if (fetched) {
-        console.log('🎯 DEBUG RECURRENCIA - Eventos refrescados:', fetched.length);
         // Reemplazar completamente los eventos para evitar duplicados
         setEvents(fetched);
       }
     } catch (error) {
-      console.error('Error al refrescar eventos:', error);
     }
   }, [currentDate]);
 
   // Función para eliminar un evento único
   const handleDeleteSingleEvent = useCallback(async (eventId: string) => {
     try {
-      console.log(`🎯 DEBUG BORRAR - Eliminando evento único ID: ${eventId}`);
       const deleteRes = await apiDeleteEvent(String(eventId));
       
       if (deleteRes.ok) {
-        console.log(`🎯 DEBUG BORRAR - ✅ Evento único ${eventId} eliminado exitosamente`);
         
         // Cerrar todos los modales inmediatamente
         setModalVisible(false);
@@ -1219,24 +1206,14 @@ export default function CalendarView({}: CalendarViewProps) {
         // Refrescar eventos para actualizar la interfaz
         await refreshEvents();
       } else {
-        console.log(`🎯 DEBUG BORRAR - ❌ Error al eliminar evento único ${eventId}:`, deleteRes.status);
       }
     } catch (error) {
-      console.log('🎯 DEBUG BORRAR - ❌ Error durante la eliminación del evento único:', error);
     }
   }, [refreshEvents]);
 
   const handleDeleteEvent = useCallback(() => {
     if (!selectedEvent) return;
     
-    // 🔥 DEBUG SIMPLE: Solo lo esencial para debugging
-    console.log('🎯 BORRAR EVENTO:', {
-      id: selectedEvent.id,
-      title: selectedEvent.title,
-      is_recurring: 'is_recurring' in selectedEvent ? selectedEvent.is_recurring : 'NO',
-      series_id: 'series_id' in selectedEvent ? selectedEvent.series_id : 'NO',
-      original_start_utc: 'original_start_utc' in selectedEvent ? selectedEvent.original_start_utc : 'NO'
-    });
     
     // Verificar si es un evento con campos de recurrencia
     const hasRecurrenceFields = 'is_recurring' in selectedEvent;
@@ -1251,22 +1228,12 @@ export default function CalendarView({}: CalendarViewProps) {
     // 🔥 NUEVO: Detectar si es un evento que viene de una serie (tiene is_recurring pero no es el original)
     const isFromSeries = hasRecurrenceFields && selectedEvent.is_recurring && !isGeneratedInstance;
     
-    console.log('🎯 DEBUG BORRAR - Análisis del evento:', {
-      hasRecurrence,
-      belongsToSeries,
-      series_id: hasRecurrenceFields ? selectedEvent.series_id : null,
-      isGeneratedInstance,
-      isFromSeries,
-      eventId: selectedEvent.id
-    });
     
     if (hasRecurrence || belongsToSeries || isGeneratedInstance || isFromSeries) {
       // Evento con recurrencia O que pertenece a una serie - mostrar modal de confirmación
-      console.log('🎯 DEBUG BORRAR - Evento con recurrencia/serie - Mostrando modal de confirmación');
       setDeleteModalVisible(true);
     } else {
       // Evento único independiente - eliminar directamente
-      console.log(`🎯 DEBUG BORRAR - Evento único independiente - Eliminando ID: ${selectedEvent.id}`);
       
       // Implementar eliminación directa
       handleDeleteSingleEvent(selectedEvent.id);
@@ -1282,7 +1249,7 @@ export default function CalendarView({}: CalendarViewProps) {
     
     if (!hasRecurrenceFields) {
       // Evento regular sin recurrencia - eliminar solo este
-      console.log('🎯 DEBUG BORRAR - Evento regular sin recurrencia');
+
       eventsToDelete.push(Number(event.id));
       return eventsToDelete;
     }
@@ -1295,18 +1262,10 @@ export default function CalendarView({}: CalendarViewProps) {
     const isOverride = hasSeriesId && event.series_id !== event.id;
     const isSeriesOriginal = isRecurring && !isOverride;
     
-    console.log('🎯 DEBUG BORRAR - Análisis del evento:', {
-      id: event.id,
-      isRecurring,
-      hasSeriesId,
-      isOverride,
-      isSeriesOriginal,
-      series_id: 'series_id' in event ? event.series_id : null
-    });
     
     if (deleteType === 'single') {
       // Solo eliminar este evento específico
-      console.log('🎯 DEBUG BORRAR - Eliminando solo este evento');
+
       eventsToDelete.push(Number(event.id));
       
     } else if (deleteType === 'series') {
@@ -1314,7 +1273,7 @@ export default function CalendarView({}: CalendarViewProps) {
       if (isOverride && 'series_id' in event) {
         // Es un override - eliminar la serie original y todos sus overrides
         const seriesId = Number(event.series_id);
-        console.log('🎯 DEBUG BORRAR - Es un override, eliminando serie original:', seriesId);
+
         
         // Agregar la serie original
         eventsToDelete.push(seriesId);
@@ -1324,11 +1283,6 @@ export default function CalendarView({}: CalendarViewProps) {
           'series_id' in ev && ev.series_id === seriesId
         );
         
-        console.log('🎯 DEBUG BORRAR - Overrides encontrados:', overrides.map(ov => ({
-          id: ov.id,
-          title: ov.title,
-          series_id: 'series_id' in ov ? ov.series_id : null
-        })));
         
         // Agregar todos los overrides
         overrides.forEach(override => {
@@ -1342,10 +1296,10 @@ export default function CalendarView({}: CalendarViewProps) {
         // Manejar instancias generadas que tienen formato "ID_fecha"
         if (typeof event.id === 'string' && event.id.includes('_')) {
           seriesId = Number(event.id.split('_')[0]);
-          console.log('🎯 DEBUG BORRAR - Es instancia generada, ID real de serie:', seriesId);
+
         } else {
           seriesId = Number(event.id);
-          console.log('🎯 DEBUG BORRAR - Es la serie original, eliminando serie:', seriesId);
+
         }
         
         // Agregar la serie original
@@ -1365,11 +1319,6 @@ export default function CalendarView({}: CalendarViewProps) {
           return false;
         });
         
-        console.log('🎯 DEBUG BORRAR - Overrides encontrados:', overrides.map(ov => ({
-          id: ov.id,
-          title: ov.title,
-          series_id: 'series_id' in ov ? ov.series_id : null
-        })));
         
         // Agregar todos los overrides
         overrides.forEach(override => {
@@ -1384,17 +1333,17 @@ export default function CalendarView({}: CalendarViewProps) {
     
     // Validación adicional: verificar que los eventos existen
     if (uniqueEvents.length === 0) {
-      console.log('🎯 DEBUG BORRAR - ⚠️ No hay eventos válidos para eliminar');
+
       return [];
     }
     
-    console.log('🎯 DEBUG BORRAR - Eventos únicos a eliminar:', uniqueEvents);
+
     return uniqueEvents;
   }, []);
 
   const handleDeleteConfirm = useCallback(async (deleteType: 'single' | 'series') => {
     if (!selectedEvent) {
-      console.log('🎯 DEBUG BORRAR - No hay evento seleccionado');
+
       setDeleteModalVisible(false);
       return;
     }
@@ -1402,27 +1351,27 @@ export default function CalendarView({}: CalendarViewProps) {
     // Analizar qué eventos eliminar basado en la estructura de series
     const eventsToDelete = analyzeEventsToDelete(selectedEvent, deleteType, events);
     
-    console.log(`🎯 DEBUG BORRAR - Eliminando evento ID: ${selectedEvent.id} (${deleteType})`);
-    console.log('🎯 DEBUG BORRAR - Eventos a eliminar:', eventsToDelete);
+
+
     
     if (eventsToDelete.length === 0) {
-      console.log('🎯 DEBUG BORRAR - ⚠️ No hay eventos válidos para eliminar');
+
       setDeleteModalVisible(false);
       return;
     }
     
     try {
       // Eliminar cada evento usando soft delete
-      console.log('🎯 DEBUG BORRAR - Iniciando eliminación de eventos...');
+
       
       for (const eventId of eventsToDelete) {
-        console.log(`🎯 DEBUG BORRAR - Eliminando evento ID: ${eventId}`);
+
         const deleteRes = await apiDeleteEvent(String(eventId));
         
         if (deleteRes.ok) {
-          console.log(`🎯 DEBUG BORRAR - ✅ Evento ${eventId} eliminado exitosamente`);
+
         } else {
-          console.log(`🎯 DEBUG BORRAR - ❌ Error al eliminar evento ${eventId}:`, deleteRes.status);
+
         }
       }
       
@@ -1435,13 +1384,13 @@ export default function CalendarView({}: CalendarViewProps) {
       setSelectedCell(null);
       
       // Refrescar eventos para actualizar la interfaz
-      console.log('🎯 DEBUG BORRAR - Refrescando eventos...');
+
       await refreshEvents();
       
-      console.log('🎯 DEBUG BORRAR - ✅ Eliminación completada');
+
       
     } catch (error) {
-      console.log('🎯 DEBUG BORRAR - ❌ Error durante la eliminación:', error);
+
     }
   }, [selectedEvent, events, analyzeEventsToDelete, refreshEvents]);
 
@@ -1555,36 +1504,12 @@ export default function CalendarView({}: CalendarViewProps) {
 
   const normalizeApiEvent = useCallback((apiEvent: any): Event | null => {
     if (!apiEvent?.id || !apiEvent?.start_utc || !apiEvent?.end_utc) {
-      console.log('🎯 DEBUG RECURRENCIA - normalizeApiEvent falló validación:', {
-        id: apiEvent?.id,
-        start_utc: apiEvent?.start_utc,
-        end_utc: apiEvent?.end_utc,
-        title: apiEvent?.title
-      });
+      
       return null;
     }
 
-    // 🔥 DEBUG: Verificar datos del servidor para eventos con series_id
-    if (apiEvent.series_id || apiEvent.original_start_utc) {
-      console.log('🎯 DEBUG RECURRENCIA - Evento con serie del servidor:', {
-        id: apiEvent.id,
-        series_id: apiEvent.series_id,
-        original_start_utc: apiEvent.original_start_utc,
-        title: apiEvent.title
-      });
-    }
     
-    // 🔥 DEBUG: Verificar TODOS los campos que llegan del servidor
-    console.log('🎯 DEBUG RECURRENCIA - Datos completos del servidor:', {
-      id: apiEvent.id,
-      title: apiEvent.title,
-      series_id: apiEvent.series_id,
-      original_start_utc: apiEvent.original_start_utc,
-      is_recurring: apiEvent.is_recurring,
-      recurrence_rule: apiEvent.recurrence_rule,
-      // Mostrar todos los campos disponibles
-      allFields: Object.keys(apiEvent)
-    });
+
 
     const startDate = new Date(apiEvent.start_utc);
     const endDate = new Date(apiEvent.end_utc);
@@ -1623,21 +1548,12 @@ export default function CalendarView({}: CalendarViewProps) {
       const expandedStart = new Date(rangeStart);
       expandedStart.setMonth(expandedStart.getMonth() - 6); // 6 meses atrás para capturar eventos recurrentes
       
-      console.log('🎯 DEBUG RECURRENCIA - Consultando API:', { 
-        expandedStart: expandedStart.toISOString(), 
-        rangeEnd: rangeEnd.toISOString() 
-      });
       const response = await apiFetchEvents(expandedStart.toISOString(), rangeEnd.toISOString());
       if (!response.ok) {
         return null;
       }
 
       const body = await response.json();
-      console.log('🎯 DEBUG RECURRENCIA - Respuesta del servidor:', { 
-        status: response.status, 
-        totalEvents: body.data?.length || 0,
-        eventIds: body.data?.map((e: any) => ({ id: e.id, title: e.title, series_id: e.series_id })) || []
-      });
       if (!body?.success || !Array.isArray(body.data)) {
         return null;
       }
@@ -1648,25 +1564,18 @@ export default function CalendarView({}: CalendarViewProps) {
       
       // Separar eventos en categorías
       for (const item of body.data) {
-        console.log('🎯 DEBUG RECURRENCIA - Procesando evento:', {
-          id: item.id,
-          title: item.title,
-          series_id: item.series_id,
-          original_start_utc: item.original_start_utc,
-          is_recurring: item.is_recurring
-        });
         
         if (item.series_id && item.original_start_utc) {
           // Es un override
-          console.log('🎯 DEBUG RECURRENCIA - → Clasificado como OVERRIDE');
+
           overrides.push(item);
         } else if (item.is_recurring) {
           // Es una serie recurrente
-          console.log('🎯 DEBUG RECURRENCIA - → Clasificado como SERIE');
+
           series.push(item);
         } else {
           // Evento regular
-          console.log('🎯 DEBUG RECURRENCIA - → Clasificado como REGULAR');
+
           const normalizedEvent = normalizeApiEvent(item);
           if (normalizedEvent) {
             allEvents.push(normalizedEvent);
@@ -1690,42 +1599,25 @@ export default function CalendarView({}: CalendarViewProps) {
       }
 
       // 🔥 NUEVO: Procesar overrides independientes (sin serie recurrente activa)
-      console.log('🎯 DEBUG RECURRENCIA - Procesando overrides independientes:', overrides.length);
+
       for (const override of overrides) {
         // Verificar si el override tiene una serie recurrente activa
         const hasActiveSeries = series.some(s => s.id === override.series_id);
         
         if (!hasActiveSeries) {
           // Override independiente - procesar como evento regular
-          console.log('🎯 DEBUG RECURRENCIA - Override independiente encontrado:', {
-            id: override.id,
-            title: override.title,
-            series_id: override.series_id
-          });
           
           const normalizedOverride = normalizeApiEvent(override);
           if (normalizedOverride) {
-            console.log('🎯 DEBUG RECURRENCIA - Override normalizado:', {
-              id: normalizedOverride.id,
-              title: normalizedOverride.title,
-              series_id: normalizedOverride.series_id,
-              original_start_utc: normalizedOverride.original_start_utc
-            });
             allEvents.push(normalizedOverride);
           } else {
-            console.log('🎯 DEBUG RECURRENCIA - Override NO se pudo normalizar:', {
-              id: override.id,
-              title: override.title,
-              start_utc: override.start_utc,
-              end_utc: override.end_utc
-            });
           }
         }
       }
 
       return allEvents;
     } catch (error) {
-      console.log('GET events error:', (error as Error).message);
+
       return null;
     }
   }, [normalizeApiEvent]);
@@ -1874,16 +1766,6 @@ export default function CalendarView({}: CalendarViewProps) {
     const tempId = selectedEvent?.id; 
     const isNewEvent = !selectedEvent;
 
-    // 🔥 DEBUG: Verificar campos del evento para detectar serie
-    if (!isNewEvent && selectedEvent && 'startTime' in selectedEvent) {
-      console.log('🎯 DEBUG RECURRENCIA - Campos del evento:', {
-        id: selectedEvent.id,
-        series_id: selectedEvent.series_id,
-        original_start_utc: selectedEvent.original_start_utc,
-        hasStartTime: 'startTime' in selectedEvent,
-        recurrenceEnabled: recurrenceConfig.enabled
-      });
-    }
 
     // 🔥 NUEVA LÓGICA: Detectar si estamos editando recurrencia en un evento que viene de una serie
     // NOTA: Un evento liberado (sin series_id local) que se le aplica recurrencia debe crear nueva serie independiente
@@ -1895,19 +1777,7 @@ export default function CalendarView({}: CalendarViewProps) {
 
 
     if (isEditingRecurrenceOnSeriesEvent) {
-      // 🔥 DEBUG: Verificar que se está liberando un evento de serie
-      console.log('🎯 DEBUG RECURRENCIA - Liberando evento de serie:', {
-        originalEventId: selectedEvent.id,
-        seriesId: selectedEvent.series_id,
-        originalStartUtc: selectedEvent.original_start_utc,
-        enabled: recurrenceConfig.enabled,
-        mode: recurrenceConfig.mode,
-        interval: recurrenceConfig.interval,
-        weekDays: recurrenceConfig.weekDays,
-        monthDays: recurrenceConfig.monthDays,
-        hasEndDate: recurrenceConfig.hasEndDate,
-        endDate: recurrenceConfig.endDate
-      });
+      
       
       try {
         // 1. Crear nuevo evento recurrente independiente
@@ -1939,15 +1809,7 @@ export default function CalendarView({}: CalendarViewProps) {
         const postRes = await apiPostEvent(payload);
         const created = await postRes.json();
 
-        if (postRes.ok && created?.data?.id) {
-          // 🔥 DEBUG: Verificar que la nueva serie se creó correctamente
-          console.log('🎯 DEBUG RECURRENCIA - Nueva serie creada exitosamente:', {
-            newEventId: created.data.id,
-            title: eventTitle,
-            isRecurring: true,
-            recurrenceRule: recurrenceRule,
-            originalEventId: selectedEvent.id
-          });
+        if (postRes.ok && created?.data?.id) {      
           
           // 2. Eliminar el evento original que venía de la serie
           await apiDeleteEvent(String(selectedEvent.id));
@@ -1981,7 +1843,7 @@ export default function CalendarView({}: CalendarViewProps) {
           !selectedEvent.series_id && 
           !selectedEvent.original_start_utc) {
         
-        console.log('🎯 DEBUG RECURRENCIA - Evento liberado editado - Creando serie independiente');
+
         
         try {
           // 1. Crear nuevo evento (con o sin recurrencia)
@@ -2017,7 +1879,7 @@ export default function CalendarView({}: CalendarViewProps) {
           const created = await postRes.json();
 
           if (postRes.ok && created?.data?.id) {
-            console.log('🎯 DEBUG RECURRENCIA - Evento liberado convertido a serie independiente:', created.data.id);
+
             
             // 2. Eliminar el evento liberado original
             await apiDeleteEvent(String(selectedEvent.id));
@@ -2039,7 +1901,7 @@ export default function CalendarView({}: CalendarViewProps) {
             throw new Error('No se pudo crear la nueva serie independiente');
           }
         } catch (error) {
-          console.log('🎯 DEBUG RECURRENCIA - Error al crear serie independiente:', error);
+
           Alert.alert('Error', 'No se pudo crear la nueva serie independiente');
           return;
         }
@@ -2047,12 +1909,6 @@ export default function CalendarView({}: CalendarViewProps) {
       
       // Lógica para actualizar un evento existente
       if ('startTime' in selectedEvent) {
-        // 🔥 DEBUG: Verificar que se está actualizando la recurrencia
-        console.log('🎯 DEBUG RECURRENCIA - Actualizando evento existente:', {
-          eventId: selectedEvent.id,
-          enabled: recurrenceConfig.enabled,
-          mode: recurrenceConfig.mode
-        });
         
         // Actualizar localmente primero
         setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { 
@@ -2103,18 +1959,18 @@ export default function CalendarView({}: CalendarViewProps) {
             recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null,
           };
           
-          console.log('🎯 DEBUG RECURRENCIA - Enviando actualización al servidor:', updatePayload);
+
           
           const updateRes = await apiPutEvent(String(selectedEvent.id), updatePayload);
           if (updateRes.ok) {
-            console.log('🎯 DEBUG RECURRENCIA - Evento actualizado exitosamente en servidor');
+
             await refreshEvents(); // Refrescar para sincronizar
-            console.log('🎯 DEBUG RECURRENCIA - Interfaz refrescada');
+
           } else {
-            console.log('🎯 DEBUG RECURRENCIA - Error al actualizar en servidor');
+
           }
         } catch (error) {
-          console.log('🎯 DEBUG RECURRENCIA - Error al actualizar:', error);
+
         }
       } else {
         setMonthEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
@@ -2201,19 +2057,8 @@ export default function CalendarView({}: CalendarViewProps) {
             recurrenceRule.byMonthDays = recurrenceConfig.monthDays;
           }
           
-          // 🔥 DEBUG: Verificar que se está creando la regla de recurrencia
-          console.log('🎯 DEBUG RECURRENCIA - Creando evento con recurrencia:', {
-            enabled: recurrenceConfig.enabled,
-            mode: recurrenceConfig.mode,
-            interval: recurrenceConfig.interval,
-            weekDays: recurrenceConfig.weekDays,
-            monthDays: recurrenceConfig.monthDays,
-            hasEndDate: recurrenceConfig.hasEndDate,
-            endDate: recurrenceConfig.endDate,
-            recurrenceRule: recurrenceRule
-          });
         } else {
-          console.log('🎯 DEBUG RECURRENCIA - Creando evento SIN recurrencia');
+
         }
 
         const payload = {
@@ -2232,14 +2077,6 @@ export default function CalendarView({}: CalendarViewProps) {
         const createdEvent = await res.json();
         
         if (res.ok && createdEvent?.data?.id) {
-          // 🔥 DEBUG: Verificar que el evento se creó correctamente con recurrencia
-          console.log('🎯 DEBUG RECURRENCIA - Evento creado exitosamente:', {
-            eventId: createdEvent.data.id,
-            title: eventTitle,
-            isRecurring: recurrenceConfig.enabled,
-            recurrenceRule: recurrenceRule,
-            payload: payload
-          });
           
           if (recurrenceConfig.enabled) {
             // Para eventos recurrentes, solo refrescar desde el servidor
