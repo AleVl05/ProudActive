@@ -285,3 +285,195 @@ if (uniqueEvents.length === 0) {
 - **Sin crashes**: La app no se crashea al intentar eliminar series inexistentes
 - **IDs correctos**: Se extraen correctamente los IDs reales de las instancias
 - **Validación robusta**: Se filtran todos los valores inválidos antes de proceder
+
+## ⚠️ **IMPLEMENTACIÓN DE ELIMINACIÓN - REVERTIDA POR CONFLICTO**
+
+### **Problema Identificado:**
+La implementación de eliminación funcionó perfectamente, pero **rompió la funcionalidad de movimiento de eventos recurrentes**. El conflicto ocurrió porque se cambió el formato de IDs de instancias generadas sin actualizar toda la lógica relacionada.
+
+### **🔧 Funcionalidad de Eliminación Implementada (FUNCIONABA):**
+
+#### **1. Logging y Detección de Eventos:**
+```typescript
+// Función para analizar qué eventos eliminar
+const analyzeEventsToDelete = useCallback((event: Event | MonthEvent, deleteType: 'single' | 'series', allEvents: Event[]): number[] => {
+  const eventsToDelete: number[] = [];
+  
+  // Clasificación correcta de eventos
+  const isRecurring = 'is_recurring' in event && event.is_recurring;
+  const hasSeriesId = 'series_id' in event && event.series_id;
+  const isOverride = hasSeriesId && event.series_id !== event.id;
+  const isSeriesOriginal = isRecurring && !isOverride;
+  
+  // Lógica de eliminación basada en tipo
+  if (deleteType === 'single') {
+    eventsToDelete.push(Number(event.id));
+  } else if (deleteType === 'series') {
+    if (isOverride) {
+      // Eliminar serie original + todos sus overrides
+      eventsToDelete.push(Number(event.series_id));
+      // Buscar y agregar todos los overrides
+    } else if (isSeriesOriginal) {
+      // Eliminar serie + todos sus overrides
+      eventsToDelete.push(Number(event.id));
+      // Buscar y agregar todos los overrides
+    }
+  }
+  
+  return eventsToDelete;
+}, []);
+```
+
+#### **2. Eliminación de Eventos Únicos:**
+```typescript
+const handleDeleteSingleEvent = useCallback(async (eventId: string) => {
+  try {
+    const deleteRes = await apiDeleteEvent(String(eventId));
+    if (deleteRes.ok) {
+      // Cerrar modales automáticamente
+      setModalVisible(false);
+      setDeleteModalVisible(false);
+      // Limpiar estados
+      setSelectedEvent(null);
+      // Refrescar interfaz
+      await refreshEvents();
+    }
+  } catch (error) {
+    console.log('Error durante eliminación:', error);
+  }
+}, [refreshEvents]);
+```
+
+#### **3. Eliminación de Series Completas:**
+```typescript
+const handleDeleteConfirm = useCallback(async (deleteType: 'single' | 'series') => {
+  const eventsToDelete = analyzeEventsToDelete(selectedEvent, deleteType, events);
+  
+  try {
+    // Eliminar cada evento usando soft delete
+    for (const eventId of eventsToDelete) {
+      const deleteRes = await apiDeleteEvent(String(eventId));
+      if (deleteRes.ok) {
+        console.log(`✅ Evento ${eventId} eliminado exitosamente`);
+      }
+    }
+    
+    // Cerrar modales y refrescar
+    setModalVisible(false);
+    setDeleteModalVisible(false);
+    await refreshEvents();
+  } catch (error) {
+    console.log('Error durante eliminación:', error);
+  }
+}, [selectedEvent, events, refreshEvents]);
+```
+
+### **🚨 CONFLICTO IDENTIFICADO - MOVIMIENTO DE EVENTOS:**
+
+#### **Problema Raíz:**
+Cuando se cambió el formato de IDs de instancias generadas de `"205_2025-09-30"` a `"205"`, **NO se actualizó la función `onMoveCommit`** que maneja el movimiento de eventos.
+
+#### **Código Roto:**
+```typescript
+// En onMoveCommit (línea ~2524):
+const match = String(eventToUpdate.id).match(/^(\d+)_(\d{4}-\d{2}-\d{2})$/);
+const isGeneratedInstance = !!match; // ❌ SIEMPRE FALSE
+
+if (isGeneratedInstance) {
+  // Crear override para instancia generada
+  const seriesId = parseInt(match[1], 10); // ❌ match[1] undefined
+}
+```
+
+#### **Corrección Necesaria:**
+```typescript
+// CORRECCIÓN APLICADA:
+const isGeneratedInstance = eventToUpdate.is_recurring === true;
+const seriesId = parseInt(String(eventToUpdate.id), 10);
+```
+
+### **📋 PARA EL PRÓXIMO DESARROLLADOR:**
+
+#### **✅ Lo que SÍ funciona (mantener):**
+1. **Sistema de soft delete**: Laravel ya está configurado con `SoftDeletes`
+2. **API endpoints**: `apiDeleteEvent()` funciona correctamente
+3. **Lógica de clasificación**: `analyzeEventsToDelete()` es correcta
+4. **Cierre automático de modales**: Funciona perfectamente
+
+#### **⚠️ Lo que hay que tener cuidado:**
+1. **NO cambiar formato de IDs** de instancias generadas sin actualizar `onMoveCommit`
+2. **NO mover funciones grandes** como `fetchEventsForRange` o `refreshEvents`
+3. **Mantener dependencias correctas** en `useCallback`
+
+#### **🔧 Pasos para re-implementar eliminación:**
+1. **Agregar solo las funciones nuevas** sin mover las existentes
+2. **Mantener `refreshEvents` donde está** (después de `fetchEventsForRange`)
+3. **Verificar que `onMoveCommit` funcione** antes de implementar eliminación
+4. **Probar movimiento de eventos recurrentes** después de cada cambio
+
+#### **🎯 Funciones que se pueden agregar sin problemas:**
+- `handleDeleteSingleEvent`
+- `handleDeleteConfirm` (versión async)
+- `analyzeEventsToDelete`
+- Logging de eliminación
+
+#### **🚫 Funciones que NO tocar:**
+- `onMoveCommit` (línea ~2507)
+- `fetchEventsForRange` (línea ~1596)
+- `refreshEvents` (línea ~1708)
+- Lógica de generación de instancias en `generateRecurrentInstances`
+
+### **💡 Lección Aprendida:**
+**Siempre verificar que el movimiento de eventos recurrentes funcione después de cualquier cambio en la generación de instancias o IDs.** La funcionalidad de movimiento es crítica y debe probarse en cada modificación.
+
+## ✅ **SISTEMA DE ELIMINACIÓN DE EVENTOS - COMPLETAMENTE FUNCIONAL**
+
+### **Problema Resuelto:**
+- **Modal de confirmación**: Ahora aparece correctamente para eventos de serie e instancias generadas
+- **Eliminación completa**: "Toda la secuencia" elimina serie madre + todos los hijos + todas las instancias generadas
+- **Detección correcta**: Las instancias generadas (formato `"ID_fecha"`) se detectan correctamente
+
+### **Soluciones Implementadas:**
+
+#### **1. Detección de Instancias Generadas:**
+```typescript
+// En handleDeleteEvent
+const isGeneratedInstance = typeof selectedEvent.id === 'string' && selectedEvent.id.includes('_');
+const isFromSeries = hasRecurrenceFields && selectedEvent.is_recurring && !isGeneratedInstance;
+
+if (hasRecurrence || belongsToSeries || isGeneratedInstance || isFromSeries) {
+  setDeleteModalVisible(true); // Mostrar modal de confirmación
+}
+```
+
+#### **2. Series ID en Instancias Generadas:**
+```typescript
+// En generateRecurrentInstances
+const instance: Event = {
+  id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
+  // ... otros campos
+  series_id: masterEvent.id, // 🔥 NUEVO: Agregar series_id
+  original_start_utc: masterEvent.start_utc,
+};
+```
+
+#### **3. Eliminación Completa de Series:**
+```typescript
+// En analyzeEventsToDelete - Buscar todos los overrides (incluyendo instancias generadas)
+const overrides = allEvents.filter(ev => {
+  // Overrides reales con series_id
+  if ('series_id' in ev && ev.series_id === seriesId) return true;
+  // Instancias generadas con formato "ID_fecha"
+  if (typeof ev.id === 'string' && ev.id.includes('_')) {
+    const instanceSeriesId = Number(ev.id.split('_')[0]);
+    return instanceSeriesId === seriesId;
+  }
+  return false;
+});
+```
+
+### **Estado: ✅ COMPLETAMENTE FUNCIONAL**
+- **Modal de confirmación**: Aparece para eventos de serie e instancias generadas
+- **Eliminación individual**: Funciona para eventos únicos
+- **Eliminación de serie completa**: Elimina serie madre + todos los hijos + todas las instancias
+- **Sin conflictos**: No afecta el movimiento de eventos recurrentes
