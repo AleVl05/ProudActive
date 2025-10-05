@@ -166,6 +166,88 @@ const totalStartMinutes = startDate.getUTCHours() * 60 + startDate.getUTCMinutes
 - **Limpieza automática**: El evento liberado original se elimina automáticamente
 - **Resultado**: ✅ **FUNCIONA PERFECTAMENTE** - Se crean series independientes correctamente
 
+## ✅ **SISTEMA DE CLASIFICACIÓN DE EVENTOS - DESCUBIERTO**
+
+### Arquitectura de Eventos:
+El sistema clasifica automáticamente los eventos en **3 categorías**:
+
+1. **REGULAR** (`allEvents`):
+   - Eventos únicos sin recurrencia
+   - Sin `series_id` ni `original_start_utc`
+   - Se muestran directamente en la interfaz
+
+2. **SERIE** (`series`):
+   - Eventos maestros con recurrencia (`is_recurring: true`)
+   - Sin `series_id` (son la serie original)
+   - Se procesan para generar instancias recurrentes
+
+3. **OVERRIDE** (`overrides`):
+   - Eventos liberados de una serie (`series_id` existe)
+   - Tienen `original_start_utc` (horario original)
+   - Se procesan como excepciones de la serie
+
+### Lógica de Clasificación:
+```typescript
+if (item.series_id && item.original_start_utc) {
+  // Es un override (evento liberado)
+  overrides.push(item);
+} else if (item.is_recurring) {
+  // Es una serie recurrente (evento maestro)
+  series.push(item);
+} else {
+  // Evento regular (único)
+  allEvents.push(normalizedEvent);
+}
+```
+
+### Implicaciones para Desarrolladores:
+- **Consultas DB**: Los eventos con `series_id` son overrides, no eventos independientes
+- **Procesamiento**: Los overrides requieren lógica especial de mapeo con sus series
+- **UI**: Los overrides deben mostrarse como eventos independientes pero mantener relación con la serie
+
+## ✅ **PROCESAMIENTO DE OVERRIDES INDEPENDIENTES - RESUELTO**
+
+### Problema Identificado:
+- **Síntoma**: Eventos liberados de una serie (overrides) no aparecían en la interfaz con `series_id` correcto
+- **Causa**: El bucle de "overrides independientes" no procesaba todos los overrides, solo los que no tenían serie activa
+- **Resultado**: Los overrides se clasificaban correctamente pero no se normalizaban ni agregaban a `allEvents`
+
+### Solución Implementada:
+- **Doble procesamiento**: Se agregó un segundo bucle que procesa **TODOS los overrides**, no solo los independientes
+- **Normalización completa**: Cada override se normaliza con `normalizeApiEvent` incluyendo `series_id` y `original_start_utc`
+- **Agregado a interfaz**: Los overrides normalizados se agregan a `allEvents` para aparecer en la UI
+
+### Código de la Solución:
+```typescript
+// 🔥 NUEVO: Procesar TODOS los overrides, no solo los independientes
+console.log('🎯 DEBUG RECURRENCIA - Procesando TODOS los overrides:', overrides.length);
+for (const override of overrides) {
+  console.log('🎯 DEBUG RECURRENCIA - Procesando override:', {
+    id: override.id,
+    title: override.title,
+    series_id: override.series_id,
+    original_start_utc: override.original_start_utc
+  });
+  
+  const normalizedOverride = normalizeApiEvent(override);
+  if (normalizedOverride) {
+    console.log('🎯 DEBUG RECURRENCIA - Override normalizado (TODOS):', {
+      id: normalizedOverride.id,
+      title: normalizedOverride.title,
+      series_id: normalizedOverride.series_id,
+      original_start_utc: normalizedOverride.original_start_utc
+    });
+    allEvents.push(normalizedOverride);
+  }
+}
+```
+
+### Estado: ✅ COMPLETAMENTE FUNCIONAL
+- **Overrides visibles**: Los eventos liberados aparecen correctamente en la interfaz
+- **Campos correctos**: `series_id` y `original_start_utc` se mantienen en el estado local
+- **Modal de borrado**: Funciona correctamente detectando eventos de serie vs eventos únicos
+- **Clasificación**: El sistema de 3 categorías (REGULAR, SERIE, OVERRIDE) funciona perfectamente
+
 ## 🐛 **BUGS CONOCIDOS (NO CRÍTICOS):**
 - **Datos legacy**: Eventos creados con código anterior pueden tener horarios incorrectos
 - **Solución**: Eliminar eventos antiguos y crear nuevos (funcionan perfectamente)

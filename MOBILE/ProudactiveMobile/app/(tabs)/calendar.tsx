@@ -1172,7 +1172,41 @@ export default function CalendarView({}: CalendarViewProps) {
 
   const handleDeleteEvent = useCallback(() => {
     if (!selectedEvent) return;
-    setDeleteModalVisible(true);
+    
+    // Verificar si es un evento con campos de recurrencia
+    const hasRecurrenceFields = 'is_recurring' in selectedEvent;
+    
+    console.log('🎯 DEBUG BORRAR - Evento a eliminar:', {
+      id: selectedEvent.id,
+      title: selectedEvent.title,
+      hasRecurrenceFields,
+      is_recurring: hasRecurrenceFields ? selectedEvent.is_recurring : false,
+      recurrence_rule: hasRecurrenceFields ? selectedEvent.recurrence_rule : null,
+      series_id: hasRecurrenceFields ? selectedEvent.series_id : null,
+      original_start_utc: hasRecurrenceFields ? selectedEvent.original_start_utc : null,
+      // Debug completo del evento
+      fullEvent: selectedEvent
+    });
+    
+    // Verificar si el evento tiene recurrencia O si pertenece a una serie (series_id)
+    const hasRecurrence = hasRecurrenceFields && selectedEvent.is_recurring;
+    const belongsToSeries = hasRecurrenceFields && selectedEvent.series_id;
+    
+    console.log('🎯 DEBUG BORRAR - Análisis del evento:', {
+      hasRecurrence,
+      belongsToSeries,
+      series_id: hasRecurrenceFields ? selectedEvent.series_id : null
+    });
+    
+    if (hasRecurrence || belongsToSeries) {
+      // Evento con recurrencia O que pertenece a una serie - mostrar modal de confirmación
+      console.log('🎯 DEBUG BORRAR - Evento con recurrencia/serie - Mostrando modal de confirmación');
+      setDeleteModalVisible(true);
+    } else {
+      // Evento único independiente - eliminar directamente
+      console.log('🎯 DEBUG BORRAR - Evento único independiente - Eliminando directamente');
+      // TODO: Implementar eliminación directa
+    }
   }, [selectedEvent]);
 
   const handleDeleteConfirm = useCallback((deleteType: 'single' | 'series') => {
@@ -1290,7 +1324,15 @@ export default function CalendarView({}: CalendarViewProps) {
   }, [recurrenceConfig]);
 
   const normalizeApiEvent = useCallback((apiEvent: any): Event | null => {
-    if (!apiEvent?.id || !apiEvent?.start_utc || !apiEvent?.end_utc) return null;
+    if (!apiEvent?.id || !apiEvent?.start_utc || !apiEvent?.end_utc) {
+      console.log('🎯 DEBUG RECURRENCIA - normalizeApiEvent falló validación:', {
+        id: apiEvent?.id,
+        start_utc: apiEvent?.start_utc,
+        end_utc: apiEvent?.end_utc,
+        title: apiEvent?.title
+      });
+      return null;
+    }
 
     // 🔥 DEBUG: Verificar datos del servidor para eventos con series_id
     if (apiEvent.series_id || apiEvent.original_start_utc) {
@@ -1301,6 +1343,18 @@ export default function CalendarView({}: CalendarViewProps) {
         title: apiEvent.title
       });
     }
+    
+    // 🔥 DEBUG: Verificar TODOS los campos que llegan del servidor
+    console.log('🎯 DEBUG RECURRENCIA - Datos completos del servidor:', {
+      id: apiEvent.id,
+      title: apiEvent.title,
+      series_id: apiEvent.series_id,
+      original_start_utc: apiEvent.original_start_utc,
+      is_recurring: apiEvent.is_recurring,
+      recurrence_rule: apiEvent.recurrence_rule,
+      // Mostrar todos los campos disponibles
+      allFields: Object.keys(apiEvent)
+    });
 
     const startDate = new Date(apiEvent.start_utc);
     const endDate = new Date(apiEvent.end_utc);
@@ -1339,12 +1393,21 @@ export default function CalendarView({}: CalendarViewProps) {
       const expandedStart = new Date(rangeStart);
       expandedStart.setMonth(expandedStart.getMonth() - 6); // 6 meses atrás para capturar eventos recurrentes
       
+      console.log('🎯 DEBUG RECURRENCIA - Consultando API:', { 
+        expandedStart: expandedStart.toISOString(), 
+        rangeEnd: rangeEnd.toISOString() 
+      });
       const response = await apiFetchEvents(expandedStart.toISOString(), rangeEnd.toISOString());
       if (!response.ok) {
         return null;
       }
 
       const body = await response.json();
+      console.log('🎯 DEBUG RECURRENCIA - Respuesta del servidor:', { 
+        status: response.status, 
+        totalEvents: body.data?.length || 0,
+        eventIds: body.data?.map((e: any) => ({ id: e.id, title: e.title, series_id: e.series_id })) || []
+      });
       if (!body?.success || !Array.isArray(body.data)) {
         return null;
       }
@@ -1355,14 +1418,25 @@ export default function CalendarView({}: CalendarViewProps) {
       
       // Separar eventos en categorías
       for (const item of body.data) {
+        console.log('🎯 DEBUG RECURRENCIA - Procesando evento:', {
+          id: item.id,
+          title: item.title,
+          series_id: item.series_id,
+          original_start_utc: item.original_start_utc,
+          is_recurring: item.is_recurring
+        });
+        
         if (item.series_id && item.original_start_utc) {
           // Es un override
+          console.log('🎯 DEBUG RECURRENCIA - → Clasificado como OVERRIDE');
           overrides.push(item);
         } else if (item.is_recurring) {
           // Es una serie recurrente
+          console.log('🎯 DEBUG RECURRENCIA - → Clasificado como SERIE');
           series.push(item);
         } else {
           // Evento regular
+          console.log('🎯 DEBUG RECURRENCIA - → Clasificado como REGULAR');
           const normalizedEvent = normalizeApiEvent(item);
           if (normalizedEvent) {
             allEvents.push(normalizedEvent);
@@ -1385,6 +1459,69 @@ export default function CalendarView({}: CalendarViewProps) {
         allEvents.push(...recurrentInstances);
       }
 
+      // 🔥 NUEVO: Procesar overrides independientes (sin serie recurrente activa)
+      console.log('🎯 DEBUG RECURRENCIA - Procesando overrides independientes:', overrides.length);
+      for (const override of overrides) {
+        // Verificar si el override tiene una serie recurrente activa
+        const hasActiveSeries = series.some(s => s.id === override.series_id);
+        
+        if (!hasActiveSeries) {
+          // Override independiente - procesar como evento regular
+          console.log('🎯 DEBUG RECURRENCIA - Override independiente encontrado:', {
+            id: override.id,
+            title: override.title,
+            series_id: override.series_id
+          });
+          
+          const normalizedOverride = normalizeApiEvent(override);
+          if (normalizedOverride) {
+            console.log('🎯 DEBUG RECURRENCIA - Override normalizado:', {
+              id: normalizedOverride.id,
+              title: normalizedOverride.title,
+              series_id: normalizedOverride.series_id,
+              original_start_utc: normalizedOverride.original_start_utc
+            });
+            allEvents.push(normalizedOverride);
+          } else {
+            console.log('🎯 DEBUG RECURRENCIA - Override NO se pudo normalizar:', {
+              id: override.id,
+              title: override.title,
+              start_utc: override.start_utc,
+              end_utc: override.end_utc
+            });
+          }
+        }
+      }
+
+      // 🔥 NUEVO: Procesar TODOS los overrides, no solo los independientes
+      console.log('🎯 DEBUG RECURRENCIA - Procesando TODOS los overrides:', overrides.length);
+      for (const override of overrides) {
+        console.log('🎯 DEBUG RECURRENCIA - Procesando override:', {
+          id: override.id,
+          title: override.title,
+          series_id: override.series_id,
+          original_start_utc: override.original_start_utc
+        });
+        
+        const normalizedOverride = normalizeApiEvent(override);
+        if (normalizedOverride) {
+          console.log('🎯 DEBUG RECURRENCIA - Override normalizado (TODOS):', {
+            id: normalizedOverride.id,
+            title: normalizedOverride.title,
+            series_id: normalizedOverride.series_id,
+            original_start_utc: normalizedOverride.original_start_utc
+          });
+          allEvents.push(normalizedOverride);
+        } else {
+          console.log('🎯 DEBUG RECURRENCIA - Override NO se pudo normalizar (TODOS):', {
+            id: override.id,
+            title: override.title,
+            start_utc: override.start_utc,
+            end_utc: override.end_utc
+          });
+        }
+      }
+
       return allEvents;
     } catch (error) {
       console.log('GET events error:', (error as Error).message);
@@ -1401,9 +1538,16 @@ export default function CalendarView({}: CalendarViewProps) {
       const rangeEnd = new Date(currentDate);
       rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
       
+      console.log('🎯 DEBUG RECURRENCIA - Rango de fechas consultado:', {
+        rangeStart: rangeStart.toISOString(),
+        rangeEnd: rangeEnd.toISOString(),
+        currentDate: currentDate.toISOString()
+      });
+      
       const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
       if (fetched) {
         console.log('🎯 DEBUG RECURRENCIA - Eventos refrescados:', fetched.length);
+        console.log('🎯 DEBUG RECURRENCIA - IDs de eventos cargados:', fetched.map(e => ({ id: e.id, title: e.title, series_id: e.series_id })));
         // Evitar duplicados: solo agregar eventos que no existan ya
         setEvents(prev => {
           const existingIds = new Set(prev.map(e => e.id));
@@ -2498,7 +2642,7 @@ export default function CalendarView({}: CalendarViewProps) {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.modalContent}>
+          <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={true}>
             <View style={styles.titleSection}>
               <Text style={styles.emoji}>☀️</Text>
               <Text style={styles.taskTitle}>Nueva tarea</Text>
@@ -2570,7 +2714,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 <Text style={styles.deleteButtonText}>Borrar evento</Text>
               </TouchableOpacity>
             )}
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
