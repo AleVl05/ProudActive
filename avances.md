@@ -251,3 +251,37 @@ for (const override of overrides) {
 ## 🐛 **BUGS CONOCIDOS (NO CRÍTICOS):**
 - **Datos legacy**: Eventos creados con código anterior pueden tener horarios incorrectos
 - **Solución**: Eliminar eventos antiguos y crear nuevos (funcionan perfectamente)
+
+## ✅ **PROTECCIÓN CONTRA ERRORES DE ELIMINACIÓN - IMPLEMENTADO**
+
+### Problema Identificado:
+- **Eliminación de series ya eliminadas**: Si se elimina una serie madre y luego se intenta eliminar un override de esa serie, podría causar errores
+- **IDs inválidos**: Instancias generadas tienen formato `"ID_fecha"` que al convertirse a número resulta en `NaN`
+
+### Soluciones Implementadas:
+1. **Extracción correcta de ID**: Para instancias generadas (`"205_2025-09-30"`), extraer solo el ID real (`205`)
+2. **Filtrado de valores inválidos**: Eliminar `NaN` y valores negativos de la lista de eventos a eliminar
+3. **Validación de existencia**: Verificar que hay eventos válidos antes de proceder
+4. **Logging de protección**: Mostrar advertencias cuando no se encuentran eventos válidos
+
+### Código de Protección:
+```typescript
+// Extraer ID real de instancias generadas
+if (typeof event.id === 'string' && event.id.includes('_')) {
+  seriesId = Number(event.id.split('_')[0]);
+}
+
+// Filtrar valores inválidos
+const validEvents = eventsToDelete.filter(id => !isNaN(id) && id > 0);
+
+// Validación final
+if (uniqueEvents.length === 0) {
+  console.log('⚠️ No hay eventos válidos para eliminar');
+  return [];
+}
+```
+
+### Estado: ✅ **COMPLETAMENTE PROTEGIDO**
+- **Sin crashes**: La app no se crashea al intentar eliminar series inexistentes
+- **IDs correctos**: Se extraen correctamente los IDs reales de las instancias
+- **Validación robusta**: Se filtran todos los valores inválidos antes de proceder

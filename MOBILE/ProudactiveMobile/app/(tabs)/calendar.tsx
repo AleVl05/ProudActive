@@ -303,7 +303,7 @@ const generateRecurrentInstances = (
           
           
           const instance: Event = {
-            id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
+            id: String(masterEvent.id), // Usar el ID real del evento maestro
             title: masterEvent.title,
             description: masterEvent.description,
             startTime: startTime,
@@ -1204,16 +1204,133 @@ export default function CalendarView({}: CalendarViewProps) {
       setDeleteModalVisible(true);
     } else {
       // Evento único independiente - eliminar directamente
-      console.log('🎯 DEBUG BORRAR - Evento único independiente - Eliminando directamente');
+      console.log(`🎯 DEBUG BORRAR - Evento único independiente - Eliminando ID: ${selectedEvent.id}`);
       // TODO: Implementar eliminación directa
     }
   }, [selectedEvent]);
 
+  // Función para analizar qué eventos eliminar basado en la estructura de series
+  const analyzeEventsToDelete = useCallback((event: Event | MonthEvent, deleteType: 'single' | 'series', allEvents: Event[]): number[] => {
+    const eventsToDelete: number[] = [];
+    
+    // Verificar si el evento tiene campos de recurrencia
+    const hasRecurrenceFields = 'is_recurring' in event || 'series_id' in event;
+    
+    if (!hasRecurrenceFields) {
+      // Evento regular sin recurrencia - eliminar solo este
+      console.log('🎯 DEBUG BORRAR - Evento regular sin recurrencia');
+      eventsToDelete.push(Number(event.id));
+      return eventsToDelete;
+    }
+    
+    // Evento con campos de recurrencia
+    const isRecurring = 'is_recurring' in event && event.is_recurring;
+    const hasSeriesId = 'series_id' in event && event.series_id;
+    
+    // Un evento NO puede ser override de sí mismo
+    const isOverride = hasSeriesId && event.series_id !== event.id;
+    const isSeriesOriginal = isRecurring && !isOverride;
+    
+    console.log('🎯 DEBUG BORRAR - Análisis del evento:', {
+      id: event.id,
+      isRecurring,
+      hasSeriesId,
+      isOverride,
+      isSeriesOriginal,
+      series_id: 'series_id' in event ? event.series_id : null
+    });
+    
+    if (deleteType === 'single') {
+      // Solo eliminar este evento específico
+      console.log('🎯 DEBUG BORRAR - Eliminando solo este evento');
+      eventsToDelete.push(Number(event.id));
+      
+    } else if (deleteType === 'series') {
+      // Eliminar toda la serie
+      if (isOverride && 'series_id' in event) {
+        // Es un override - eliminar la serie original y todos sus overrides
+        const seriesId = Number(event.series_id);
+        console.log('🎯 DEBUG BORRAR - Es un override, eliminando serie original:', seriesId);
+        
+        // Agregar la serie original
+        eventsToDelete.push(seriesId);
+        
+        // Buscar todos los overrides de esta serie
+        const overrides = allEvents.filter(ev => 
+          'series_id' in ev && ev.series_id === seriesId
+        );
+        
+        console.log('🎯 DEBUG BORRAR - Overrides encontrados:', overrides.map(ov => ({
+          id: ov.id,
+          title: ov.title,
+          series_id: 'series_id' in ov ? ov.series_id : null
+        })));
+        
+        // Agregar todos los overrides
+        overrides.forEach(override => {
+          eventsToDelete.push(Number(override.id));
+        });
+        
+      } else if (isSeriesOriginal) {
+        // Es la serie original - eliminar la serie y todos sus overrides
+        const seriesId = Number(event.id);
+        console.log('🎯 DEBUG BORRAR - Es la serie original, eliminando serie:', seriesId);
+        
+        // Agregar la serie original
+        eventsToDelete.push(seriesId);
+        
+        // Buscar todos los overrides de esta serie
+        const overrides = allEvents.filter(ev => 
+          'series_id' in ev && ev.series_id === seriesId
+        );
+        
+        console.log('🎯 DEBUG BORRAR - Overrides encontrados:', overrides.map(ov => ({
+          id: ov.id,
+          title: ov.title,
+          series_id: 'series_id' in ov ? ov.series_id : null
+        })));
+        
+        // Agregar todos los overrides
+        if (overrides.length > 0) {
+          overrides.forEach(override => {
+            eventsToDelete.push(Number(override.id));
+          });
+        } else {
+          console.log('🎯 DEBUG BORRAR - No se encontraron overrides para la serie:', seriesId);
+        }
+      }
+    }
+    
+    // Eliminar duplicados y valores inválidos (NaN)
+    const validEvents = eventsToDelete.filter(id => !isNaN(id) && id > 0);
+    const uniqueEvents = [...new Set(validEvents)];
+    
+    // Validación adicional: verificar que los eventos existen
+    if (uniqueEvents.length === 0) {
+      console.log('🎯 DEBUG BORRAR - ⚠️ No hay eventos válidos para eliminar');
+      return [];
+    }
+    
+    console.log('🎯 DEBUG BORRAR - Eventos únicos a eliminar:', uniqueEvents);
+    return uniqueEvents;
+  }, []);
+
   const handleDeleteConfirm = useCallback((deleteType: 'single' | 'series') => {
-    console.log('🎯 DEBUG BORRAR - Opción seleccionada:', deleteType);
+    if (!selectedEvent) {
+      console.log('🎯 DEBUG BORRAR - No hay evento seleccionado');
+      setDeleteModalVisible(false);
+      return;
+    }
+    
+    // Analizar qué eventos eliminar basado en la estructura de series
+    const eventsToDelete = analyzeEventsToDelete(selectedEvent, deleteType, events);
+    
+    console.log(`🎯 DEBUG BORRAR - Eliminando evento ID: ${selectedEvent.id} (${deleteType})`);
+    console.log('🎯 DEBUG BORRAR - Eventos a eliminar:', eventsToDelete);
+    
     setDeleteModalVisible(false);
     // TODO: Implementar lógica de borrado
-  }, []);
+  }, [selectedEvent, events]);
 
   // Lock para evitar commits duplicados por el mismo evento en paralelo
   const resizeLockRef = useRef<Set<string>>(new Set());
