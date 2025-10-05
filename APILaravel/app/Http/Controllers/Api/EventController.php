@@ -33,7 +33,7 @@ class EventController extends Controller
             ], 422);
         }
 
-        $query = Event::with(['calendar', 'category', 'alarms'])
+        $query = Event::with(['calendar', 'category', 'alarms', 'recurrenceExceptions'])
             ->where('user_id', 1) // Usuario fijo por ahora
             ->whereBetween('start_utc', [$request->start, $request->end])
             ->whereNull('deleted_at');
@@ -269,6 +269,19 @@ class EventController extends Controller
         }
 
         try {
+            // Si es un override (tiene series_id y original_start_utc), 
+            // crear una excepción de recurrencia para marcar que esa instancia fue eliminada
+            if ($event->series_id && $event->original_start_utc) {
+                // Crear excepción de recurrencia para marcar que esta instancia fue eliminada
+                DB::table('recurrence_exceptions')->insert([
+                    'event_id' => $event->series_id,  // ID de la serie original
+                    'exception_date' => \Carbon\Carbon::parse($event->original_start_utc)->toDateString(),
+                    'is_deleted' => true,
+                    'reason' => 'Override deleted',
+                    'created_at' => now()
+                ]);
+            }
+            
             $event->delete(); // Soft delete
 
             return response()->json([

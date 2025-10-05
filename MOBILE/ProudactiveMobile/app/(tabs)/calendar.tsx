@@ -277,8 +277,19 @@ const generateRecurrentInstances = (
         const instanceUtcKey = instanceStart.toISOString();
         
         
-        // Verificar si existe un override para esta instancia
-        if (overridesMap && overridesMap.has(instanceUtcKey)) {
+        // 🎯 NUEVO: Verificar si esta instancia está excluida por excepciones de recurrencia
+        const instanceDateString = instanceStart.toISOString().split('T')[0];
+        const isExcluded = masterEvent.recurrence_exceptions && 
+          masterEvent.recurrence_exceptions.some((exception: any) => {
+            // Comparar solo la fecha, ignorando la hora
+            const exceptionDate = new Date(exception.exception_date).toISOString().split('T')[0];
+            return exceptionDate === instanceDateString && exception.is_deleted;
+          });
+        
+        if (isExcluded) {
+          // Esta instancia está excluida, no generar
+          console.log('🎯 INSTANCIA EXCLUIDA:', instanceDateString);
+        } else if (overridesMap && overridesMap.has(instanceUtcKey)) {
           const override = overridesMap.get(instanceUtcKey);
           
           // Convertir override a formato Event (normalizeApiEvent se define más abajo)
@@ -1594,6 +1605,13 @@ export default function CalendarView({}: CalendarViewProps) {
       
       // Procesar series recurrentes con overrides
       for (const seriesItem of series) {
+        // 🎯 DEBUG: Verificar si las excepciones llegan del backend
+        console.log('🎯 SERIE RECURRENTE:', {
+          id: seriesItem.id,
+          title: seriesItem.title,
+          recurrence_exceptions: seriesItem.recurrence_exceptions
+        });
+        
         const recurrentInstances = generateRecurrentInstances(seriesItem, rangeStart, rangeEnd, overridesMap);
         allEvents.push(...recurrentInstances);
       }
@@ -2317,8 +2335,41 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, []); // <-- La dependencia vacía [] es clave, ahora no sufre de "estado obsoleto"
 
+  // Función para identificar el tipo de evento
+  const getEventType = (event: Event): string => {
+    // Instancia generada (cuadradito de serie)
+    if (typeof event.id === 'string' && event.id.includes('_')) {
+      return 'INSTANCIA_GENERADA';
+    }
+    
+    // Override (evento liberado)
+    if (event.series_id && event.original_start_utc) {
+      return 'OVERRIDE';
+    }
+    
+    // Serie original
+    if (event.is_recurring) {
+      return 'SERIE_ORIGINAL';
+    }
+    
+    // Evento único
+    return 'EVENTO_UNICO';
+  };
+
   // Callback para abrir modal al hacer click rápido en evento
   const onQuickPress = useCallback((event: Event) => {
+    // 🎯 LOGGING DE IDENTIFICACIÓN DE EVENTO
+    console.log('🎯 IDENTIFICACIÓN DE EVENTO:', {
+      id: event.id,
+      title: event.title,
+      type: getEventType(event),
+      series_id: event.series_id,
+      original_start_utc: event.original_start_utc,
+      is_recurring: event.is_recurring,
+      date: event.date,
+      startTime: event.startTime
+    });
+
     setSelectedEvent(event);
     setEventTitle(event.title);
     setEventDescription(event.description || '');
