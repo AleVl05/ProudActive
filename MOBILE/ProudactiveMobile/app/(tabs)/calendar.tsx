@@ -388,6 +388,32 @@ const generateRecurrentInstances = (
   }
 };
 
+// Componente para dibujar las líneas del grid como fondo
+const GridBackground = ({ width, height, cellHeight }: { width: number, height: number, cellHeight: number }) => {
+  const lines = [];
+  const numRows = Math.ceil(height / cellHeight);
+  
+  for (let i = 1; i < numRows; i++) {
+    const y = i * cellHeight;
+    lines.push(
+      <View
+        key={`line-${i}`}
+        style={{
+          position: 'absolute',
+          top: y,
+          left: 0,
+          right: 0,
+          height: 0.5,
+          backgroundColor: '#f0f0f0',
+          zIndex: 0
+        }}
+      />
+    );
+  }
+  
+  return <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 }}>{lines}</View>;
+};
+
 const buildMonthMatrix = (date: Date) => {
   const year = date.getFullYear();
   const month = date.getMonth();
@@ -570,14 +596,50 @@ interface EventResizableBlockProps {
 }
 
 const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit, onMoveCommit, onQuickPress, cellWidth }: EventResizableBlockProps) {
+  // 🔧 DEBUG: Log cuando el componente recibe nuevas props
+  console.log('🔧 RESIZE DEBUG - EventResizableBlock render:', {
+    eventId: ev.id,
+    eventTitle: ev.title,
+    duration: ev.duration,
+    startTime: ev.startTime,
+    calculatedHeight: (ev.duration / 30) * CELL_HEIGHT - 2
+  });
+
   const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
   const ghostTopOffset = useRef(new Animated.Value(0)).current;
   const ghostLeftOffset = useRef(new Animated.Value(0)).current;
   const [showGhost, setShowGhost] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   const allowDragRef = useRef(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initial = useRef({ startTime: ev.startTime, duration: ev.duration, date: ev.date }).current;
+
+  // Función para calcular el estilo del texto según la duración
+  const getTextStyle = useCallback(() => {
+    const height = (ev.duration / 30) * CELL_HEIGHT - 2;
+    const minHeightForTwoLines = 40; // Altura mínima para mostrar 2 líneas
+    
+    if (height < minHeightForTwoLines) {
+      return {
+        fontSize: 12,
+        lineHeight: 14,
+        numberOfLines: 1
+      };
+    } else if (height < 60) {
+      return {
+        fontSize: 13,
+        lineHeight: 16,
+        numberOfLines: 2
+      };
+    } else {
+      return {
+        fontSize: 14,
+        lineHeight: 18,
+        numberOfLines: 2
+      };
+    }
+  }, [ev.duration]);
 
   useEffect(() => {
     return () => {
@@ -589,10 +651,64 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
     };
   }, []);
 
+  // 🔧 DEBUG: Detectar cambios en las props del evento
+  useEffect(() => {
+    console.log('🔧 RESIZE DEBUG - EventResizableBlock props changed:', {
+      eventId: ev.id,
+      duration: ev.duration,
+      startTime: ev.startTime,
+      height: (ev.duration / 30) * CELL_HEIGHT - 2
+    });
+  }, [ev.duration, ev.startTime, ev.id]);
+
+  // 🔧 FIX: Forzar re-render cuando cambia la duración
+  const [forceRender, setForceRender] = useState(0);
+  useEffect(() => {
+    if (ev.duration !== initial.duration) {
+      console.log('🔧 RESIZE DEBUG - Duration changed, forcing re-render:', {
+        oldDuration: initial.duration,
+        newDuration: ev.duration,
+        forceRenderKey: `${ev.id}-${forceRender + 1}`
+      });
+      setForceRender(prev => prev + 1);
+    }
+  }, [ev.duration, initial.duration]);
+
+  // 🔧 DEBUG: Log cuando se fuerza el re-render
+  useEffect(() => {
+    if (forceRender > 0) {
+      console.log('🔧 RESIZE DEBUG - Force render triggered:', {
+        eventId: ev.id,
+        forceRender,
+        duration: ev.duration,
+        height: (ev.duration / 30) * CELL_HEIGHT - 2
+      });
+    }
+  }, [forceRender, ev.id, ev.duration]);
+
   const commitResize = useCallback((newStartTime: number, newDuration: number) => {
+    console.log('🔧 RESIZE DEBUG - commitResize called:', {
+      eventId: ev.id,
+      eventTitle: ev.title,
+      originalStartTime: ev.startTime,
+      originalDuration: ev.duration,
+      newStartTime,
+      newDuration,
+      deltaStart: newStartTime - ev.startTime,
+      deltaDuration: newDuration - ev.duration
+    });
+    
     const minDuration = 30;
-    if (newDuration < minDuration) newDuration = minDuration;
-    if (newStartTime < 0) return;
+    if (newDuration < minDuration) {
+      console.log('🔧 RESIZE DEBUG - Duration too small, adjusting to minimum:', newDuration, '->', minDuration);
+      newDuration = minDuration;
+    }
+    if (newStartTime < 0) {
+      console.log('🔧 RESIZE DEBUG - Start time negative, aborting:', newStartTime);
+      return;
+    }
+    
+    console.log('🔧 RESIZE DEBUG - Calling onResizeCommit with:', { newStartTime, newDuration });
     onResizeCommit(ev, newStartTime, newDuration);
   }, [ev, onResizeCommit]);
 
@@ -602,9 +718,14 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
   }, [ev, onMoveCommit]);
 
   const topResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponder: () => {
+      console.log('🔧 RESIZE DEBUG - Top responder activated');
+      return true;
+    },
     onPanResponderGrant: () => {
+      console.log('🔧 RESIZE DEBUG - Top resize started for event:', ev.title);
       setShowGhost(true);
+      setIsResizing(true);
       ghostTopOffset.setValue(0);
       ghostHeight.setValue((initial.duration / 30) * CELL_HEIGHT - 2);
     },
@@ -613,7 +734,35 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       const deltaMin = deltaSlots * 30;
       const newStart = initial.startTime + deltaMin;
       const newDuration = initial.duration - deltaMin;
-      if (newDuration >= 30 && newStart >= 0) {
+      
+      // Validaciones robustas
+      const minDuration = 30; // 30 minutos mínimo
+      const maxDuration = 24 * 60; // 24 horas máximo
+      const minStartTime = 0; // No puede empezar antes de medianoche
+      const maxStartTime = 24 * 60 - minDuration; // No puede empezar tan tarde que no quede tiempo mínimo
+      
+      const isValidDuration = newDuration >= minDuration && newDuration <= maxDuration;
+      const isValidStart = newStart >= minStartTime && newStart <= maxStartTime;
+      const isValid = isValidDuration && isValidStart;
+      
+      console.log('🔧 RESIZE DEBUG - Top resize move:', {
+        gestureDy: gesture.dy,
+        deltaSlots,
+        deltaMin,
+        newStart,
+        newDuration,
+        isValid,
+        validationDetails: {
+          isValidDuration,
+          isValidStart,
+          minDuration,
+          maxDuration,
+          minStartTime,
+          maxStartTime
+        }
+      });
+      
+      if (isValid) {
         ghostTopOffset.setValue(deltaSlots * CELL_HEIGHT);
         ghostHeight.setValue((newDuration / 30) * CELL_HEIGHT - 2);
       }
@@ -623,17 +772,47 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       const deltaMin = deltaSlots * 30;
       const newStart = Math.max(0, initial.startTime + deltaMin);
       const newDuration = Math.max(30, initial.duration - deltaMin);
+      
+      // Validaciones finales
+      const minDuration = 30;
+      const maxDuration = 24 * 60;
+      const maxStartTime = 24 * 60 - minDuration;
+      
+      const finalStart = Math.min(newStart, maxStartTime);
+      const finalDuration = Math.min(Math.max(newDuration, minDuration), maxDuration);
+      
+      console.log('🔧 RESIZE DEBUG - Top resize release:', {
+        gestureDy: gesture.dy,
+        deltaSlots,
+        deltaMin,
+        originalStart: newStart,
+        originalDuration: newDuration,
+        finalStart,
+        finalDuration,
+        wasAdjusted: finalStart !== newStart || finalDuration !== newDuration
+      });
+      
       setShowGhost(false);
-      commitResize(newStart, newDuration);
+      setIsResizing(false);
+      commitResize(finalStart, finalDuration);
     },
     onPanResponderTerminationRequest: () => false,
-    onPanResponderTerminate: () => setShowGhost(false),
+    onPanResponderTerminate: () => {
+      console.log('🔧 RESIZE DEBUG - Top resize terminated');
+      setShowGhost(false);
+      setIsResizing(false);
+    },
   })).current;
 
   const bottomResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponder: () => {
+      console.log('🔧 RESIZE DEBUG - Bottom responder activated');
+      return true;
+    },
     onPanResponderGrant: () => {
+      console.log('🔧 RESIZE DEBUG - Bottom resize started for event:', ev.title);
       setShowGhost(true);
+      setIsResizing(true);
       ghostTopOffset.setValue(0);
       ghostHeight.setValue((initial.duration / 30) * CELL_HEIGHT - 2);
     },
@@ -641,19 +820,72 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       const deltaSlots = Math.round(gesture.dy / CELL_HEIGHT);
       const deltaMin = deltaSlots * 30;
       const newDuration = initial.duration + deltaMin;
-      if (newDuration >= 30) {
+      
+      // Validaciones robustas
+      const minDuration = 30; // 30 minutos mínimo
+      const maxDuration = 24 * 60; // 24 horas máximo
+      const maxEndTime = 24 * 60; // No puede terminar después de medianoche del día siguiente
+      const newEndTime = initial.startTime + newDuration;
+      
+      const isValidDuration = newDuration >= minDuration && newDuration <= maxDuration;
+      const isValidEndTime = newEndTime <= maxEndTime;
+      const isValid = isValidDuration && isValidEndTime;
+      
+      console.log('🔧 RESIZE DEBUG - Bottom resize move:', {
+        gestureDy: gesture.dy,
+        deltaSlots,
+        deltaMin,
+        newDuration,
+        newEndTime,
+        isValid,
+        validationDetails: {
+          isValidDuration,
+          isValidEndTime,
+          minDuration,
+          maxDuration,
+          maxEndTime
+        }
+      });
+      
+      if (isValid) {
         ghostHeight.setValue((newDuration / 30) * CELL_HEIGHT - 2);
       }
     },
     onPanResponderRelease: (_, gesture) => {
       const deltaSlots = Math.round(gesture.dy / CELL_HEIGHT);
       const deltaMin = deltaSlots * 30;
-      const newDuration = Math.max(30, initial.duration + deltaMin);
+      const newDuration = initial.duration + deltaMin;
+      
+      // Validaciones finales
+      const minDuration = 30;
+      const maxDuration = 24 * 60;
+      const maxEndTime = 24 * 60;
+      const newEndTime = initial.startTime + newDuration;
+      
+      const finalDuration = Math.min(Math.max(newDuration, minDuration), maxDuration);
+      const finalEndTime = initial.startTime + finalDuration;
+      const adjustedDuration = finalEndTime > maxEndTime ? maxEndTime - initial.startTime : finalDuration;
+      
+      console.log('🔧 RESIZE DEBUG - Bottom resize release:', {
+        gestureDy: gesture.dy,
+        deltaSlots,
+        deltaMin,
+        originalDuration: newDuration,
+        originalEndTime: newEndTime,
+        finalDuration: adjustedDuration,
+        wasAdjusted: adjustedDuration !== newDuration
+      });
+      
       setShowGhost(false);
-      commitResize(initial.startTime, newDuration);
+      setIsResizing(false);
+      commitResize(initial.startTime, adjustedDuration);
     },
     onPanResponderTerminationRequest: () => false,
-    onPanResponderTerminate: () => setShowGhost(false),
+    onPanResponderTerminate: () => {
+      console.log('🔧 RESIZE DEBUG - Bottom resize terminated');
+      setShowGhost(false);
+      setIsResizing(false);
+    },
   })).current;
 
   // PanResponder para mover el bloque completo
@@ -767,17 +999,59 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
               { translateX: ghostLeftOffset }
             ],
             height: ghostHeight,
-            borderWidth: 1,
+            borderWidth: 3,
             borderStyle: 'dashed',
             borderColor: ev.color,
             borderRadius: 4,
-            backgroundColor: 'transparent',
-            zIndex: 5,
+            backgroundColor: `${ev.color}40`, // 40% opacity para mejor visibilidad
+            zIndex: 200, // 🔧 FIX: Ghost por encima del evento
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.25,
+            shadowRadius: 4,
+            elevation: 5,
           }}
-        />
+        >
+          {/* Indicador de resize en el ghost */}
+          <View style={{
+            position: 'absolute',
+            top: 4,
+            left: 4,
+            right: 4,
+            height: 3,
+            backgroundColor: '#fff',
+            borderRadius: 2,
+            opacity: 0.9,
+            borderWidth: 1,
+            borderColor: ev.color
+          }} />
+          <View style={{
+            position: 'absolute',
+            bottom: 4,
+            left: 4,
+            right: 4,
+            height: 3,
+            backgroundColor: '#fff',
+            borderRadius: 2,
+            opacity: 0.9,
+            borderWidth: 1,
+            borderColor: ev.color
+          }} />
+        </Animated.View>
       )}
 
-      <View style={[styles.eventBlock, { backgroundColor: ev.color, height: (ev.duration / 30) * CELL_HEIGHT - 2 }]}> 
+        <View 
+          key={`${ev.id}-${forceRender}`} // 🔧 FIX: Forzar re-render con key única
+          style={[
+            styles.eventBlock, 
+            { 
+              backgroundColor: ev.color, 
+              height: (ev.duration / 30) * CELL_HEIGHT - 2,
+              minHeight: (ev.duration / 30) * CELL_HEIGHT - 2, // 🔧 FIX: Forzar altura mínima también
+              zIndex: 100 // 🔧 FIX: Asegurar que esté encima del grid
+            }
+          ]}
+        >
         <Text style={styles.eventText} numberOfLines={2}>{ev.title}</Text>
         {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
         <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
@@ -1354,35 +1628,71 @@ export default function CalendarView({}: CalendarViewProps) {
 
   const handleDeleteConfirm = useCallback(async (deleteType: 'single' | 'series') => {
     if (!selectedEvent) {
-
-      setDeleteModalVisible(false);
-      return;
-    }
-    
-    // Analizar qué eventos eliminar basado en la estructura de series
-    const eventsToDelete = analyzeEventsToDelete(selectedEvent, deleteType, events);
-    
-
-
-    
-    if (eventsToDelete.length === 0) {
-
       setDeleteModalVisible(false);
       return;
     }
     
     try {
-      // Eliminar cada evento usando soft delete
-
-      
-      for (const eventId of eventsToDelete) {
-
-        const deleteRes = await apiDeleteEvent(String(eventId));
+      if (deleteType === 'single') {
+        // 🎯 NUEVA LÓGICA: Si es una instancia de serie, convertirla en override primero
+        const isInstance = typeof selectedEvent.id === 'string' && selectedEvent.id.includes('_');
         
-        if (deleteRes.ok) {
-
+        if (isInstance) {
+          console.log('🎯 CONVIRTIENDO INSTANCIA EN OVERRIDE:', selectedEvent.id);
+          
+          // Crear override con los mismos datos de la instancia
+          // 🎯 CORREGIR: Usar la fecha correcta de la instancia, no la original
+          const instanceDate = selectedEvent.date; // Fecha de la instancia (ej: 2025-09-30)
+          const instanceStartTime = selectedEvent.startTime; // Hora de la instancia
+          const instanceDuration = selectedEvent.duration;
+          
+          // Convertir startTime a horas y minutos
+          const hours = Math.floor(instanceStartTime / 60);
+          const minutes = instanceStartTime % 60;
+          const endHours = Math.floor((instanceStartTime + instanceDuration) / 60);
+          const endMinutes = (instanceStartTime + instanceDuration) % 60;
+          
+          const overridePayload = {
+            calendar_id: 1, // Usar calendar_id por defecto
+            title: selectedEvent.title,
+            description: selectedEvent.description || '',
+            start_utc: new Date(`${instanceDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`).toISOString(),
+            end_utc: new Date(`${instanceDate}T${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00.000Z`).toISOString(),
+            series_id: selectedEvent.series_id,
+            original_start_utc: new Date(`${instanceDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`).toISOString(), // 🎯 CORREGIR: Usar la fecha de la instancia
+            color: selectedEvent.color,
+            all_day: false,
+            timezone: 'UTC'
+          };
+          
+          // Crear el override
+          const createRes = await apiPostEvent(overridePayload);
+          if (createRes.ok) {
+            const overrideData = await createRes.json();
+            console.log('🎯 OVERRIDE CREADO:', overrideData.data.id);
+            
+            // Ahora eliminar el override recién creado
+            const deleteRes = await apiDeleteEvent(String(overrideData.data.id));
+            if (deleteRes.ok) {
+              console.log('🎯 OVERRIDE ELIMINADO - Hueco mantenido');
+            }
+          }
         } else {
-
+          // Es un evento único o override, eliminar directamente
+          const deleteRes = await apiDeleteEvent(String(selectedEvent.id));
+          if (!deleteRes.ok) {
+            console.log('🎯 ERROR AL ELIMINAR EVENTO');
+          }
+        }
+      } else {
+        // Eliminar toda la serie (lógica existente)
+        const eventsToDelete = analyzeEventsToDelete(selectedEvent, deleteType, events);
+        
+        for (const eventId of eventsToDelete) {
+          const deleteRes = await apiDeleteEvent(String(eventId));
+          if (!deleteRes.ok) {
+            console.log('🎯 ERROR AL ELIMINAR SERIE');
+          }
         }
       }
       
@@ -2222,19 +2532,60 @@ export default function CalendarView({}: CalendarViewProps) {
   const onResizeCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDuration: number) => {
     const eventId = eventToUpdate.id; // ID actual, ya sea temporal o real
 
-    if (resizeLockRef.current.has(eventId)) return;
+    console.log('🔧 RESIZE DEBUG - onResizeCommit called:', {
+      eventId,
+      eventTitle: eventToUpdate.title,
+      originalStartTime: eventToUpdate.startTime,
+      originalDuration: eventToUpdate.duration,
+      newStartTime,
+      newDuration,
+      isLocked: resizeLockRef.current.has(eventId)
+    });
+
+    if (resizeLockRef.current.has(eventId)) {
+      console.log('🔧 RESIZE DEBUG - Event is locked, skipping:', eventId);
+      return;
+    }
     resizeLockRef.current.add(eventId);
 
     // 1. Actualización optimista de la UI (para que se vea instantáneo)
-    setEvents(prev => prev.map(ev => ev.id === eventId ? { ...ev, startTime: newStartTime, duration: newDuration } : ev));
+    console.log('🔧 RESIZE DEBUG - Updating UI optimistically');
+    setEvents(prev => {
+      const updatedEvents = prev.map(ev => ev.id === eventId ? { ...ev, startTime: newStartTime, duration: newDuration } : ev);
+      
+      // 🔧 DEBUG: Verificar que el evento se actualizó correctamente
+      const updatedEvent = updatedEvents.find(ev => ev.id === eventId);
+      if (updatedEvent) {
+        console.log('🔧 RESIZE DEBUG - Event updated in state:', {
+          eventId: updatedEvent.id,
+          newDuration: updatedEvent.duration,
+          newStartTime: updatedEvent.startTime,
+          calculatedHeight: (updatedEvent.duration / 30) * CELL_HEIGHT - 2
+        });
+      }
+      
+      return updatedEvents;
+    });
 
     const startLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime);
     const endLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime + newDuration);
+
+    console.log('🔧 RESIZE DEBUG - Calculated times:', {
+      startLocal: startLocal.toISOString(),
+      endLocal: endLocal.toISOString(),
+      eventDate: eventToUpdate.date
+    });
 
     try {
         // 🔍 DETECTAR SI ES INSTANCIA GENERADA DE SERIE RECURRENTE
         const match = String(eventToUpdate.id).match(/^(\d+)_(\d{4}-\d{2}-\d{2})$/);
         const isGeneratedInstance = !!match;
+        
+        console.log('🔧 RESIZE DEBUG - Event type detection:', {
+          eventId: eventToUpdate.id,
+          isGeneratedInstance,
+          match: match ? match[1] : null
+        });
 
         if (isGeneratedInstance) {
             // 📝 CREAR OVERRIDE PARA INSTANCIA GENERADA
@@ -2327,10 +2678,12 @@ export default function CalendarView({}: CalendarViewProps) {
             }
         }
     } catch (e) {
+        console.log('🔧 RESIZE DEBUG - Error during resize:', e);
         Alert.alert('Error', 'No se pudo guardar el cambio. Reintentando...');
         // Revertimos al estado original del bloque antes del estiramiento
         setEvents(prev => prev.map(ev => ev.id === eventId ? eventToUpdate : ev));
     } finally {
+        console.log('🔧 RESIZE DEBUG - Resize completed, unlocking event:', eventId);
         resizeLockRef.current.delete(eventId);
     }
   }, []); // <-- La dependencia vacía [] es clave, ahora no sufre de "estado obsoleto"
@@ -2645,6 +2998,13 @@ export default function CalendarView({}: CalendarViewProps) {
                 ))}
               </View>
 
+              {/* Fondo del grid */}
+              <GridBackground 
+                width={getCellWidth() * 7} 
+                height={timeSlots.length * CELL_HEIGHT} 
+                cellHeight={CELL_HEIGHT} 
+              />
+              
               {/* Contenido de días horizontal (scrollable) */}
               <ScrollView
                 horizontal
@@ -2865,11 +3225,12 @@ const styles = StyleSheet.create({
   dayHeader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   dayText: { fontSize: 14, fontWeight: '600', color: Colors.light.tint },
   calendarContainer: { flex: 1 },
-  timeRow: { flexDirection: 'row', height: CELL_HEIGHT, borderBottomWidth: 0.5, borderBottomColor: '#f0f0f0' },
+  timeRow: { flexDirection: 'row', height: CELL_HEIGHT },
   timeText: { fontSize: 12, color: Colors.light.text, textAlign: 'center' },
   cell: { flex: 1, borderRightWidth: 0.5, borderRightColor: '#f0f0f0', position: 'relative' },
   eventContainer: { position: 'absolute', top: 2, left: 2, right: 2, bottom: 2 },
   eventBlock: { flex: 1, borderRadius: 4, padding: 4, justifyContent: 'center', minHeight: 20 },
+  gridBackground: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 },
   eventText: { fontSize: 11, color: 'white', fontWeight: '500' },
   fullscreenModal: { flex: 1, backgroundColor: '#f0f8ff' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#f0f8ff' },

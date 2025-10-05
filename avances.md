@@ -477,3 +477,57 @@ const overrides = allEvents.filter(ev => {
 - **Eliminación individual**: Funciona para eventos únicos
 - **Eliminación de serie completa**: Elimina serie madre + todos los hijos + todas las instancias
 - **Sin conflictos**: No afecta el movimiento de eventos recurrentes
+
+---
+
+## 🎯 **SOLUCIÓN DE EXCEPCIONES DE RECURRENCIA - OCTUBRE 2025**
+
+### **Problema Identificado:**
+1. **Regeneración de secuencias**: Al eliminar un override, la secuencia original se regeneraba, recreando el espacio vacío
+2. **Eliminación de instancias**: No se podían eliminar cuadraditos individuales de series recurrentes
+
+### **🔧 Solución Implementada:**
+
+#### **Backend (Laravel):**
+```php
+// EventController::destroy() - Crear excepción de recurrencia para overrides
+if ($event->series_id && $event->original_start_utc) {
+    DB::table('recurrence_exceptions')->insert([
+        'event_id' => $event->series_id,
+        'exception_date' => \Carbon\Carbon::parse($event->original_start_utc)->toDateString(),
+        'is_deleted' => true,
+        'reason' => 'Override deleted',
+        'created_at' => now()
+    ]);
+}
+```
+
+#### **Frontend (React Native):**
+```typescript
+// generateRecurrentInstances() - Excluir instancias con excepciones
+const isExcluded = masterEvent.recurrence_exceptions && 
+  masterEvent.recurrence_exceptions.some((exception: any) => {
+    const exceptionDate = new Date(exception.exception_date).toISOString().split('T')[0];
+    return exceptionDate === instanceDateString && exception.is_deleted;
+  });
+
+// handleDeleteConfirm() - Convertir instancias en overrides para eliminación
+if (isInstance) {
+  // Crear override con datos de la instancia
+  const overridePayload = { /* datos de la instancia */ };
+  const createRes = await apiPostEvent(overridePayload);
+  // Eliminar el override recién creado
+  await apiDeleteEvent(overrideData.data.id);
+}
+```
+
+### **✅ Resultados:**
+- **Huecos persistentes**: Los espacios vacíos se mantienen después de eliminar overrides
+- **Eliminación individual**: Se pueden eliminar cuadraditos específicos de series
+- **Compatibilidad total**: No afecta la funcionalidad existente de recurrencia
+- **Base de datos**: Tabla `recurrence_exceptions` maneja las excepciones correctamente
+
+### **Estado: ✅ COMPLETAMENTE FUNCIONAL**
+- **Eliminación de overrides**: Mantiene huecos sin regeneración
+- **Eliminación de instancias**: Funciona para cualquier cuadradito de serie
+- **Sistema robusto**: Maneja correctamente fechas, horas y excepciones
