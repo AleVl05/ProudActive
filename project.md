@@ -51,6 +51,7 @@
 - [x] **Drag & drop**: ✅ **COMPLETAMENTE FUNCIONAL** - Click corto para editar, long press para mover
 - [x] **Liberación de series**: ✅ **COMPLETAMENTE FUNCIONAL** - Eventos de serie se pueden liberar y crear nueva serie independiente
 - [x] **Edición de eventos liberados**: ✅ **COMPLETAMENTE FUNCIONAL** - Eventos liberados pueden aplicar nueva recurrencia creando serie independiente
+- [x] **Hitbox de eventos expandidos**: ✅ **RESUELTO** - Eventos redimensionados son clickeables en toda su área
 
 ### ❌ **CALENDARIO - PENDIENTE**
 - [ ] **Personalidad de bloques**: Manejo correcto de edición vs creación de eventos recurrentes

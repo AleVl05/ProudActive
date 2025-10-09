@@ -531,3 +531,91 @@ if (isInstance) {
 - **Eliminación de overrides**: Mantiene huecos sin regeneración
 - **Eliminación de instancias**: Funciona para cualquier cuadradito de serie
 - **Sistema robusto**: Maneja correctamente fechas, horas y excepciones
+
+## ✅ **PROBLEMA DE HITBOX EN EVENTOS EXPANDIDOS - RESUELTO**
+
+### **Problema Identificado:**
+- **Síntoma**: Eventos expandidos (redimensionados) no eran clickeables en toda su área visual
+- **Causa**: El `EventResizableBlock` solo se renderizaba en la celda donde empezaba el evento, no en las celdas adicionales ocupadas
+- **Resultado**: Al hacer clic en el área expandida, se creaban nuevos eventos en lugar de editar el existente
+
+### **Solución Implementada:**
+```typescript
+// 🔧 FIX: Verificar si hay un evento que ocupa esta celda
+let hasOccupyingEvent = !!event;
+if (!event) {
+  // Buscar eventos que empiezan antes y ocupan esta celda
+  for (let i = 0; i < 48; i++) {
+    const checkTime = startTime - (i * 30);
+    if (checkTime < 0) break;
+    
+    const checkKey = `${dateKey}-${checkTime}`;
+    const checkEvent = eventsByCell[checkKey];
+    if (checkEvent && checkEvent.startTime <= startTime && (checkEvent.startTime + checkEvent.duration) > startTime) {
+      hasOccupyingEvent = true;
+      break;
+    }
+  }
+}
+
+// 🔧 FIX: Solo ejecutar handleCellPress si NO hay evento ocupando esta celda
+if (!hasOccupyingEvent) {
+  handleCellPress(dayIndex, timeIndex);
+} else {
+  // 🔧 FIX TEMPORAL: Si hay un evento ocupando la celda, abrir su modal
+  const occupyingEvent = eventsByCell[lookupKey] || 
+    Object.values(eventsByCell).find(ev => 
+      ev.startTime <= startTime && (ev.startTime + ev.duration) > startTime
+    );
+  if (occupyingEvent) {
+    onQuickPress(occupyingEvent);
+  }
+}
+```
+
+### **Estado: ✅ COMPLETAMENTE FUNCIONAL**
+- **Eventos expandidos clickeables**: Ahora se puede hacer clic en cualquier parte del evento expandido
+- **Modal de edición**: Se abre correctamente al hacer clic en el área expandida
+- **Solución robusta**: Funciona tanto para eventos únicos como recurrentes
+- **Sin duplicación**: No se crean eventos duplicados al hacer clic en el área expandida
+
+## ✅ **BUG DE EVENTOS "PEGADOS" EN MISMA FILA - RESUELTO**
+
+### **Problema Identificado:**
+- **Síntoma**: Múltiples eventos en la misma fila horizontal abrían el modal del primer evento encontrado
+- **Causa**: La lógica de búsqueda de eventos ocupantes encontraba el primer evento que cumplía la condición, no el evento correcto
+- **Resultado**: Al hacer clic en "Test 2" se abría el modal de "Test 1"
+
+### **Solución Implementada:**
+```typescript
+// 🔧 FIX: Capturar el evento correcto específico
+let hasOccupyingEvent = !!event;
+let occupyingEvent = event;
+
+if (!event) {
+  // Buscar eventos que empiezan antes y ocupan esta celda
+  for (let i = 0; i < 48; i++) {
+    const checkTime = startTime - (i * 30);
+    if (checkTime < 0) break;
+    
+    const checkKey = `${dateKey}-${checkTime}`;
+    const checkEvent = eventsByCell[checkKey];
+    if (checkEvent && checkEvent.startTime <= startTime && (checkEvent.startTime + checkEvent.duration) > startTime) {
+      hasOccupyingEvent = true;
+      occupyingEvent = checkEvent; // 🔥 NUEVO: Capturar el evento específico
+      break;
+    }
+  }
+}
+
+// 🔧 FIX: Usar el evento correcto sin búsqueda duplicada
+if (occupyingEvent) {
+  onQuickPress(occupyingEvent);
+}
+```
+
+### **Estado: ✅ COMPLETAMENTE FUNCIONAL**
+- **Eventos independientes**: Cada evento abre su modal correcto independientemente de la posición
+- **Sin "pegado"**: Los eventos no se interfieren entre sí en la misma fila
+- **Funcionamiento robusto**: Funciona correctamente al mover y reorganizar eventos
+- **Detección precisa**: El sistema identifica correctamente qué evento está siendo clickeado
