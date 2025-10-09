@@ -586,6 +586,50 @@ async function apiFetchEvents(startIso: string, endIso: string) {
   return res;
 }
 
+// Funciones de API para subtareas
+async function apiGetSubtasks(eventId: string) {
+  const res = await fetch(`${API_BASE}/events/${eventId}/subtasks`);
+  return res;
+}
+
+async function apiCreateSubtask(eventId: string, text: string, sortOrder: number = 0) {
+  console.log('🔧 apiCreateSubtask called with:', { eventId, text, sortOrder });
+  const res = await fetch(`${API_BASE}/subtasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      event_id: eventId,
+      text: text,
+      sort_order: sortOrder
+    }),
+  });
+  console.log('🔧 apiCreateSubtask response:', res.status, res.ok);
+  return res;
+}
+
+async function apiUpdateSubtask(subtaskId: string, updates: {text?: string, completed?: boolean, sort_order?: number}) {
+  const res = await fetch(`${API_BASE}/subtasks/${subtaskId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  return res;
+}
+
+async function apiDeleteSubtask(subtaskId: string) {
+  const res = await fetch(`${API_BASE}/subtasks/${subtaskId}`, { method: 'DELETE' });
+  return res;
+}
+
+async function apiUpdateMultipleSubtasks(subtasks: Array<{id: string, text?: string, completed?: boolean, sort_order?: number}>) {
+  const res = await fetch(`${API_BASE}/subtasks/update-multiple`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subtasks }),
+  });
+  return res;
+}
+
 interface EventResizableBlockProps {
   ev: Event;
   onResizeCommit: (event: Event, newStartTime: number, newDuration: number) => void;
@@ -1392,6 +1436,11 @@ export default function CalendarView({}: CalendarViewProps) {
   const [tempRecurrenceConfig, setTempRecurrenceConfig] = useState<RecurrenceConfig | null>(null);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [recurrenceCalendarMonth, setRecurrenceCalendarMonth] = useState<Date>(new Date());
+  
+  // Estado para subtareas
+  const [subtasks, setSubtasks] = useState<Array<{id: string, text: string, completed: boolean}>>([]);
+  const [newSubtaskText, setNewSubtaskText] = useState('');
+  const [showSubtaskInput, setShowSubtaskInput] = useState(false);
 
   const handleOpenRecurrenceModal = useCallback(() => {
   setTempRecurrenceConfig(cloneRecurrenceConfig(recurrenceConfig));
@@ -1411,6 +1460,197 @@ export default function CalendarView({}: CalendarViewProps) {
     setSelectedCell(null);
     setSelectedMonthCell(null);
     setRecurrenceConfig(createDefaultRecurrenceConfig());
+    // Limpiar subtareas al cerrar modal
+    setSubtasks([]);
+    setNewSubtaskText('');
+    setShowSubtaskInput(false);
+  }, []);
+
+  // Función para cargar subtareas de un evento
+  const loadSubtasks = useCallback(async (eventId: string) => {
+    console.log('🔧 Loading subtasks for event:', eventId);
+    try {
+      const response = await apiGetSubtasks(eventId);
+      console.log('🔧 API response:', response.status, response.ok);
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('🔧 API result:', result);
+        
+        const loadedSubtasks = result.data.map((subtask: any) => ({
+          id: subtask.id.toString(),
+          text: subtask.text,
+          completed: subtask.completed
+        }));
+        
+        console.log('🔧 Loaded subtasks:', loadedSubtasks);
+        setSubtasks(loadedSubtasks);
+      } else {
+        console.error('🔧 Error loading subtasks:', response.status);
+      }
+    } catch (error) {
+      console.error('Error al cargar subtareas:', error);
+    }
+  }, []);
+
+  // Función para migrar subtareas de un evento a otro
+  const migrateSubtasks = useCallback(async (oldEventId: string, newEventId: string) => {
+    console.log('🔧 Migrating subtasks from', oldEventId, 'to', newEventId);
+    try {
+      // 1. Obtener subtareas del evento anterior
+      const response = await apiGetSubtasks(oldEventId);
+      if (response.ok) {
+        const result = await response.json();
+        const oldSubtasks = result.data;
+        
+        console.log('🔧 Found subtasks to migrate:', oldSubtasks);
+        
+        // 2. Crear las subtareas en el nuevo evento
+        for (let i = 0; i < oldSubtasks.length; i++) {
+          const oldSubtask = oldSubtasks[i];
+          const createResponse = await apiCreateSubtask(
+            newEventId, 
+            oldSubtask.text, 
+            i
+          );
+          
+          if (createResponse.ok) {
+            console.log('🔧 Migrated subtask:', oldSubtask.text);
+          } else {
+            console.error('🔧 Failed to migrate subtask:', oldSubtask.text);
+          }
+        }
+        
+        // 3. Recargar subtareas del nuevo evento
+        await loadSubtasks(newEventId);
+      }
+    } catch (error) {
+      console.error('Error al migrar subtareas:', error);
+    }
+  }, [loadSubtasks]);
+
+  // Funciones para manejar subtareas
+  const handleAddSubtask = useCallback(async () => {
+    if (newSubtaskText.trim() && selectedEvent) {
+      console.log('🔧 Creating subtask for event ID:', selectedEvent.id);
+      const tempId = `temp-${Date.now()}`;
+      const newSubtask = {
+        id: tempId,
+        text: newSubtaskText.trim(),
+        completed: false
+      };
+      
+      // Optimistic update - mostrar inmediatamente
+      setSubtasks(prev => [...prev, newSubtask]);
+      setNewSubtaskText('');
+      setShowSubtaskInput(false);
+      
+      try {
+        const response = await apiCreateSubtask(
+          selectedEvent.id, 
+          newSubtaskText.trim(), 
+          subtasks.length
+        );
+        
+        if (response.ok) {
+          const result = await response.json();
+          // Reemplazar la subtarea temporal con la real
+          setSubtasks(prev => prev.map(subtask => 
+            subtask.id === tempId 
+              ? {
+                  id: result.data.id.toString(),
+                  text: result.data.text,
+                  completed: result.data.completed
+                }
+              : subtask
+          ));
+        } else {
+          // Si falla, remover la subtarea temporal
+          setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
+        }
+      } catch (error) {
+        // Si falla, remover la subtarea temporal
+        setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
+        console.error('Error al crear subtarea:', error);
+      }
+    }
+  }, [newSubtaskText, selectedEvent, subtasks.length]);
+
+  const handleToggleSubtask = useCallback(async (id: string) => {
+    try {
+      const subtask = subtasks.find(s => s.id === id);
+      if (subtask) {
+        // Optimistic update - actualizar UI inmediatamente
+        setSubtasks(prev => 
+          prev.map(subtask => 
+            subtask.id === id 
+              ? { ...subtask, completed: !subtask.completed }
+              : subtask
+          )
+        );
+        
+        // Luego actualizar en el servidor
+        const response = await apiUpdateSubtask(id, {
+          completed: !subtask.completed
+        });
+        
+        if (!response.ok) {
+          // Si falla, revertir el cambio
+          setSubtasks(prev => 
+            prev.map(subtask => 
+              subtask.id === id 
+                ? { ...subtask, completed: subtask.completed }
+                : subtask
+            )
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error al actualizar subtarea:', error);
+    }
+  }, [subtasks]);
+
+  const handleDeleteSubtask = useCallback(async (id: string) => {
+    // Optimistic update - remover inmediatamente
+    const originalSubtasks = subtasks;
+    setSubtasks(prev => prev.filter(subtask => subtask.id !== id));
+    
+    try {
+      const response = await apiDeleteSubtask(id);
+      
+      if (!response.ok) {
+        // Si falla, restaurar la subtarea
+        setSubtasks(originalSubtasks);
+      }
+    } catch (error) {
+      // Si falla, restaurar la subtarea
+      setSubtasks(originalSubtasks);
+      console.error('Error al eliminar subtarea:', error);
+    }
+  }, [subtasks]);
+
+  const handleEditSubtask = useCallback(async (id: string, newText: string) => {
+    // Optimistic update - actualizar inmediatamente
+    setSubtasks(prev => 
+      prev.map(subtask => 
+        subtask.id === id 
+          ? { ...subtask, text: newText }
+          : subtask
+      )
+    );
+    
+    try {
+      const response = await apiUpdateSubtask(id, {
+        text: newText
+      });
+      
+      if (!response.ok) {
+        // Si falla, revertir el cambio (necesitaríamos el texto original)
+        console.error('Error al actualizar subtarea en servidor');
+      }
+    } catch (error) {
+      console.error('Error al editar subtarea:', error);
+    }
   }, []);
 
   // Función para refrescar eventos después de crear/editar
@@ -2101,10 +2341,13 @@ export default function CalendarView({}: CalendarViewProps) {
 
         if (postRes.ok && created?.data?.id) {      
           
-          // 2. Eliminar el evento original que venía de la serie
+          // 2. Migrar subtareas del evento anterior al nuevo
+          await migrateSubtasks(String(selectedEvent.id), String(created.data.id));
+          
+          // 3. Eliminar el evento original que venía de la serie
           await apiDeleteEvent(String(selectedEvent.id));
           
-          // 3. Refrescar eventos para mostrar la nueva serie
+          // 4. Refrescar eventos para mostrar la nueva serie
           await refreshEvents();
           
           // 4. Cerrar modal
@@ -2170,11 +2413,13 @@ export default function CalendarView({}: CalendarViewProps) {
 
           if (postRes.ok && created?.data?.id) {
 
+            // 2. Migrar subtareas del evento anterior al nuevo
+            await migrateSubtasks(String(selectedEvent.id), String(created.data.id));
             
-            // 2. Eliminar el evento liberado original
+            // 3. Eliminar el evento liberado original
             await apiDeleteEvent(String(selectedEvent.id));
             
-            // 3. Refrescar eventos para mostrar la nueva serie
+            // 4. Refrescar eventos para mostrar la nueva serie
             await refreshEvents();
             
             // 4. Cerrar modal
@@ -2413,6 +2658,34 @@ export default function CalendarView({}: CalendarViewProps) {
       setMonthEvents(prev => [...prev, newMonthEvent]);
     }
 
+    // Guardar subtareas pendientes si hay un evento seleccionado
+    if (selectedEvent && subtasks.length > 0) {
+      console.log('🔧 Saving pending subtasks for event:', selectedEvent.id);
+      try {
+        // Guardar todas las subtareas que no tienen ID real (son temporales)
+        const tempSubtasks = subtasks.filter(subtask => subtask.id.startsWith('temp-'));
+        for (let i = 0; i < tempSubtasks.length; i++) {
+          const tempSubtask = tempSubtasks[i];
+          const response = await apiCreateSubtask(selectedEvent.id, tempSubtask.text, i);
+          if (response.ok) {
+            const result = await response.json();
+            // Reemplazar la subtarea temporal con la real
+            setSubtasks(prev => prev.map(subtask => 
+              subtask.id === tempSubtask.id 
+                ? {
+                    id: result.data.id.toString(),
+                    text: result.data.text,
+                    completed: result.data.completed
+                  }
+                : subtask
+            ));
+          }
+        }
+      } catch (error) {
+        console.error('Error al guardar subtareas pendientes:', error);
+      }
+    }
+
     // Limpiar modal
     setModalVisible(false);
     setEventTitle('');
@@ -2421,7 +2694,7 @@ export default function CalendarView({}: CalendarViewProps) {
     setSelectedCell(null);
     setSelectedMonthCell(null);
     // NO resetear recurrenceConfig aquí - se mantiene para próximos eventos
-  }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, recurrenceConfig]);
+  }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, recurrenceConfig, subtasks, migrateSubtasks]);
 
   // Navegación de fecha (flechas)
   const navigateDate = useCallback((direction: 'prev' | 'next') => {
@@ -2663,7 +2936,10 @@ export default function CalendarView({}: CalendarViewProps) {
     setEventColor(event.color);
     setRecurrenceConfig(extractRecurrenceFromEvent(event));
     setModalVisible(true);
-  }, []);
+    
+    // Cargar subtareas del evento
+    loadSubtasks(event.id);
+  }, [loadSubtasks]);
 
   // Callback de commit desde bloque movible
   const onMoveCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDate: string) => {
@@ -3108,12 +3384,71 @@ export default function CalendarView({}: CalendarViewProps) {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={styles.subtasksCard}>
-              <Ionicons name="add" size={20} color={Colors.light.tint} />
-              <Text style={styles.subtasksLabel}>Subtarefas</Text>
-            </TouchableOpacity>
+            <View style={styles.subtasksSection}>
+              <TouchableOpacity 
+                style={styles.subtasksCard}
+                onPress={() => setShowSubtaskInput(!showSubtaskInput)}
+              >
+                <Ionicons name="add" size={20} color={Colors.light.tint} />
+                <Text style={styles.subtasksLabel}>Subtarefas</Text>
+              </TouchableOpacity>
 
-            <Text style={styles.subtasksDescription}>As subtarefas podem ser definidas como sua rotina ou lista de verificação diária</Text>
+              <Text style={styles.subtasksDescription}>As subtarefas podem ser definidas como sua rotina ou lista de verificação diária</Text>
+
+              {/* Input para nueva subtarea */}
+              {showSubtaskInput && (
+                <View style={styles.subtaskInputContainer}>
+                  <TextInput
+                    style={styles.subtaskInput}
+                    placeholder="Nova subtarefa..."
+                    value={newSubtaskText}
+                    onChangeText={setNewSubtaskText}
+                    onSubmitEditing={handleAddSubtask}
+                    autoFocus
+                  />
+                  <TouchableOpacity 
+                    style={styles.subtaskAddButton}
+                    onPress={handleAddSubtask}
+                  >
+                    <Ionicons name="checkmark" size={20} color="white" />
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Lista de subtareas */}
+              {subtasks.map((subtask) => (
+                <View key={subtask.id} style={styles.subtaskItem}>
+                  <TouchableOpacity
+                    style={[
+                      styles.subtaskCheckbox,
+                      subtask.completed && styles.subtaskCheckboxCompleted
+                    ]}
+                    onPress={() => handleToggleSubtask(subtask.id)}
+                  >
+                    {subtask.completed && (
+                      <Ionicons name="checkmark" size={16} color="white" />
+                    )}
+                  </TouchableOpacity>
+                  
+                  <TextInput
+                    style={[
+                      styles.subtaskText,
+                      subtask.completed && styles.subtaskTextCompleted
+                    ]}
+                    value={subtask.text}
+                    onChangeText={(text) => handleEditSubtask(subtask.id, text)}
+                    multiline
+                  />
+                  
+                  <TouchableOpacity
+                    style={styles.subtaskDeleteButton}
+                    onPress={() => handleDeleteSubtask(subtask.id)}
+                  >
+                    <Ionicons name="trash-outline" size={16} color="#ff4444" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
 
             {/* Botón de borrar - solo visible cuando se está editando un evento */}
             {selectedEvent && (
@@ -3241,9 +3576,74 @@ const styles = StyleSheet.create({
   configRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   configLabel: { flex: 1, fontSize: 16, color: Colors.light.text, marginLeft: 12 },
   configValue: { fontSize: 14, color: '#666', marginRight: 8 },
+  subtasksSection: { marginBottom: 16 },
   subtasksCard: { backgroundColor: 'white', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   subtasksLabel: { fontSize: 16, color: Colors.light.text, marginLeft: 12 },
-  subtasksDescription: { fontSize: 12, color: '#666', textAlign: 'center', lineHeight: 16 },
+  subtasksDescription: { fontSize: 12, color: '#666', textAlign: 'center', lineHeight: 16, marginBottom: 12 },
+  
+  // Estilos para input de subtarea
+  subtaskInputContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'white', 
+    borderRadius: 12, 
+    padding: 12, 
+    marginBottom: 8 
+  },
+  subtaskInput: { 
+    flex: 1, 
+    fontSize: 16, 
+    color: Colors.light.text, 
+    paddingVertical: 8 
+  },
+  subtaskAddButton: { 
+    backgroundColor: Colors.light.tint, 
+    borderRadius: 20, 
+    width: 40, 
+    height: 40, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginLeft: 8 
+  },
+  
+  // Estilos para items de subtarea
+  subtaskItem: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'white', 
+    borderRadius: 12, 
+    padding: 12, 
+    marginBottom: 8 
+  },
+  subtaskCheckbox: { 
+    width: 24, 
+    height: 24, 
+    borderRadius: 12, 
+    borderWidth: 2, 
+    borderColor: '#ddd', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginRight: 12,
+    backgroundColor: '#f8f8f8'
+  },
+  subtaskCheckboxCompleted: {
+    backgroundColor: Colors.light.tint,
+    borderColor: Colors.light.tint
+  },
+  subtaskText: { 
+    flex: 1, 
+    fontSize: 16, 
+    color: Colors.light.text, 
+    paddingVertical: 4 
+  },
+  subtaskTextCompleted: { 
+    textDecorationLine: 'line-through', 
+    color: '#999' 
+  },
+  subtaskDeleteButton: { 
+    padding: 8, 
+    marginLeft: 8 
+  },
   
   // Estilos para botón de borrar
   deleteButton: { 

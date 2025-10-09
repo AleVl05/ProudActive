@@ -113,4 +113,12 @@ class Event extends Model
     {
         return $this->hasMany(RecurrenceException::class);
     }
+
+    /**
+     * Relación con las subtareas del evento
+     */
+    public function subtasks(): HasMany
+    {
+        return $this->hasMany(Subtask::class)->ordered();
+    }
 }

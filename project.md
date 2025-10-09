@@ -142,6 +142,7 @@ recurrence_count INT NULL
 - `users` - Usuarios del sistema
 - `calendars` - Calendarios por usuario  
 - `events` - Eventos con soporte de recurrencia
+- `subtasks` - Subtareas de eventos (nueva)
 - `recurrence_exceptions` - Excepciones en series recurrentes
 - `alarms` - Alarmas y recordatorios
 - `devices` - Dispositivos para notificaciones push
@@ -283,6 +284,26 @@ CREATE TABLE events (
     INDEX idx_series_id (series_id),
     INDEX idx_deleted (is_deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- TABLA: subtasks
+-- Subtareas de eventos (checklist de tareas)
+-- =============================================
+CREATE TABLE subtasks (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id BIGINT UNSIGNED NOT NULL COMMENT 'ID del evento padre',
+    text VARCHAR(500) NOT NULL COMMENT 'Texto de la subtarea',
+    completed TINYINT(1) DEFAULT 0 COMMENT 'Si la subtarea está completada',
+    sort_order INT DEFAULT 0 COMMENT 'Orden de visualización',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_event_id (event_id),
+    INDEX idx_completed (completed),
+    INDEX idx_sort_order (sort_order),
+    CONSTRAINT fk_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- =============================================
 -- TABLA: recurrence_exceptions
