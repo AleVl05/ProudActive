@@ -596,12 +596,31 @@ interface EventResizableBlockProps {
 
 const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit, onMoveCommit, onQuickPress, cellWidth }: EventResizableBlockProps) {
 
+  // 🔧 RENDER LOGS
+  const renderCount = useRef(0);
+  renderCount.current += 1;
+  const calculatedHeight = (ev.duration / 30) * CELL_HEIGHT - 2;
+  const blocks = ev.duration / 30;
+  
+  console.log(`🔧 RENDER - EventResizableBlock`, {
+    eventId: ev.id,
+    eventTitle: ev.title,
+    startTime: ev.startTime,
+    duration: ev.duration,
+    calculatedHeight,
+    blocks: blocks.toFixed(1),
+    renderCount: renderCount.current,
+    timestamp: new Date().toISOString()
+  });
+
   const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
   const ghostTopOffset = useRef(new Animated.Value(0)).current;
   const ghostLeftOffset = useRef(new Animated.Value(0)).current;
   const [showGhost, setShowGhost] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [showDebugOverlay, setShowDebugOverlay] = useState(true); // 🔧 DEBUG: Mostrar overlays visuales
+  const [lastTouchPosition, setLastTouchPosition] = useState<{x: number, y: number} | null>(null);
   const allowDragRef = useRef(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initial = useRef({ startTime: ev.startTime, duration: ev.duration, date: ev.date }).current;
@@ -680,6 +699,18 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       return true;
     },
     onPanResponderGrant: () => {
+      // 🟣 TOUCH_EVENT - TopHandle
+      const timestamp = new Date().toISOString();
+      console.log('🟣 TOUCH_EVENT - TopHandle', {
+        timestamp,
+        eventId: ev.id,
+        eventTitle: ev.title,
+        eventDuration: ev.duration,
+        component: 'EventResizableBlock',
+        area: 'top_handle',
+        action: 'resize_start'
+      });
+      
       setShowGhost(true);
       setIsResizing(true);
       ghostTopOffset.setValue(0);
@@ -738,6 +769,18 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       return true;
     },
     onPanResponderGrant: () => {
+      // 🟣 TOUCH_EVENT - BottomHandle
+      const timestamp = new Date().toISOString();
+      console.log('🟣 TOUCH_EVENT - BottomHandle', {
+        timestamp,
+        eventId: ev.id,
+        eventTitle: ev.title,
+        eventDuration: ev.duration,
+        component: 'EventResizableBlock',
+        area: 'bottom_handle',
+        action: 'resize_start'
+      });
+      
       setShowGhost(true);
       setIsResizing(true);
       ghostTopOffset.setValue(0);
@@ -806,7 +849,26 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       
       return shouldCapture;
     },
-    onPanResponderGrant: () => {
+    onPanResponderGrant: (evt) => {
+      // 🟣 TOUCH_EVENT - CenterArea
+      const timestamp = new Date().toISOString();
+      const touchX = evt.nativeEvent.pageX;
+      const touchY = evt.nativeEvent.pageY;
+      
+      // 🔧 DEBUG: Capturar posición del toque
+      setLastTouchPosition({ x: touchX, y: touchY });
+      
+      console.log('🟣 TOUCH_EVENT - CenterArea', {
+        timestamp,
+        eventId: ev.id,
+        eventTitle: ev.title,
+        eventDuration: ev.duration,
+        component: 'EventResizableBlock',
+        area: 'center_area',
+        action: 'touch_start',
+        touchPosition: { x: touchX, y: touchY }
+      });
+      
       // Iniciar timer de long press (1 segundo)
       longPressTimer.current = setTimeout(() => {
         allowDragRef.current = true;
@@ -848,6 +910,19 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       
       // Si no se activó el drag mode, es un click corto - abrir modal
       if (!allowDragRef.current) {
+        // 🟣 TOUCH_EVENT - QuickPress
+        const timestamp = new Date().toISOString();
+        console.log('🟣 TOUCH_EVENT - QuickPress', {
+          timestamp,
+          eventId: ev.id,
+          eventTitle: ev.title,
+          eventDuration: ev.duration,
+          component: 'EventResizableBlock',
+          area: 'center_area',
+          action: 'quick_press',
+          gesture: { deltaY, deltaX }
+        });
+        
         if (typeof onQuickPress === 'function') {
           onQuickPress(ev);
         }
@@ -940,6 +1015,133 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
             borderColor: ev.color
           }} />
         </Animated.View>
+      )}
+
+      {/* 🔧 DEBUG: Overlay visual para mostrar hitbox real del bloque */}
+      {showDebugOverlay && (
+        <View style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: blockHeight,
+          borderWidth: 2,
+          borderColor: '#ff0000',
+          borderStyle: 'dashed',
+          backgroundColor: 'rgba(255, 0, 0, 0.1)',
+          zIndex: 150,
+          pointerEvents: 'none'
+        }}>
+          <Text style={{
+            position: 'absolute',
+            top: 2,
+            left: 2,
+            fontSize: 10,
+            color: '#ff0000',
+            fontWeight: 'bold',
+            backgroundColor: 'rgba(255, 255, 255, 0.8)',
+            padding: 2
+          }}>
+            ID: {ev.id}
+          </Text>
+          <Text style={{
+            position: 'absolute',
+            top: 16,
+            left: 2,
+            fontSize: 10,
+            color: '#ff0000',
+            fontWeight: 'bold',
+            backgroundColor: 'rgba(255, 255, 255, 0.8)',
+            padding: 2
+          }}>
+            Block H: {Math.round(blockHeight)}px
+          </Text>
+          <Text style={{
+            position: 'absolute',
+            top: 30,
+            left: 2,
+            fontSize: 10,
+            color: '#ff0000',
+            fontWeight: 'bold',
+            backgroundColor: 'rgba(255, 255, 255, 0.8)',
+            padding: 2
+          }}>
+            Blocks: {(ev.duration / 30).toFixed(1)}
+          </Text>
+        </View>
+      )}
+
+      {/* 🔧 DEBUG: Overlay visual para mostrar área del moveResponder */}
+      {showDebugOverlay && (
+        <View style={{
+          position: 'absolute',
+          top: 12, // moveResponder top
+          left: 0,
+          right: 0,
+          bottom: 12, // moveResponder bottom
+          borderWidth: 2,
+          borderColor: '#00ff00',
+          borderStyle: 'solid',
+          backgroundColor: 'rgba(0, 255, 0, 0.2)',
+          zIndex: 160,
+          pointerEvents: 'none'
+        }}>
+          <Text style={{
+            position: 'absolute',
+            top: 2,
+            left: 2,
+            fontSize: 10,
+            color: '#00ff00',
+            fontWeight: 'bold',
+            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+            padding: 2
+          }}>
+            MoveResponder
+          </Text>
+          <Text style={{
+            position: 'absolute',
+            top: 16,
+            left: 2,
+            fontSize: 10,
+            color: '#00ff00',
+            fontWeight: 'bold',
+            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+            padding: 2
+          }}>
+            H: {Math.round(blockHeight - 24)}px
+          </Text>
+          <Text style={{
+            position: 'absolute',
+            top: 30,
+            left: 2,
+            fontSize: 10,
+            color: '#00ff00',
+            fontWeight: 'bold',
+            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+            padding: 2
+          }}>
+            Top: 12, Bottom: 12
+          </Text>
+        </View>
+      )}
+
+      {/* 🔧 DEBUG: Mostrar posición del último toque */}
+      {lastTouchPosition && (
+        <View style={{
+          position: 'absolute',
+          left: lastTouchPosition.x - 10,
+          top: lastTouchPosition.y - 10,
+          width: 20,
+          height: 20,
+          backgroundColor: 'rgba(0, 255, 0, 0.8)',
+          borderRadius: 10,
+          zIndex: 300,
+          pointerEvents: 'none',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}>
+          <Text style={{ fontSize: 12, color: 'white' }}>👆</Text>
+        </View>
       )}
 
         <View 
@@ -1918,6 +2120,22 @@ export default function CalendarView({}: CalendarViewProps) {
   }, [currentDate, startOfWeek, addDays, toDateKey]);
 
   const handleCellPress = useCallback((dayIndex: number, timeIndex: number) => {
+    // 🟣 TOUCH_EVENT - GridCell
+    const timestamp = new Date().toISOString();
+    const startTime = timeIndex * 30;
+    const lookupKey = `${toDateKey(currentDate)}-${startTime}`;
+    const existingEvent = eventsByCell[lookupKey];
+    
+    console.log('🟣 TOUCH_EVENT - GridCell', {
+      timestamp,
+      coordinates: { dayIndex, timeIndex },
+      startTime,
+      lookupKey,
+      hasExistingEvent: !!existingEvent,
+      eventId: existingEvent?.id,
+      component: 'GridCell'
+    });
+
     // Calcular fecha correspondiente a la celda (usando vista semana)
     let dateKey = '';
     if (currentView === 'day') {
@@ -1931,16 +2149,15 @@ export default function CalendarView({}: CalendarViewProps) {
       dateKey = toDateKey(currentDate);
     }
 
-    const startTime = timeIndex * 30;
-    const lookupKey = `${dateKey}-${startTime}`;
-    const existingEvent = eventsByCell[lookupKey];
+    const lookupKeyFinal = `${dateKey}-${startTime}`;
+    const existingEventFinal = eventsByCell[lookupKeyFinal];
 
-    if (existingEvent) {
-      setSelectedEvent(existingEvent);
-      setEventTitle(existingEvent.title);
-      setEventDescription(existingEvent.description || '');
-      setEventColor(existingEvent.color);
-      setRecurrenceConfig(extractRecurrenceFromEvent(existingEvent));
+    if (existingEventFinal) {
+      setSelectedEvent(existingEventFinal);
+      setEventTitle(existingEventFinal.title);
+      setEventDescription(existingEventFinal.description || '');
+      setEventColor(existingEventFinal.color);
+      setRecurrenceConfig(extractRecurrenceFromEvent(existingEventFinal));
       setModalVisible(true);
     } else {
       setSelectedEvent(null);
@@ -2573,7 +2790,18 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // Callback para abrir modal al hacer click rápido en evento
   const onQuickPress = useCallback((event: Event) => {
-    // 🎯 LOGGING DE IDENTIFICACIÓN DE EVENTO
+    // 🟣 TOUCH_EVENT - EventResizableBlock
+    const timestamp = new Date().toISOString();
+    console.log('🟣 TOUCH_EVENT - EventResizableBlock', {
+      timestamp,
+      eventId: event.id,
+      eventTitle: event.title,
+      eventDuration: event.duration,
+      eventStartTime: event.startTime,
+      eventDate: event.date,
+      component: 'EventResizableBlock',
+      coordinates: 'center_area'
+    });
 
     setSelectedEvent(event);
     setEventTitle(event.title);
@@ -2813,7 +3041,22 @@ export default function CalendarView({}: CalendarViewProps) {
                 <View style={styles.timeColumn}>
                   <Text style={styles.timeText}>{time}</Text>
                 </View>
-                <TouchableOpacity style={[styles.cell, { width: getCellWidth() }]} onPress={() => handleCellPress(0, timeIndex)}>
+                <TouchableOpacity 
+                  style={[styles.cell, { width: getCellWidth() }]} 
+                  onPress={() => {
+                    // 🟣 TOUCH_EVENT - DayViewCell
+                    const timestamp = new Date().toISOString();
+                    console.log('🟣 TOUCH_EVENT - DayViewCell', {
+                      timestamp,
+                      coordinates: { dayIndex: 0, timeIndex },
+                      startTime: timeIndex * 30,
+                      hasEvent: !!event,
+                      eventId: event?.id,
+                      component: 'DayViewCell'
+                    });
+                    handleCellPress(0, timeIndex);
+                  }}
+                >
                 {event && (
                     <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} />
                 )}
@@ -2882,7 +3125,19 @@ export default function CalendarView({}: CalendarViewProps) {
                           <TouchableOpacity
                             key={`cell-${dayIndex}-${timeIndex}`}
                             style={[styles.cell, { width: getCellWidth() }]}
-                            onPress={() => handleCellPress(dayIndex, timeIndex)}
+                            onPress={() => {
+                              // 🟣 TOUCH_EVENT - WeekViewCell
+                              const timestamp = new Date().toISOString();
+                              console.log('🟣 TOUCH_EVENT - WeekViewCell', {
+                                timestamp,
+                                coordinates: { dayIndex, timeIndex },
+                                startTime: timeIndex * 30,
+                                hasEvent: !!event,
+                                eventId: event?.id,
+                                component: 'WeekViewCell'
+                              });
+                              handleCellPress(dayIndex, timeIndex);
+                            }}
                           >
                             {event && (
                                 <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} />
