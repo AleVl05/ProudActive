@@ -288,7 +288,6 @@ const generateRecurrentInstances = (
         
         if (isExcluded) {
           // Esta instancia está excluida, no generar
-          console.log('🎯 INSTANCIA EXCLUIDA:', instanceDateString);
         } else if (overridesMap && overridesMap.has(instanceUtcKey)) {
           const override = overridesMap.get(instanceUtcKey);
           
@@ -596,14 +595,6 @@ interface EventResizableBlockProps {
 }
 
 const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit, onMoveCommit, onQuickPress, cellWidth }: EventResizableBlockProps) {
-  // 🔧 DEBUG: Log cuando el componente recibe nuevas props
-  console.log('🔧 RESIZE DEBUG - EventResizableBlock render:', {
-    eventId: ev.id,
-    eventTitle: ev.title,
-    duration: ev.duration,
-    startTime: ev.startTime,
-    calculatedHeight: (ev.duration / 30) * CELL_HEIGHT - 2
-  });
 
   const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
   const ghostTopOffset = useRef(new Animated.Value(0)).current;
@@ -651,64 +642,28 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
     };
   }, []);
 
-  // 🔧 DEBUG: Detectar cambios en las props del evento
-  useEffect(() => {
-    console.log('🔧 RESIZE DEBUG - EventResizableBlock props changed:', {
-      eventId: ev.id,
-      duration: ev.duration,
-      startTime: ev.startTime,
-      height: (ev.duration / 30) * CELL_HEIGHT - 2
-    });
-  }, [ev.duration, ev.startTime, ev.id]);
 
-  // 🔧 FIX: Forzar re-render cuando cambia la duración
+  // 🔧 OPTIMIZACIÓN: Solo forzar re-render cuando realmente cambia la duración
   const [forceRender, setForceRender] = useState(0);
+  const prevDuration = useRef(ev.duration);
+  
   useEffect(() => {
-    if (ev.duration !== initial.duration) {
-      console.log('🔧 RESIZE DEBUG - Duration changed, forcing re-render:', {
-        oldDuration: initial.duration,
-        newDuration: ev.duration,
-        forceRenderKey: `${ev.id}-${forceRender + 1}`
-      });
+    if (ev.duration !== prevDuration.current) {
+      prevDuration.current = ev.duration;
       setForceRender(prev => prev + 1);
     }
-  }, [ev.duration, initial.duration]);
+  }, [ev.duration]);
 
-  // 🔧 DEBUG: Log cuando se fuerza el re-render
-  useEffect(() => {
-    if (forceRender > 0) {
-      console.log('🔧 RESIZE DEBUG - Force render triggered:', {
-        eventId: ev.id,
-        forceRender,
-        duration: ev.duration,
-        height: (ev.duration / 30) * CELL_HEIGHT - 2
-      });
-    }
-  }, [forceRender, ev.id, ev.duration]);
 
   const commitResize = useCallback((newStartTime: number, newDuration: number) => {
-    console.log('🔧 RESIZE DEBUG - commitResize called:', {
-      eventId: ev.id,
-      eventTitle: ev.title,
-      originalStartTime: ev.startTime,
-      originalDuration: ev.duration,
-      newStartTime,
-      newDuration,
-      deltaStart: newStartTime - ev.startTime,
-      deltaDuration: newDuration - ev.duration
-    });
-    
     const minDuration = 30;
     if (newDuration < minDuration) {
-      console.log('🔧 RESIZE DEBUG - Duration too small, adjusting to minimum:', newDuration, '->', minDuration);
       newDuration = minDuration;
     }
     if (newStartTime < 0) {
-      console.log('🔧 RESIZE DEBUG - Start time negative, aborting:', newStartTime);
       return;
     }
     
-    console.log('🔧 RESIZE DEBUG - Calling onResizeCommit with:', { newStartTime, newDuration });
     onResizeCommit(ev, newStartTime, newDuration);
   }, [ev, onResizeCommit]);
 
@@ -717,13 +672,14 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
     onMoveCommit(ev, newStartTime, newDate);
   }, [ev, onMoveCommit]);
 
+  // 🔧 OPTIMIZACIÓN: Memoizar el cálculo de altura para evitar recálculos innecesarios
+  const blockHeight = useMemo(() => (ev.duration / 30) * CELL_HEIGHT - 2, [ev.duration]);
+
   const topResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => {
-      console.log('🔧 RESIZE DEBUG - Top responder activated');
       return true;
     },
     onPanResponderGrant: () => {
-      console.log('🔧 RESIZE DEBUG - Top resize started for event:', ev.title);
       setShowGhost(true);
       setIsResizing(true);
       ghostTopOffset.setValue(0);
@@ -745,22 +701,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       const isValidStart = newStart >= minStartTime && newStart <= maxStartTime;
       const isValid = isValidDuration && isValidStart;
       
-      console.log('🔧 RESIZE DEBUG - Top resize move:', {
-        gestureDy: gesture.dy,
-        deltaSlots,
-        deltaMin,
-        newStart,
-        newDuration,
-        isValid,
-        validationDetails: {
-          isValidDuration,
-          isValidStart,
-          minDuration,
-          maxDuration,
-          minStartTime,
-          maxStartTime
-        }
-      });
       
       if (isValid) {
         ghostTopOffset.setValue(deltaSlots * CELL_HEIGHT);
@@ -781,16 +721,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       const finalStart = Math.min(newStart, maxStartTime);
       const finalDuration = Math.min(Math.max(newDuration, minDuration), maxDuration);
       
-      console.log('🔧 RESIZE DEBUG - Top resize release:', {
-        gestureDy: gesture.dy,
-        deltaSlots,
-        deltaMin,
-        originalStart: newStart,
-        originalDuration: newDuration,
-        finalStart,
-        finalDuration,
-        wasAdjusted: finalStart !== newStart || finalDuration !== newDuration
-      });
       
       setShowGhost(false);
       setIsResizing(false);
@@ -798,7 +728,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
     },
     onPanResponderTerminationRequest: () => false,
     onPanResponderTerminate: () => {
-      console.log('🔧 RESIZE DEBUG - Top resize terminated');
       setShowGhost(false);
       setIsResizing(false);
     },
@@ -806,11 +735,9 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
 
   const bottomResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => {
-      console.log('🔧 RESIZE DEBUG - Bottom responder activated');
       return true;
     },
     onPanResponderGrant: () => {
-      console.log('🔧 RESIZE DEBUG - Bottom resize started for event:', ev.title);
       setShowGhost(true);
       setIsResizing(true);
       ghostTopOffset.setValue(0);
@@ -831,21 +758,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       const isValidEndTime = newEndTime <= maxEndTime;
       const isValid = isValidDuration && isValidEndTime;
       
-      console.log('🔧 RESIZE DEBUG - Bottom resize move:', {
-        gestureDy: gesture.dy,
-        deltaSlots,
-        deltaMin,
-        newDuration,
-        newEndTime,
-        isValid,
-        validationDetails: {
-          isValidDuration,
-          isValidEndTime,
-          minDuration,
-          maxDuration,
-          maxEndTime
-        }
-      });
       
       if (isValid) {
         ghostHeight.setValue((newDuration / 30) * CELL_HEIGHT - 2);
@@ -866,15 +778,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
       const finalEndTime = initial.startTime + finalDuration;
       const adjustedDuration = finalEndTime > maxEndTime ? maxEndTime - initial.startTime : finalDuration;
       
-      console.log('🔧 RESIZE DEBUG - Bottom resize release:', {
-        gestureDy: gesture.dy,
-        deltaSlots,
-        deltaMin,
-        originalDuration: newDuration,
-        originalEndTime: newEndTime,
-        finalDuration: adjustedDuration,
-        wasAdjusted: adjustedDuration !== newDuration
-      });
       
       setShowGhost(false);
       setIsResizing(false);
@@ -882,7 +785,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
     },
     onPanResponderTerminationRequest: () => false,
     onPanResponderTerminate: () => {
-      console.log('🔧 RESIZE DEBUG - Bottom resize terminated');
       setShowGhost(false);
       setIsResizing(false);
     },
@@ -1046,8 +948,8 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
             styles.eventBlock, 
             { 
               backgroundColor: ev.color, 
-              height: (ev.duration / 30) * CELL_HEIGHT - 2,
-              minHeight: (ev.duration / 30) * CELL_HEIGHT - 2, // 🔧 FIX: Forzar altura mínima también
+              height: blockHeight,
+              minHeight: blockHeight, // 🔧 OPTIMIZACIÓN: Usar altura memoizada
               zIndex: 100 // 🔧 FIX: Asegurar que esté encima del grid
             }
           ]}
@@ -1638,7 +1540,6 @@ export default function CalendarView({}: CalendarViewProps) {
         const isInstance = typeof selectedEvent.id === 'string' && selectedEvent.id.includes('_');
         
         if (isInstance) {
-          console.log('🎯 CONVIRTIENDO INSTANCIA EN OVERRIDE:', selectedEvent.id);
           
           // Crear override con los mismos datos de la instancia
           // 🎯 CORREGIR: Usar la fecha correcta de la instancia, no la original
@@ -1669,19 +1570,16 @@ export default function CalendarView({}: CalendarViewProps) {
           const createRes = await apiPostEvent(overridePayload);
           if (createRes.ok) {
             const overrideData = await createRes.json();
-            console.log('🎯 OVERRIDE CREADO:', overrideData.data.id);
             
             // Ahora eliminar el override recién creado
             const deleteRes = await apiDeleteEvent(String(overrideData.data.id));
             if (deleteRes.ok) {
-              console.log('🎯 OVERRIDE ELIMINADO - Hueco mantenido');
             }
           }
         } else {
           // Es un evento único o override, eliminar directamente
           const deleteRes = await apiDeleteEvent(String(selectedEvent.id));
           if (!deleteRes.ok) {
-            console.log('🎯 ERROR AL ELIMINAR EVENTO');
           }
         }
       } else {
@@ -1691,7 +1589,6 @@ export default function CalendarView({}: CalendarViewProps) {
         for (const eventId of eventsToDelete) {
           const deleteRes = await apiDeleteEvent(String(eventId));
           if (!deleteRes.ok) {
-            console.log('🎯 ERROR AL ELIMINAR SERIE');
           }
         }
       }
@@ -1915,12 +1812,6 @@ export default function CalendarView({}: CalendarViewProps) {
       
       // Procesar series recurrentes con overrides
       for (const seriesItem of series) {
-        // 🎯 DEBUG: Verificar si las excepciones llegan del backend
-        console.log('🎯 SERIE RECURRENTE:', {
-          id: seriesItem.id,
-          title: seriesItem.title,
-          recurrence_exceptions: seriesItem.recurrence_exceptions
-        });
         
         const recurrentInstances = generateRecurrentInstances(seriesItem, rangeStart, rangeEnd, overridesMap);
         allEvents.push(...recurrentInstances);
@@ -2532,36 +2423,19 @@ export default function CalendarView({}: CalendarViewProps) {
   const onResizeCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDuration: number) => {
     const eventId = eventToUpdate.id; // ID actual, ya sea temporal o real
 
-    console.log('🔧 RESIZE DEBUG - onResizeCommit called:', {
-      eventId,
-      eventTitle: eventToUpdate.title,
-      originalStartTime: eventToUpdate.startTime,
-      originalDuration: eventToUpdate.duration,
-      newStartTime,
-      newDuration,
-      isLocked: resizeLockRef.current.has(eventId)
-    });
 
     if (resizeLockRef.current.has(eventId)) {
-      console.log('🔧 RESIZE DEBUG - Event is locked, skipping:', eventId);
       return;
     }
     resizeLockRef.current.add(eventId);
 
     // 1. Actualización optimista de la UI (para que se vea instantáneo)
-    console.log('🔧 RESIZE DEBUG - Updating UI optimistically');
     setEvents(prev => {
       const updatedEvents = prev.map(ev => ev.id === eventId ? { ...ev, startTime: newStartTime, duration: newDuration } : ev);
       
       // 🔧 DEBUG: Verificar que el evento se actualizó correctamente
       const updatedEvent = updatedEvents.find(ev => ev.id === eventId);
       if (updatedEvent) {
-        console.log('🔧 RESIZE DEBUG - Event updated in state:', {
-          eventId: updatedEvent.id,
-          newDuration: updatedEvent.duration,
-          newStartTime: updatedEvent.startTime,
-          calculatedHeight: (updatedEvent.duration / 30) * CELL_HEIGHT - 2
-        });
       }
       
       return updatedEvents;
@@ -2570,22 +2444,12 @@ export default function CalendarView({}: CalendarViewProps) {
     const startLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime);
     const endLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime + newDuration);
 
-    console.log('🔧 RESIZE DEBUG - Calculated times:', {
-      startLocal: startLocal.toISOString(),
-      endLocal: endLocal.toISOString(),
-      eventDate: eventToUpdate.date
-    });
 
     try {
         // 🔍 DETECTAR SI ES INSTANCIA GENERADA DE SERIE RECURRENTE
         const match = String(eventToUpdate.id).match(/^(\d+)_(\d{4}-\d{2}-\d{2})$/);
         const isGeneratedInstance = !!match;
         
-        console.log('🔧 RESIZE DEBUG - Event type detection:', {
-          eventId: eventToUpdate.id,
-          isGeneratedInstance,
-          match: match ? match[1] : null
-        });
 
         if (isGeneratedInstance) {
             // 📝 CREAR OVERRIDE PARA INSTANCIA GENERADA
@@ -2678,12 +2542,10 @@ export default function CalendarView({}: CalendarViewProps) {
             }
         }
     } catch (e) {
-        console.log('🔧 RESIZE DEBUG - Error during resize:', e);
         Alert.alert('Error', 'No se pudo guardar el cambio. Reintentando...');
         // Revertimos al estado original del bloque antes del estiramiento
         setEvents(prev => prev.map(ev => ev.id === eventId ? eventToUpdate : ev));
     } finally {
-        console.log('🔧 RESIZE DEBUG - Resize completed, unlocking event:', eventId);
         resizeLockRef.current.delete(eventId);
     }
   }, []); // <-- La dependencia vacía [] es clave, ahora no sufre de "estado obsoleto"
@@ -2712,16 +2574,6 @@ export default function CalendarView({}: CalendarViewProps) {
   // Callback para abrir modal al hacer click rápido en evento
   const onQuickPress = useCallback((event: Event) => {
     // 🎯 LOGGING DE IDENTIFICACIÓN DE EVENTO
-    console.log('🎯 IDENTIFICACIÓN DE EVENTO:', {
-      id: event.id,
-      title: event.title,
-      type: getEventType(event),
-      series_id: event.series_id,
-      original_start_utc: event.original_start_utc,
-      is_recurring: event.is_recurring,
-      date: event.date,
-      startTime: event.startTime
-    });
 
     setSelectedEvent(event);
     setEventTitle(event.title);
