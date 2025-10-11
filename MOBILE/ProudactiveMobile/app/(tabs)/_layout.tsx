@@ -40,8 +40,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="challenges"
         options={{
-          title: 'Desafíos',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="trophy.fill" color={color} />,
+          title: 'Mercado',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="cart.fill" color={color} />,
         }}
       />
       <Tabs.Screen

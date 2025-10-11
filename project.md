@@ -122,10 +122,18 @@
 - [ ] **Sincronización**: Misma API que mobile
 - [ ] **PWA**: Progressive Web App
 
+### ✅ **MERCADO - COMPLETADO**
+- [x] **Lista de compras**: Sistema de ítems con checkbox
+- [x] **Agregar ítems**: Campo de texto para agregar nuevos ítems
+- [x] **Eliminar individual**: Botón de basurero para cada ítem
+- [x] **Eliminar todo**: Botón para limpiar toda la lista
+- [x] **API Backend**: CRUD completo con autenticación
+- [x] **Base de datos**: Tabla `market_items` con campos futuros
+- [x] **Navegación**: Cambio de "Desafíos" a "Mercado"
+
 ### 🏋️ **MÓDULOS ADICIONALES - PENDIENTE**
 - [ ] **Gimnasio**: Rastreador de entrenamientos
 - [ ] **Biblioteca**: Gestión de libros y notas
-- [ ] **Desafíos**: Sistema de gamificación
 - [ ] **Herramientas**: Pomodoro, tareas rápidas
 
 ## 🗄️ Base de Datos - Estructura Esencial
@@ -143,6 +151,7 @@ recurrence_count INT NULL
 - `calendars` - Calendarios por usuario  
 - `events` - Eventos con soporte de recurrencia
 - `subtasks` - Subtareas de eventos (nueva)
+- `market_items` - Lista de compras del mercado (nueva)
 - `recurrence_exceptions` - Excepciones en series recurrentes
 - `alarms` - Alarmas y recordatorios
 - `devices` - Dispositivos para notificaciones push
@@ -455,6 +464,24 @@ CREATE TABLE user_achievements (
     INDEX idx_user_id (user_id),
     INDEX idx_type (achievement_type),
     INDEX idx_earned_at (earned_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- TABLA: market_items (Lista de compras del mercado)
+CREATE TABLE market_items (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL COMMENT 'ID del usuario propietario del mercado',
+    name VARCHAR(255) NOT NULL COMMENT 'Nombre del ítem (pan, queso, etc.)',
+    checked TINYINT(1) DEFAULT 0 COMMENT 'Si el ítem fue marcado para eliminar',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    -- Campos futuros para historial o estadísticas
+    historical_data JSON DEFAULT NULL COMMENT 'Por si guardamos histórico de este ítem',
+    popularity_count INT DEFAULT 0 COMMENT 'Por si guardamos cuántas veces se pidió este ítem',
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_checked (checked)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
