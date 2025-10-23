@@ -1,2 +1,1 @@
-// MOBILE/ProudactiveMobile/src/config/api.ts
-export const API_BASE = 'http://192.168.0.11:8000/api/v1';
+export const API_BASE = "https://proudactive.iradogelateria.com.br/api/v1";

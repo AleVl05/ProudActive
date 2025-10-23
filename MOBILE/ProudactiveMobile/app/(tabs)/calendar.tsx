@@ -24,13 +24,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from '../../src/config/api';
+import authService from '../../services/auth';
 // import { DateTime } from 'luxon'; // No está instalado, usar funciones nativas
 
 
 const { width } = Dimensions.get('window');
 const CELL_HEIGHT = 50; // 30 minutos = 50px
 const START_HOUR = 6;
-const END_HOUR = 22;
+const END_HOUR = 24;
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
 
 const WEEK_DAY_ITEMS = [
@@ -541,11 +542,22 @@ const formatDisplayMonthYear = (date: Date) => {
   return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 };
 
+// Helper para obtener headers autenticados
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const token = await authService.getToken();
+  return {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+}
+
 async function apiPutEventTimes(eventId: string, startUtcIso: string, endUtcIso: string) {
   const url = `${API_BASE}/events/${eventId}`;
+  const headers = await getAuthHeaders();
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ start_utc: startUtcIso, end_utc: endUtcIso }),
   });
   return res;
@@ -553,78 +565,109 @@ async function apiPutEventTimes(eventId: string, startUtcIso: string, endUtcIso:
 
 async function apiPutEvent(eventId: string, payload: any) {
   const url = `${API_BASE}/events/${eventId}`;
+  const headers = await getAuthHeaders();
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
   return res;
 }
 
 async function apiGetCalendars() {
-  const res = await fetch(`${API_BASE}/calendars`);
-  return res.json();
+  const url = `${API_BASE}/calendars`;
+  const headers = await getAuthHeaders();
+  
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers
+    });
+
+    if (res.ok) {
+      return await res.json();
+    }
+    return null;
+  } catch(err) {
+    console.error('📅 Error loading calendars:', err);
+    return null;
+  }
 }
 
 async function apiPostEvent(payload: any) {
+  const headers = await getAuthHeaders();
   const res = await fetch(`${API_BASE}/events`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
   return res;
 }
 
+
 async function apiDeleteEvent(eventId: string) {
-  const res = await fetch(`${API_BASE}/events/${eventId}`, { method: 'DELETE' });
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/events/${eventId}`, { 
+    method: 'DELETE',
+    headers 
+  });
   return res;
 }
 
 async function apiFetchEvents(startIso: string, endIso: string) {
+  const headers = await getAuthHeaders();
   const params = new URLSearchParams({ start: startIso, end: endIso });
-  const res = await fetch(`${API_BASE}/events?${params.toString()}`);
+  const res = await fetch(`${API_BASE}/events?${params.toString()}`, {
+    headers
+  });
   return res;
 }
 
 // Funciones de API para subtareas
 async function apiGetSubtasks(eventId: string) {
-  const res = await fetch(`${API_BASE}/events/${eventId}/subtasks`);
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/events/${eventId}/subtasks`, { headers });
   return res;
 }
 
 async function apiCreateSubtask(eventId: string, text: string, sortOrder: number = 0) {
-  console.log('🔧 apiCreateSubtask called with:', { eventId, text, sortOrder });
+  const headers = await getAuthHeaders();
   const res = await fetch(`${API_BASE}/subtasks`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       event_id: eventId,
       text: text,
       sort_order: sortOrder
     }),
   });
-  console.log('🔧 apiCreateSubtask response:', res.status, res.ok);
   return res;
 }
 
 async function apiUpdateSubtask(subtaskId: string, updates: {text?: string, completed?: boolean, sort_order?: number}) {
+  const headers = await getAuthHeaders();
   const res = await fetch(`${API_BASE}/subtasks/${subtaskId}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(updates),
   });
   return res;
 }
 
 async function apiDeleteSubtask(subtaskId: string) {
-  const res = await fetch(`${API_BASE}/subtasks/${subtaskId}`, { method: 'DELETE' });
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/subtasks/${subtaskId}`, { 
+    method: 'DELETE',
+    headers 
+  });
   return res;
 }
 
 async function apiUpdateMultipleSubtasks(subtasks: Array<{id: string, text?: string, completed?: boolean, sort_order?: number}>) {
+  const headers = await getAuthHeaders();
   const res = await fetch(`${API_BASE}/subtasks/update-multiple`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ subtasks }),
   });
   return res;
@@ -636,9 +679,10 @@ interface EventResizableBlockProps {
   onMoveCommit: (event: Event, newStartTime: number, newDate: string) => void;
   cellWidth: number;
   onQuickPress?: (ev: Event) => void; // <-- NEW
+  currentView?: 'day' | 'week' | 'month' | 'year'; // <-- NEW: Para estilos condicionales
 }
 
-const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit, onMoveCommit, onQuickPress, cellWidth }: EventResizableBlockProps) {
+const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResizeCommit, onMoveCommit, onQuickPress, cellWidth, currentView = 'week' }: EventResizableBlockProps) {
 
   const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
   const ghostTopOffset = useRef(new Animated.Value(0)).current;
@@ -1043,11 +1087,15 @@ const EventResizableBlock = React.memo(function EventResizableBlock({ ev, onResi
               backgroundColor: ev.color, 
               height: blockHeight,
               minHeight: blockHeight, // 🔧 OPTIMIZACIÓN: Usar altura memoizada
-              zIndex: 100 // 🔧 FIX: Asegurar que esté encima del grid
+              zIndex: 1000 // 🔧 FIX: Asegurar que esté encima del grid y del día actual
             }
           ]}
         >
-        <Text style={styles.eventText} numberOfLines={2}>{ev.title}</Text>
+        <Text style={[
+          styles.eventText,
+          currentView === 'day' && styles.eventTextDay,
+          currentView === 'week' && styles.eventTextWeek
+        ]} numberOfLines={2}>{ev.title}</Text>
         {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
         <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
         <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
@@ -2638,6 +2686,8 @@ export default function CalendarView({}: CalendarViewProps) {
           Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
         }
       } catch (e) {
+        apiCalendarsPublicTest();
+        apiDebugHeaders();
         Alert.alert('Aviso', 'No se pudo crear el evento en el servidor.');
       }
 
@@ -2919,16 +2969,6 @@ export default function CalendarView({}: CalendarViewProps) {
   const onQuickPress = useCallback((event: Event) => {
     // 🟣 TOUCH_EVENT - EventResizableBlock
     const timestamp = new Date().toISOString();
-    console.log('🟣 TOUCH_EVENT - EventResizableBlock', {
-      timestamp,
-      eventId: event.id,
-      eventTitle: event.title,
-      eventDuration: event.duration,
-      eventStartTime: event.startTime,
-      eventDate: event.date,
-      component: 'EventResizableBlock',
-      coordinates: 'center_area'
-    });
 
     setSelectedEvent(event);
     setEventTitle(event.title);
@@ -3103,9 +3143,17 @@ export default function CalendarView({}: CalendarViewProps) {
                     const dayDate = addDays(weekStart, i);
                     const dayNum = dayDate.getDate();
                     const dayName = weekDaysFull[i];
+                    const isToday = dayDate.toDateString() === new Date().toDateString();
                     return (
-                      <View key={i} style={[styles.dayHeader, { width: dayHeaderWidth }]}>
-                        <Text style={styles.dayText}>{`${dayName} ${String(dayNum).padStart(2, '0')}`}</Text>
+                      <View key={i} style={[
+                        styles.dayHeader, 
+                        { width: dayHeaderWidth },
+                        isToday && styles.todayHeader
+                      ]}>
+                        <Text style={[
+                          styles.dayText,
+                          isToday && styles.todayHeaderText
+                        ]}>{`${dayName} ${String(dayNum).padStart(2, '0')}`}</Text>
                       </View>
                     );
                   })}
@@ -3166,29 +3214,39 @@ export default function CalendarView({}: CalendarViewProps) {
             const dateKey = toDateKey(currentDate);
             const key = `${dateKey}-${timeIndex * 30}`;
             const event = eventsByCell[key];
+            
+            // Detectar si es la hora actual
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const currentTimeInMinutes = currentHour * 60 + currentMinute;
+            const slotStartTime = START_HOUR * 60 + (timeIndex * 30);
+            const slotEndTime = slotStartTime + 30;
+            const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
+            
             return (
-              <View style={styles.timeRow}>
-                <View style={styles.timeColumn}>
-                  <Text style={styles.timeText}>{time}</Text>
+              <View style={[
+                styles.timeRow,
+                isCurrentHour && styles.currentHourRow
+              ]}>
+                <View style={[
+                  styles.timeColumn,
+                  isCurrentHour && styles.currentHourColumn
+                ]}>
+                  <Text style={[
+                    styles.timeText,
+                    isCurrentHour && styles.currentHourText
+                  ]}>{time}</Text>
                 </View>
                 <TouchableOpacity 
                   style={[styles.cell, { width: getCellWidth() }]} 
                   onPress={() => {
-                    // 🟣 TOUCH_EVENT - DayViewCell
-                    const timestamp = new Date().toISOString();
-                    console.log('🟣 TOUCH_EVENT - DayViewCell', {
-                      timestamp,
-                      coordinates: { dayIndex: 0, timeIndex },
-                      startTime: timeIndex * 30,
-                      hasEvent: !!event,
-                      eventId: event?.id,
-                      component: 'DayViewCell'
-                    });
-                    handleCellPress(0, timeIndex);
+                    
+                    
                   }}
                 >
                 {event && (
-                    <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} />
+                    <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} currentView={currentView} />
                 )}
                 </TouchableOpacity>
               </View>
@@ -3230,6 +3288,30 @@ export default function CalendarView({}: CalendarViewProps) {
                 cellHeight={CELL_HEIGHT} 
               />
               
+              {/* Línea horizontal de la hora actual */}
+              {(() => {
+                const now = new Date();
+                const currentHour = now.getHours();
+                const currentMinute = now.getMinutes();
+                const currentTimeInMinutes = currentHour * 60 + currentMinute;
+                const slotStartTime = START_HOUR * 60;
+                const currentSlotIndex = Math.floor((currentTimeInMinutes - slotStartTime) / 30);
+                
+                if (currentSlotIndex >= 0 && currentSlotIndex < timeSlots.length) {
+                  const lineTop = currentSlotIndex * CELL_HEIGHT + ((currentTimeInMinutes - slotStartTime) % 30) * (CELL_HEIGHT / 30);
+                  return (
+                    <View style={[
+                      styles.currentHourLine,
+                      {
+                        top: lineTop,
+                        width: getCellWidth() * 7
+                      }
+                    ]} />
+                  );
+                }
+                return null;
+              })()}
+              
               {/* Contenido de días horizontal (scrollable) */}
               <ScrollView
                 horizontal
@@ -3241,8 +3323,22 @@ export default function CalendarView({}: CalendarViewProps) {
                 contentContainerStyle={{ width: getCellWidth() * 7 }}
               >
                 <View>
-                  {timeSlots.map((_, timeIndex) => (
-                    <View key={`row-${timeIndex}`} style={[styles.timeRow, { width: getCellWidth() * 7 }]}> 
+                  {timeSlots.map((_, timeIndex) => {
+                    // Detectar si es la hora actual
+                    const now = new Date();
+                    const currentHour = now.getHours();
+                    const currentMinute = now.getMinutes();
+                    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+                    const slotStartTime = START_HOUR * 60 + (timeIndex * 30);
+                    const slotEndTime = slotStartTime + 30;
+                    const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
+                    
+                    return (
+                    <View key={`row-${timeIndex}`} style={[
+                      styles.timeRow, 
+                      { width: getCellWidth() * 7 },
+                      isCurrentHour && styles.currentHourRow
+                    ]}> 
                       {Array.from({ length: 7 }, (_, dayIndex) => {
                         const weekStart = startOfWeek(currentDate);
                         const dayDate = addDays(weekStart, dayIndex);
@@ -3250,12 +3346,24 @@ export default function CalendarView({}: CalendarViewProps) {
                         const startTime = timeIndex * 30;
                         const lookupKey = `${dateKey}-${startTime}`;
                         const event = eventsByCell[lookupKey];
+                        const isToday = dayDate.toDateString() === new Date().toDateString();
 
                         return (
-                          <TouchableOpacity
+                          <View
                             key={`cell-${dayIndex}-${timeIndex}`}
-                            style={[styles.cell, { width: getCellWidth() }]}
-                            onPress={() => {
+                            style={[
+                              styles.cell, 
+                              { width: getCellWidth() },
+                              isToday && styles.todayCell
+                            ]}
+                          >
+                            {/* Línea vertical del día actual */}
+                            {isToday && (
+                              <View style={styles.todayLine} />
+                            )}
+                            <TouchableOpacity
+                              style={styles.cellTouchable}
+                              onPress={() => {
                               // 🟣 TOUCH_EVENT - WeekViewCell
                               const timestamp = new Date().toISOString();
                               // 🔧 FIX: Verificar si hay un evento que ocupa esta celda
@@ -3278,14 +3386,7 @@ export default function CalendarView({}: CalendarViewProps) {
                                 }
                               }
                               
-                              console.log('🟣 TOUCH_EVENT - WeekViewCell', {
-                                timestamp,
-                                coordinates: { dayIndex, timeIndex },
-                                startTime: timeIndex * 30,
-                                hasEvent: hasOccupyingEvent,
-                                eventId: event?.id,
-                                component: 'WeekViewCell'
-                              });
+                              
                               
                               // 🔧 FIX: Solo ejecutar handleCellPress si NO hay evento ocupando esta celda
                               if (!hasOccupyingEvent) {
@@ -3299,13 +3400,15 @@ export default function CalendarView({}: CalendarViewProps) {
                             }}
                           >
                             {event && (
-                                <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} />
+                                <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} currentView={currentView} />
                             )}
-                          </TouchableOpacity>
+                            </TouchableOpacity>
+                          </View>
                         );
                       })}
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
               </ScrollView>
             </View>
@@ -3345,12 +3448,13 @@ export default function CalendarView({}: CalendarViewProps) {
             </View>
 
             <View style={styles.configCard}>
-              <TouchableOpacity style={styles.configRow}>
+              {/* TODO: Implementar opciones de configuración - comentado temporalmente */}
+              {/* <TouchableOpacity style={styles.configRow}>
                 <Ionicons name="calendar-outline" size={20} color={Colors.light.tint} />
                 <Text style={styles.configLabel}>Data</Text>
                 <Text style={styles.configValue}>Hoje</Text>
                 <Ionicons name="chevron-forward" size={16} color="#ccc" />
-              </TouchableOpacity>
+              </TouchableOpacity> */}
 
               <TouchableOpacity
                 style={styles.configRow}
@@ -3362,26 +3466,29 @@ export default function CalendarView({}: CalendarViewProps) {
                 <Ionicons name="chevron-forward" size={16} color="#ccc" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.configRow}>
+              {/* TODO: Implementar configuración de tiempo - comentado temporalmente */}
+              {/* <TouchableOpacity style={styles.configRow}>
                 <Ionicons name="time-outline" size={20} color={Colors.light.tint} />
                 <Text style={styles.configLabel}>Tempo</Text>
                 <Text style={styles.configValue}>A qualquer momento</Text>
                 <Ionicons name="chevron-forward" size={16} color="#ccc" />
-              </TouchableOpacity>
+              </TouchableOpacity> */}
 
-              <TouchableOpacity style={styles.configRow}>
+              {/* TODO: Implementar configuración de recordatorios - comentado temporalmente */}
+              {/* <TouchableOpacity style={styles.configRow}>
                 <Ionicons name="alarm-outline" size={20} color={Colors.light.tint} />
                 <Text style={styles.configLabel}>Lembrete</Text>
                 <Text style={styles.configValue}>Sem lembrete</Text>
                 <Ionicons name="chevron-forward" size={16} color="#ccc" />
-              </TouchableOpacity>
+              </TouchableOpacity> */}
 
-              <TouchableOpacity style={styles.configRow}>
+              {/* TODO: Implementar configuración de tags - comentado temporalmente */}
+              {/* <TouchableOpacity style={styles.configRow}>
                 <Ionicons name="pricetag-outline" size={20} color={Colors.light.tint} />
                 <Text style={styles.configLabel}>Tag</Text>
                 <Text style={styles.configValue}>Sem tag</Text>
                 <Ionicons name="chevron-forward" size={16} color="#ccc" />
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
 
             <View style={styles.subtasksSection}>
@@ -3457,6 +3564,9 @@ export default function CalendarView({}: CalendarViewProps) {
                 <Text style={styles.deleteButtonText}>Borrar evento</Text>
               </TouchableOpacity>
             )}
+            
+            {/* Padding adicional para evitar que el botón de borrar quede oculto detrás de los botones del celular */}
+            <View style={styles.bottomPadding} />
           </ScrollView>
         </View>
       </Modal>
@@ -3553,10 +3663,38 @@ const styles = StyleSheet.create({
   timeRow: { flexDirection: 'row', height: CELL_HEIGHT },
   timeText: { fontSize: 12, color: Colors.light.text, textAlign: 'center' },
   cell: { flex: 1, borderRightWidth: 0.5, borderRightColor: '#f0f0f0', position: 'relative' },
-  eventContainer: { position: 'absolute', top: 2, left: 2, right: 2, bottom: 2 },
-  eventBlock: { flex: 1, borderRadius: 4, padding: 4, justifyContent: 'center', minHeight: 20 },
+  cellTouchable: { flex: 1, position: 'relative' },
+  todayCell: { position: 'relative' },
+  todayLine: {
+    position: 'absolute',
+    top: 0,
+    left: '50%',
+    width: 2,
+    height: '100%',
+    backgroundColor: 'rgba(107, 83, 226, 0.3)',
+    zIndex: 1001
+  },
+  currentHourLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: 'rgba(107, 83, 226, 0.3)',
+    zIndex: 1001
+  },
+  todayHeader: { backgroundColor: '#6b53e2', borderRadius: 8, marginHorizontal: 2, paddingVertical: 1 },
+  todayHeaderText: { color: 'white', fontWeight: '700' },
+  eventContainer: { position: 'absolute', top: 2, left: 2, right: 2, bottom: 2, zIndex: 1000 },
+  eventBlock: { flex: 1, borderRadius: 4, padding: 4, justifyContent: 'center', minHeight: 20, marginBottom: 2, marginHorizontal: 1, zIndex: 1000 },
   gridBackground: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 },
-  eventText: { fontSize: 11, color: 'white', fontWeight: '500' },
+  eventText: { fontSize: 16, color: 'white', fontWeight: '500' },
+  eventTextDay: { fontSize: 22, fontWeight: '600', paddingLeft: 8, paddingRight: 4 }, // Texto más grande para vista de día con padding
+  eventTextWeek: { fontSize: 14, fontWeight: '500', paddingLeft: 4, paddingRight: 2 }, // Texto ligeramente más grande para vista de semana con padding reducido
+  
+  // Estilos para resaltar la hora actual
+  currentHourRow: { backgroundColor: '#f0e8ff' },
+  currentHourColumn: { backgroundColor: '#f0e8ff' },
+  currentHourText: { color: '#6b53e2', fontWeight: '700' },
   fullscreenModal: { flex: 1, backgroundColor: '#f0f8ff' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#f0f8ff' },
   closeButton: { padding: 8 },
@@ -3662,6 +3800,12 @@ const styles = StyleSheet.create({
     fontWeight: '600', 
     color: '#ff4444', 
     marginLeft: 8 
+  },
+  
+  // Padding adicional para evitar que el botón de borrar quede oculto detrás de los botones del celular
+  bottomPadding: {
+    height: 100, // Espacio suficiente para los botones de navegación del celular
+    backgroundColor: 'transparent'
   },
   
   // Estilos para modal de confirmación de borrado

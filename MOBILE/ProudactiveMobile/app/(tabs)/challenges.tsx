@@ -12,6 +12,17 @@ import {
 import { Colors } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { API_BASE } from '../../src/config/api';
+import authService from '../../services/auth';
+
+// Helper para obtener headers autenticados
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const token = await authService.getToken();
+  return {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+}
 
 interface MarketItem {
   id: string;
@@ -31,58 +42,70 @@ interface Recipe {
 
 // API Functions
 async function apiGetMarketItems() {
-  const res = await fetch(`${API_BASE}/market-items-test`);
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/market-items`, { headers });
   return res;
 }
 
 async function apiCreateMarketItem(name: string) {
-  const res = await fetch(`${API_BASE}/market-items-test-insert`, {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/market-items`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ name }),
   });
   return res;
 }
 
 async function apiDeleteMarketItem(id: string) {
-  const res = await fetch(`${API_BASE}/market-items-test-delete/${id}`, {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/market-items/${id}`, {
     method: 'DELETE',
+    headers
   });
   return res;
 }
 
 async function apiToggleMarketItem(id: string) {
-  const res = await fetch(`${API_BASE}/market-items-test-toggle/${id}`, {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/market-items/${id}/toggle`, {
     method: 'POST',
+    headers
   });
   return res;
 }
 
 async function apiDeleteAllMarketItems() {
-  const res = await fetch(`${API_BASE}/market-items-test-delete-all`, {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/market-items`, {
     method: 'DELETE',
+    headers
   });
   return res;
 }
 
 // Recipe API Functions
 async function apiGetRecipes() {
-  const res = await fetch(`${API_BASE}/recipes-test`);
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/recipes`, { headers });
   return res;
 }
 
 async function apiCreateRecipe(title: string, content: string) {
-  const res = await fetch(`${API_BASE}/recipes-test-insert`, {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/recipes`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ title, content }),
   });
   return res;
 }
 
 async function apiDeleteRecipe(id: string) {
-  const res = await fetch(`${API_BASE}/recipes-test-delete/${id}`, {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/recipes/${id}`, {
     method: 'DELETE',
+    headers
   });
   return res;
 }
@@ -107,19 +130,14 @@ export default function MarketScreen() {
   const loadItems = async () => {
     try {
       setLoading(true);
-      console.log('🔄 Loading items from API...');
       const response = await apiGetMarketItems();
-      console.log('📡 API Response status:', response.status);
       
       if (response.ok) {
         const data = await response.json();
-        console.log('📦 API Response data:', data);
-        if (data.success && data.items) {
-          setItems(data.items);
-          console.log('✅ Items loaded successfully:', data.items.length);
+        // Laravel devuelve directamente el array
+        if (Array.isArray(data)) {
+          setItems(data);
         }
-      } else {
-        console.error('❌ API Error:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('❌ Error loading items:', error);
@@ -135,20 +153,13 @@ export default function MarketScreen() {
 
     try {
       setLoading(true);
-      console.log('➕ Creating item:', newItemName.trim());
       const response = await apiCreateMarketItem(newItemName.trim());
-      console.log('📡 Create API Response status:', response.status);
       
       if (response.ok) {
-        const data = await response.json();
-        console.log('📦 Create API Response data:', data);
-        if (data.success && data.item) {
-          setItems(prevItems => [...prevItems, data.item]);
-          setNewItemName('');
-          console.log('✅ Item created successfully');
-        }
-      } else {
-        console.error('❌ Create API Error:', response.status, response.statusText);
+        const item = await response.json();
+        // Laravel devuelve directamente el objeto creado
+        setItems(prevItems => [...prevItems, item]);
+        setNewItemName('');
       }
     } catch (error) {
       console.error('❌ Error creating item:', error);
@@ -247,19 +258,14 @@ export default function MarketScreen() {
   // Recipe functions
   const loadRecipes = async () => {
     try {
-      console.log('🔄 Loading recipes from API...');
       const response = await apiGetRecipes();
-      console.log('📡 Recipe API Response status:', response.status);
       
       if (response.ok) {
         const data = await response.json();
-        console.log('📦 Recipe API Response data:', data);
-        if (data.success && data.recipes) {
-          setRecipes(data.recipes);
-          console.log('✅ Recipes loaded successfully:', data.recipes.length);
+        // Laravel devuelve directamente el array
+        if (Array.isArray(data)) {
+          setRecipes(data);
         }
-      } else {
-        console.error('❌ Recipe API Error:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('❌ Error loading recipes:', error);
@@ -273,22 +279,15 @@ export default function MarketScreen() {
 
     try {
       setLoading(true);
-      console.log('➕ Creating recipe:', newRecipeTitle.trim());
       const response = await apiCreateRecipe(newRecipeTitle.trim(), newRecipeContent.trim());
-      console.log('📡 Create Recipe API Response status:', response.status);
       
       if (response.ok) {
-        const data = await response.json();
-        console.log('📦 Create Recipe API Response data:', data);
-        if (data.success && data.recipe) {
-          setRecipes(prevRecipes => [...prevRecipes, data.recipe]);
-          setNewRecipeTitle('');
-          setNewRecipeContent('');
-          setShowRecipeForm(false);
-          console.log('✅ Recipe created successfully');
-        }
-      } else {
-        console.error('❌ Create Recipe API Error:', response.status, response.statusText);
+        const recipe = await response.json();
+        // Laravel devuelve directamente el objeto creado
+        setRecipes(prevRecipes => [...prevRecipes, recipe]);
+        setNewRecipeTitle('');
+        setNewRecipeContent('');
+        setShowRecipeForm(false);
       }
     } catch (error) {
       console.error('❌ Error creating recipe:', error);
