@@ -40,6 +40,9 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
+      // Limpiar cualquier sesión anterior para evitar conflictos de tokens
+      await authService.clearSession();
+      
       const result = await authService.register({
         name,
         email,

@@ -20,7 +20,7 @@ class SubtaskController extends Controller
             $event = Event::findOrFail($eventId);
             
             // Verificar que el usuario tenga acceso al evento
-            if ($event->user_id !== 1) {
+            if ($event->user_id !== $request->user()->id) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
@@ -60,7 +60,7 @@ class SubtaskController extends Controller
             $event = Event::findOrFail($request->event_id);
             
             // Verificar que el usuario tenga acceso al evento
-            if ($event->user_id !== 1) {
+            if ($event->user_id !== $request->user()->id) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
@@ -105,7 +105,7 @@ class SubtaskController extends Controller
             $subtask = Subtask::findOrFail($id);
             
             // Verificar que el usuario tenga acceso al evento
-            if ($subtask->event->user_id !== 1) {
+            if ($subtask->event->user_id !== $request->user()->id) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
@@ -126,13 +126,13 @@ class SubtaskController extends Controller
     /**
      * Eliminar una subtarea
      */
-    public function destroy($id): JsonResponse
+    public function destroy($id, Request $request): JsonResponse
     {
         try {
             $subtask = Subtask::findOrFail($id);
             
             // Verificar que el usuario tenga acceso al evento
-            if ($subtask->event->user_id !== 1) {
+            if ($subtask->event->user_id !== $request->user()->id) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
@@ -177,7 +177,7 @@ class SubtaskController extends Controller
                 $subtask = Subtask::findOrFail($subtaskData['id']);
                 
                 // Verificar que el usuario tenga acceso al evento
-                if ($subtask->event->user_id !== 1) {
+                if ($subtask->event->user_id !== $request->user()->id) {
                     return response()->json(['error' => 'Unauthorized'], 403);
                 }
 

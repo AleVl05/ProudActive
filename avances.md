@@ -619,3 +619,44 @@ if (occupyingEvent) {
 - **Sin "pegado"**: Los eventos no se interfieren entre sí en la misma fila
 - **Funcionamiento robusto**: Funciona correctamente al mover y reorganizar eventos
 - **Detección precisa**: El sistema identifica correctamente qué evento está siendo clickeado
+
+## ✅ **MEJORAS DE INTERFAZ - DICIEMBRE 2025**
+
+### **Problema Resuelto: Accesibilidad del Botón de Borrar**
+- **Síntoma**: El botón de borrar evento quedaba oculto detrás de los botones de navegación del celular
+- **Causa**: Falta de padding inferior en el modal de eventos
+- **Solución**: Agregado padding de 100px en la parte inferior del modal
+
+### **Opciones de Configuración Comentadas**
+- **Data**: Comentada temporalmente (TODO: implementar)
+- **Tempo**: Comentada temporalmente (TODO: implementar) 
+- **Lembrete**: Comentada temporalmente (TODO: implementar)
+- **Tag**: Comentada temporalmente (TODO: implementar)
+- **Repetir**: Mantenida activa (funcional)
+
+### **Código Implementado:**
+```typescript
+// Padding adicional para evitar que el botón de borrar quede oculto
+<View style={styles.bottomPadding} />
+
+// Estilo del padding
+bottomPadding: {
+  height: 100, // Espacio suficiente para los botones de navegación del celular
+  backgroundColor: 'transparent'
+},
+
+// Opciones comentadas con TODO
+{/* TODO: Implementar opciones de configuración - comentado temporalmente */}
+{/* <TouchableOpacity style={styles.configRow}>
+  <Ionicons name="calendar-outline" size={20} color={Colors.light.tint} />
+  <Text style={styles.configLabel}>Data</Text>
+  <Text style={styles.configValue}>Hoje</Text>
+  <Ionicons name="chevron-forward" size={16} color="#ccc" />
+</TouchableOpacity> */}
+```
+
+### **Estado: ✅ COMPLETAMENTE FUNCIONAL**
+- **Botón de borrar accesible**: Ahora se puede hacer clic sin problemas
+- **Opciones organizadas**: Solo se muestran las opciones implementadas
+- **Código preparado**: Las opciones comentadas están listas para implementar
+- **UX mejorada**: Interfaz más limpia y funcional

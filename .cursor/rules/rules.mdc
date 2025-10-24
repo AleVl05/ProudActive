@@ -1,0 +1,108 @@
+# Reglas de Cursor para el código de Irado Gelateria
+# Archivo: .cursorrules (YAML)
+# Propósito: asegurar que el código y outputs estén en portugués, sea escalable multi-locais
+# y que el asistente haga "preflight" (preguntas) hasta 95% de confianza antes de escribir código.
+
+description: "Reglas para código de Irado Gelateria — PT-BR, escalabilidad multi-locais, preflight 95%"
+globs:
+  - "**/*.js"
+  - "**/*.ts"
+  - "**/*.jsx"
+  - "**/*.tsx"
+  - "**/*.py"
+  - "**/*.html"
+  - "**/*.css"
+  - "**/*.sql"
+
+alwaysApply: true
+
+rules:
+  - id: "language_and_naming"
+    description: "Todas las variables, identificadores y textos user-facing deben estar en portugués (pt-BR)."
+    appliesTo: ["**/*"]
+    enforce:
+      - type: "naming"
+        target: "identifiers"
+        # patrón simple para asegurar lowercase + underscores o camelCase; validar palabras en portugués manualmente
+        pattern: "^[a-z][a-z0-9_]*$"
+        note: |
+          - Usar **palabras en portugués** para *identifiers* (variables, nombres de funciones, constantes, tablas, columnas).
+          - Elegir convención del repo (snake_case o camelCase) y documentarla; el patrón anterior exige lowercase y guiones bajos si se usa snake_case.
+          - Ejemplos: `preco_unitario`, `adicionar_produto`, `usuario_admin`.
+      - type: "locale"
+        target: "user_facing"
+        locale: "pt-BR"
+        note: |
+          - TODOS los textos visibles para el usuario (labels, botones, placeholders, mensajes de error, emails, notificaciones) deben estar en portugués brasileño.
+          - Comentarios técnicos internos pueden estar en inglés o portugués, pero preferir portugués cuando explique comportamiento del negocio.
+
+  - id: "scalability_multi_tenant"
+    description: "Estructura y convenciones para soportar multiples locais, marcas y restaurantes." 
+    appliesTo:
+      - "backend/**"
+      - "db/**"
+      - "infra/**"
+    enforce:
+      - type: "architecture"
+        requirements:
+          - "Externalizar toda configuración (variables de entorno o ficheros de config), nada hardcodeado por marca."
+          - "Diseñar la app pensando en 'tenant' o 'estabelecimento': introducir tenant_id en las entidades que lo requieran."
+          - "Los assets (logo, tema, textos) deben ser configurables por tenant, no hardcodeados en el frontend ni en rutas fijas."
+          - "APIs deben aceptar un header o claim 'X-Tenant-ID' o extraer tenant desde el JWT para aislar datos."
+      - type: "db"
+        requirements:
+          - "Evitar suposiciones exclusivas de gelatería: usar entidades genéricas como 'estabelecimento', 'produto', 'categoria', 'menu', 'mesa', 'pedido'."
+          - "Diseño multi-tenant recomendado: tenant_id en tablas compartidas; considerar esquema separado por tenant sólo si la necesidad de aislamiento es fuerte."
+          - "Crear índices compuestos incluyendo tenant_id para mantener rendimiento."
+      - type: "frontend"
+        requirements:
+          - "Temas y branding deben cargarse dinámicamente por tenant: colors, logos, textos y rutas personalizables."
+          - "Textos traducibles y almacenados en i18n files (pt-BR) y override por tenant."
+
+  - id: "preflight_questions_and_confidence"
+    description: "Antes de generar o modificar código, el asistente debe recopilar información hasta alcanzar 95% de confianza."
+    appliesTo: ["**/*"]
+    enforce:
+      - type: "preflight"
+        threshold: 0.95
+        behavior: |
+          - Antes de generar código nuevo o cambiar arquitectura, el asistente debe:
+            1) Hacer una lista clara de supuestos (assumptions).
+            2) Formular preguntas abiertas y concretas para reducir incertidumbre (p.ej. formatos de datos, límites de usuarios, integraciones externas, esquema actual DB).
+            3) No escribir código hasta que el desarrollador confirme o el asistente alcance >=95% de confianza.
+          - Si el asistente no alcanza 95% tras 3 rondas de preguntas, deberá presentar una propuesta de diseño con riesgos y alternativas, y solicitar aprobación explícita.
+          - Todo código generado debe incluir al principio un bloque `/* ASSUMPTIONS */` (o docstring) en portugués explicando decisiones tomadas.
+
+  - id: "testing_and_documentation"
+    description: "Obligatoriedad de tests y documentación mínima para cambios significativos."
+    appliesTo: ["**/*"]
+    enforce:
+      - type: "test"
+        requirement: |
+          - Cada feature o cambio no trivial debe ir acompañado de tests unitarios que cubran la lógica principal.
+          - Para flujos críticos (checkout, pedidos, auth) debe haber pruebas e2e o integración.
+      - type: "docs"
+        requirement: |
+          - Cada módulo nuevo debe tener README en pt-BR con propósito, cómo ejecutar localmente y variables de entorno necesarias.
+          - Documentar los endpoints principales en formato OpenAPI o en un markdown `docs/api.md` en pt-BR.
+
+  - id: "security_and_privacy"
+    description: "Reglas básicas de seguridad y privacidad para la app multi-tenant."
+    enforce:
+      - type: "secrets"
+        requirement: "No hardcodear secretos en el repositorio; usar vaults o variables de entorno."
+      - type: "authz"
+        requirement: "Verificar tenant_id en todas las rutas que tocan datos sensibles; no confiar en datos de frontend sin validar."
+
+# Plantillas de ejemplo (usar como guía al generar archivos):
+# - Header assumptions: incluir siempre en cabecera del archivo generado (en portugués)
+# - Ejemplo snippet de ASSUMPTIONS:
+#   /* ASSUMPTIONS:
+#    - este endpoint se conecta a db compartida con tenant_id
+#    - el frontend proveerá header X-Tenant-ID
+#    - usuario admin es 'usuario_admin'
+#   */
+
+# Nota: estas reglas están pensadas para guiar el comportamiento del asistente en Cursor. Si necesitas
+# que convierta esto a un archivo .cursorrules exactamente compatible o que lo adapte a la versión
+# específica del plugin de Cursor que usas, decímelo y lo ajusto.

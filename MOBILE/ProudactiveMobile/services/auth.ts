@@ -93,6 +93,11 @@ class AuthService {
   async login(email: string, password: string): Promise<AuthResponse> {
     try {
       console.log('🔵 Intentando login a:', `${API_BASE}/auth/login`);
+      console.log('🔵 Email intentando login:', email);
+      
+      // LIMPIAR SESIÓN ANTES DE LOGIN
+      await this.clearSession();
+      console.log('🧹 Sesión limpiada antes de login');
       
       const response = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -119,8 +124,21 @@ class AuthService {
       }
 
       if (result.success && result.data) {
+        console.log('🔍 Usuario recibido del servidor:', {
+          id: result.data.user.id,
+          email: result.data.user.email,
+          email_verified_at: result.data.user.email_verified_at
+        });
+        
         await this.saveToken(result.data.token);
         await this.saveUser(result.data.user);
+        
+        // Verificar que se guardó correctamente
+        const savedUser = await this.getUser();
+        console.log('🔍 Usuario guardado en storage:', {
+          id: savedUser?.id,
+          email: savedUser?.email
+        });
       }
 
       return result;
@@ -147,8 +165,22 @@ class AuthService {
       const result = await response.json();
 
       if (result.success && result.data) {
+        console.log('🔍 Saving token and user after verification:', {
+          hasToken: !!result.data.token,
+          hasUser: !!result.data.user,
+          userEmail: result.data.user?.email
+        });
         await this.saveToken(result.data.token);
         await this.saveUser(result.data.user);
+        
+        // Verificar que se guardó
+        const savedToken = await this.getToken();
+        const savedUser = await this.getUser();
+        console.log('🔍 Verification complete - saved:', {
+          tokenSaved: !!savedToken,
+          userSaved: !!savedUser,
+          userId: savedUser?.id
+        });
       }
 
       return result;
@@ -172,7 +204,14 @@ class AuthService {
         body: JSON.stringify({ email }),
       });
 
-      return await response.json();
+      const result = await response.json();
+      
+      // Si el email ya está verificado, limpiar sesión para permitir nuevo login
+      if (result.already_verified) {
+        await this.clearSession();
+      }
+      
+      return result;
     } catch (error) {
       console.error('Error reenviando código:', error);
       return {

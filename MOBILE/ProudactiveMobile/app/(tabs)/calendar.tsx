@@ -1489,6 +1489,7 @@ export default function CalendarView({}: CalendarViewProps) {
   const [subtasks, setSubtasks] = useState<Array<{id: string, text: string, completed: boolean}>>([]);
   const [newSubtaskText, setNewSubtaskText] = useState('');
   const [showSubtaskInput, setShowSubtaskInput] = useState(false);
+  
 
   const handleOpenRecurrenceModal = useCallback(() => {
   setTempRecurrenceConfig(cloneRecurrenceConfig(recurrenceConfig));
@@ -1887,9 +1888,10 @@ export default function CalendarView({}: CalendarViewProps) {
           
           // Crear override con los mismos datos de la instancia
           // 🎯 CORREGIR: Usar la fecha correcta de la instancia, no la original
-          const instanceDate = selectedEvent.date; // Fecha de la instancia (ej: 2025-09-30)
-          const instanceStartTime = selectedEvent.startTime; // Hora de la instancia
-          const instanceDuration = selectedEvent.duration;
+          const eventInstance = selectedEvent as Event;
+          const instanceDate = eventInstance.date; // Fecha de la instancia (ej: 2025-09-30)
+          const instanceStartTime = eventInstance.startTime; // Hora de la instancia
+          const instanceDuration = eventInstance.duration;
           
           // Convertir startTime a horas y minutos
           const hours = Math.floor(instanceStartTime / 60);
@@ -1897,15 +1899,20 @@ export default function CalendarView({}: CalendarViewProps) {
           const endHours = Math.floor((instanceStartTime + instanceDuration) / 60);
           const endMinutes = (instanceStartTime + instanceDuration) % 60;
           
+          // Obtener calendar_id dinámicamente
+          const calJson = await apiGetCalendars();
+          const calendarId = calJson?.data?.[0]?.id;
+          if (!calendarId) throw new Error('No calendars available');
+
           const overridePayload = {
-            calendar_id: 1, // Usar calendar_id por defecto
-            title: selectedEvent.title,
-            description: selectedEvent.description || '',
+            calendar_id: calendarId,
+            title: eventInstance.title,
+            description: eventInstance.description || '',
             start_utc: new Date(`${instanceDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`).toISOString(),
             end_utc: new Date(`${instanceDate}T${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00.000Z`).toISOString(),
-            series_id: selectedEvent.series_id,
+            series_id: eventInstance.series_id,
             original_start_utc: new Date(`${instanceDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`).toISOString(), // 🎯 CORREGIR: Usar la fecha de la instancia
-            color: selectedEvent.color,
+            color: eventInstance.color,
             all_day: false,
             timezone: 'UTC'
           };
@@ -2686,8 +2693,7 @@ export default function CalendarView({}: CalendarViewProps) {
           Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
         }
       } catch (e) {
-        apiCalendarsPublicTest();
-        apiDebugHeaders();
+        console.error('Error creating event:', e);
         Alert.alert('Aviso', 'No se pudo crear el evento en el servidor.');
       }
 
@@ -3091,6 +3097,7 @@ export default function CalendarView({}: CalendarViewProps) {
   // Renderizado principal
   return (
     <View style={styles.container}>
+      
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}> 
         <View style={styles.viewFilters}>

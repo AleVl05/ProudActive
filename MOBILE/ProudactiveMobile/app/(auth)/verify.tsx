@@ -70,6 +70,18 @@ export default function VerifyScreen() {
       if (result.success) {
         Alert.alert('Código enviado', 'Revisa tu email');
         setCountdown(60);
+      } else if (result.already_verified) {
+        // Email ya verificado, redirigir a login
+        Alert.alert(
+          'Email verificado',
+          'Tu email ya está verificado. Por favor inicia sesión.',
+          [
+            {
+              text: 'Ir a Login',
+              onPress: () => router.replace('/(auth)/login'),
+            },
+          ]
+        );
       } else {
         Alert.alert('Error', result.message || 'No se pudo enviar el código');
       }

@@ -1,0 +1,13 @@
+rule: 
+  id: "no_inline_scss_js"
+  description: "Nunca escrever SCSS (ou CSS) nem JavaScript diretamente dentro de arquivos PHP. Todo código SCSS/CSS e JS deve ser mantido organizado em arquivos separados e incluído de forma ordenada."
+  appliesTo: ["**/*.php"]
+  enforce:
+    - type: "no_inline_code"
+      languages: ["scss", "css", "js", "javascript"]
+      note: |
+        - Sempre crie arquivos separados (.scss, .css, .js) para estilos e scripts.
+        - Nunca escreva <style>, <script> ou SCSS/CSS/JS inline em arquivos PHP.
+        - Inclua os arquivos usando include/require (para PHP) ou via <link> e <script src=""> no HTML renderizado.
+        - Exceção: Pequenos trechos de style/js apenas para emails inline.
+      errorMessage: "Código SCSS, CSS ou JS não deve ser incluído inline em arquivos PHP. Use arquivos separados."

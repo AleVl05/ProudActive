@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class EventController extends Controller
@@ -34,7 +35,7 @@ class EventController extends Controller
         }
 
         $query = Event::with(['calendar', 'category', 'alarms', 'recurrenceExceptions'])
-            ->where('user_id', 1) // Usuario fijo por ahora
+            ->where('user_id', $request->user()->id)
             ->whereBetween('start_utc', [$request->start, $request->end])
             ->whereNull('deleted_at');
 
@@ -102,7 +103,7 @@ class EventController extends Controller
             $event = Event::create([
                 'uuid' => Str::uuid(),
                 'calendar_id' => $request->calendar_id,
-                'user_id' => 1, // Usuario fijo por ahora
+                'user_id' => $request->user()->id,
                 'category_id' => $request->category_id,
                 'title' => $request->title,
                 'description' => $request->description,
@@ -162,10 +163,10 @@ class EventController extends Controller
     /**
      * Mostrar evento específico
      */
-    public function show(string $id): JsonResponse
+    public function show(string $id, Request $request): JsonResponse
     {
         $event = Event::with(['calendar', 'category', 'alarms', 'recurrenceExceptions'])
-            ->where('user_id', 1) // Usuario fijo por ahora
+            ->where('user_id', $request->user()->id)
             ->whereNull('deleted_at')
             ->find($id);
 
@@ -187,7 +188,7 @@ class EventController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
-        $event = Event::where('user_id', 1)
+        $event = Event::where('user_id', $request->user()->id)
             ->whereNull('deleted_at')
             ->find($id);
 
@@ -255,9 +256,9 @@ class EventController extends Controller
     /**
      * Eliminar evento
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(string $id, Request $request): JsonResponse
     {
-        $event = Event::where('user_id', 1)
+        $event = Event::where('user_id', $request->user()->id)
             ->whereNull('deleted_at')
             ->find($id);
 
@@ -301,9 +302,17 @@ class EventController extends Controller
     /**
      * Listar calendarios del usuario
      */
-    public function calendars(): JsonResponse
+    public function calendars(Request $request): JsonResponse
     {
-        $calendars = Calendar::where('user_id', 1)
+        Log::info('calendars.called', [
+            'user_id' => $request->user()->id,
+            'headers' => request()->headers->all(),
+            'method' => request()->method(),
+            'fullUrl' => request()->fullUrl(),
+            'ip' => request()->ip(),
+        ]);
+
+        $calendars = Calendar::where('user_id', $request->user()->id)
             ->whereNull('deleted_at')
             ->orderBy('sort_order')
             ->get();
@@ -317,9 +326,9 @@ class EventController extends Controller
     /**
      * Listar categorías del usuario
      */
-    public function categories(): JsonResponse
+    public function categories(Request $request): JsonResponse
     {
-        $categories = EventCategory::where('user_id', 1)
+        $categories = EventCategory::where('user_id', $request->user()->id)
             ->orderBy('is_default', 'desc')
             ->orderBy('name')
             ->get();

@@ -1,0 +1,14 @@
+rule: 
+  id: "no_nuevos_md"
+  description: "Nunca crear nuevos archivos .md; siempre actualizar ligeramente project.md existente con mucho cuidado."
+  appliesTo: ["**/*.md"]
+  enforce:
+    - type: "no_new_files"
+      glob: "**/*.md"
+      exceptions:
+        - "project.md"
+      note: |
+        - Não criar novos arquivos Markdown (.md) no repositório — só existe project.md.
+        - Sempre que for necessário documentar, edite **project.md** existente, realizando apenas atualizações pequenas e cuidadosas.
+        - Revisar alterações no project.md para garantir que a documentação permaneça clara, consistente e sem informações duplicadas ou contraditórias.
+      errorMessage: "Não é permitido criar novos arquivos .md. Atualize apenas o project.md, e sempre com muito cuidado."
