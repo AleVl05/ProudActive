@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class AuthController extends Controller
@@ -121,7 +122,20 @@ class AuthController extends Controller
             ], 404);
         }
 
-        $user->update(['email_verified_at' => now()]);
+        // Marcar email como verificado
+        $user->email_verified_at = now();
+        $user->save();
+        
+        // Refrescar el modelo para asegurar que tiene los datos actualizados
+        $user->refresh();
+        
+        // Debug: Verificar que se guardó
+        Log::info('✅ Email verified - email_verified_at:', [
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'email_verified_at' => $user->email_verified_at,
+            'verified_at_timestamp' => $user->email_verified_at ? $user->email_verified_at->toDateTimeString() : null
+        ]);
         
         // Eliminar código del cache
         Cache::forget("email_verification_{$request->email}");
@@ -167,8 +181,21 @@ class AuthController extends Controller
             ], 401);
         }
 
+        // Log para debug
+        Log::info('🔑 Login attempt:', [
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'email_verified_at' => $user->email_verified_at,
+            'is_verified' => !is_null($user->email_verified_at)
+        ]);
+
         // Verificar si el email está verificado
         if (!$user->email_verified_at) {
+            Log::warning('⚠️ Login blocked - Email not verified:', [
+                'user_id' => $user->id,
+                'email' => $user->email
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Email no verificado',
@@ -215,10 +242,18 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->email)->first();
 
+        // Si el email ya está verificado, informar al usuario
         if ($user->email_verified_at) {
+            Log::info('📧 Resend code requested for verified email:', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'email_verified_at' => $user->email_verified_at
+            ]);
+            
             return response()->json([
                 'success' => false,
-                'message' => 'El email ya está verificado'
+                'message' => 'El email ya está verificado. Por favor intenta iniciar sesión.',
+                'already_verified' => true
             ], 400);
         }
 
@@ -230,6 +265,13 @@ class AuthController extends Controller
 
         // Enviar email
         $this->sendVerificationEmail($user->email, $verificationCode, $user->name);
+
+        Log::info('✅ Verification code sent:', [
+            'email' => $user->email,
+            'code' => $verificationCode,
+            'user_id' => $user->id,
+            'cache_key' => "email_verification_{$user->email}"
+        ]);
 
         return response()->json([
             'success' => true,
@@ -419,12 +461,20 @@ class AuthController extends Controller
     private function sendVerificationEmail(string $email, string $code, string $name): void
     {
         try {
+            Log::info('📧 Enviando email de verificación:', [
+                'email' => $email,
+                'code' => $code,
+                'name' => $name
+            ]);
+            
             Mail::raw("Hola {$name},\n\nTu código de verificación es: {$code}\n\nEste código expira en 10 minutos.\n\nSi no solicitaste este código, ignora este mensaje.\n\n- Equipo Proudactive", function ($message) use ($email) {
                 $message->to($email)
                         ->subject('Verifica tu cuenta - Proudactive');
             });
+            
+            Log::info('✅ Email de verificación enviado exitosamente');
         } catch (\Exception $e) {
-            \Log::error('Error enviando email de verificación: ' . $e->getMessage());
+            Log::error('❌ Error enviando email de verificación: ' . $e->getMessage());
         }
     }
 
@@ -439,7 +489,7 @@ class AuthController extends Controller
                         ->subject('Recuperar contraseña - Proudactive');
             });
         } catch (\Exception $e) {
-            \Log::error('Error enviando email de recuperación: ' . $e->getMessage());
+            Log::error('Error enviando email de recuperación: ' . $e->getMessage());
         }
     }
 }

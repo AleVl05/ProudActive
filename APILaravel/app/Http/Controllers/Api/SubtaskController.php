@@ -17,13 +17,18 @@ class SubtaskController extends Controller
     public function index(Request $request, $eventId): JsonResponse
     {
         try {
-            $event = Event::findOrFail($eventId);
+            // Debug: verificar si el evento existe
+            $event = Event::find($eventId);
+            if (!$event) {
+                return response()->json(['error' => 'Event not found'], 404);
+            }
             
-            // Verificar que el usuario tenga acceso al evento
+            // Debug: verificar acceso
             if ($event->user_id !== $request->user()->id) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
+            // Obtener subtareas usando el modelo Eloquent
             $subtasks = $event->subtasks()->get();
 
             return response()->json([
@@ -33,7 +38,8 @@ class SubtaskController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'error' => 'Error al obtener subtareas: ' . $e->getMessage()
+                'error' => 'Error al obtener subtareas: ' . $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ], 500);
         }
     }

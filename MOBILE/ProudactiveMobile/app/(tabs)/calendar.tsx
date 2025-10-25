@@ -243,14 +243,17 @@ export default function CalendarView({}: CalendarViewProps) {
     setRecurrenceConfig(createDefaultRecurrenceConfig());
     // Limpiar subtareas al cerrar modal
     setSubtasks([]);
+    setOriginalSubtasks([]);
     setNewSubtaskText('');
     setShowSubtaskInput(false);
+    setPendingSubtaskChanges(null);
+    setSubtaskChangesModalVisible(false);
   }, []);
 
   // ===== GESTIÓN DE SUBTAREAS =====
-  const loadSubtasks = useCallback(async (eventId: string, event?: Event | MonthEvent | null) => {
-    // Verificar si ya tenemos las subtareas en caché
-    if (subtasksCache[eventId]) {
+  const loadSubtasks = useCallback(async (eventId: string, event?: Event | MonthEvent | null, forceReload: boolean = false) => {
+    // Verificar si ya tenemos las subtareas en caché (solo si no es force reload)
+    if (!forceReload && subtasksCache[eventId]) {
       const cached = subtasksCache[eventId];
       setSubtasks(cached);
       setOriginalSubtasks(JSON.parse(JSON.stringify(cached))); // Deep copy
@@ -350,10 +353,12 @@ export default function CalendarView({}: CalendarViewProps) {
   const handleAddSubtask = useCallback(async () => {
     if (newSubtaskText.trim()) {
       const tempId = `temp-${Date.now()}`;
-      const newSubtask = {
+      const newSubtask: SubtaskItem = {
         id: tempId,
         text: newSubtaskText.trim(),
-        completed: false
+        completed: false,
+        type: 'master',
+        sort_order: subtasks.length
       };
       
       // Optimistic update - mostrar inmediatamente
@@ -372,25 +377,27 @@ export default function CalendarView({}: CalendarViewProps) {
           
           if (response.ok) {
             const result = await response.json();
-          // Reemplazar la subtarea temporal con la real
-          const updatedSubtasks = subtasks.map(subtask => 
-            subtask.id === tempId 
-              ? {
-                  id: result.data.id.toString(),
-                  text: result.data.text,
-                  completed: result.data.completed
-                }
-              : subtask
-          );
-          setSubtasks(updatedSubtasks);
-          
-          // Actualizar caché si estamos editando un evento existente
-          if (selectedEvent) {
-            setSubtasksCache(prev => ({
-              ...prev,
-              [selectedEvent.id]: updatedSubtasks
-            }));
-          }
+            // Reemplazar la subtarea temporal con la real
+            const realSubtask: SubtaskItem = {
+              id: result.data.id.toString(),
+              text: result.data.text,
+              completed: result.data.completed || false,
+              type: 'master',
+              sort_order: result.data.sort_order || subtasks.length
+            };
+            
+            const updatedSubtasks = [...subtasks.filter(st => st.id !== tempId), realSubtask];
+            setSubtasks(updatedSubtasks);
+            
+            // Invalidar caché para forzar recarga
+            setSubtasksCache(prev => {
+              const newCache = { ...prev };
+              delete newCache[selectedEvent.id];
+              return newCache;
+            });
+            
+            // Actualizar originalSubtasks también
+            setOriginalSubtasks(JSON.parse(JSON.stringify(updatedSubtasks)));
           } else {
             // Si falla, remover la subtarea temporal
             setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
@@ -401,10 +408,8 @@ export default function CalendarView({}: CalendarViewProps) {
           console.error('Error al crear subtarea:', error);
         }
       }
-      // Si estamos creando un nuevo evento, la subtarea se guardará cuando se guarde el evento
-      // (ya está implementado en handleSaveEvent líneas 1407-1449)
     }
-  }, [newSubtaskText, selectedEvent, subtasks.length]);
+  }, [newSubtaskText, selectedEvent, subtasks]);
 
   const handleToggleSubtask = useCallback(async (id: string) => {
     try {
@@ -2008,8 +2013,8 @@ export default function CalendarView({}: CalendarViewProps) {
     setRecurrenceConfig(extractRecurrenceFromEvent(event));
     setModalVisible(true);
     
-    // Cargar subtareas del evento
-    loadSubtasks(event.id);
+    // Cargar subtareas del evento (siempre forzar reload para ver cambios recientes)
+    loadSubtasks(event.id, event, true);
   }, [loadSubtasks]);
 
   // Callback de commit desde bloque movible

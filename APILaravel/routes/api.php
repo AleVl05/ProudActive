@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\SubtaskController;
+use App\Http\Controllers\Api\SubtaskInstanceController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\MarketItemController;
 use App\Http\Controllers\RecipeController;
@@ -53,12 +54,22 @@ Route::prefix('v1')->group(function () {
         Route::get('calendars', [EventController::class, 'calendars']);
         Route::get('categories', [EventController::class, 'categories']);
 
-        // Subtareas - CRUD completo
+        // Subtareas - CRUD completo (plantilla del maestro)
         Route::get('events/{eventId}/subtasks', [SubtaskController::class, 'index']);
         Route::post('subtasks', [SubtaskController::class, 'store']);
         Route::match(['put', 'patch'], 'subtasks/{id}', [SubtaskController::class, 'update']);
         Route::delete('subtasks/{id}', [SubtaskController::class, 'destroy']);
         Route::post('subtasks/update-multiple', [SubtaskController::class, 'updateMultiple']);
+
+        // Subtask Instances - Estado independiente por instancia
+        Route::get('event-instances/{eventInstanceId}/subtasks', [SubtaskInstanceController::class, 'getSubtasksForInstance']);
+        Route::post('subtask-instances/toggle', [SubtaskInstanceController::class, 'toggleSubtaskInstance']);
+        Route::post('subtask-instances/toggle-multiple', [SubtaskInstanceController::class, 'toggleMultipleSubtaskInstances']);
+
+        // Custom Subtasks - Subtareas personalizadas por instancia
+        Route::post('custom-subtasks', [SubtaskInstanceController::class, 'storeCustomSubtask']);
+        Route::match(['put', 'patch'], 'custom-subtasks/{id}', [SubtaskInstanceController::class, 'updateCustomSubtask']);
+        Route::delete('custom-subtasks/{id}', [SubtaskInstanceController::class, 'destroyCustomSubtask']);
 
         // Market Items - CRUD completo
         Route::get('market-items', [MarketItemController::class, 'index']);

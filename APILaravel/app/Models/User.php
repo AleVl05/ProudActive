@@ -18,6 +18,7 @@ class User extends Authenticatable
         'uuid',
         'name',
         'email',
+        'email_verified_at',
         'password',
         'timezone',
         'locale',

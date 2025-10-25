@@ -115,10 +115,26 @@ class Event extends Model
     }
 
     /**
-     * Relación con las subtareas del evento
+     * Relación con las subtareas del evento (plantilla del maestro)
      */
     public function subtasks(): HasMany
     {
-        return $this->hasMany(Subtask::class)->ordered();
+        return $this->hasMany(Subtask::class)->orderBy('sort_order')->orderBy('created_at');
+    }
+
+    /**
+     * Relación con las instancias de subtareas de este evento
+     */
+    public function subtaskInstances(): HasMany
+    {
+        return $this->hasMany(SubtaskInstance::class, 'event_instance_id');
+    }
+
+    /**
+     * Relación con las subtareas personalizadas de este evento
+     */
+    public function customSubtasks(): HasMany
+    {
+        return $this->hasMany(CustomSubtask::class, 'event_instance_id')->ordered();
     }
 }
