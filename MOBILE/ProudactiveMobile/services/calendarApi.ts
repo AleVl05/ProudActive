@@ -1,7 +1,8 @@
+// calendarApi.ts - API calls for calendar events and subtasks
 import { API_BASE } from '../src/config/api';
 import authService from './auth';
 
-// Helper para obtener headers autenticados
+// ===== AUTHENTICATION =====
 async function getAuthHeaders(): Promise<HeadersInit> {
   const token = await authService.getToken();
   return {
@@ -11,6 +12,7 @@ async function getAuthHeaders(): Promise<HeadersInit> {
   };
 }
 
+// ===== EVENT OPERATIONS =====
 async function apiPutEventTimes(eventId: string, startUtcIso: string, endUtcIso: string) {
   const url = `${API_BASE}/events/${eventId}`;
   const headers = await getAuthHeaders();
@@ -48,7 +50,6 @@ async function apiGetCalendars() {
     }
     return null;
   } catch(err) {
-    console.error('📅 Error loading calendars:', err);
     return null;
   }
 }
@@ -81,7 +82,7 @@ async function apiFetchEvents(startIso: string, endIso: string) {
   return res;
 }
 
-// Funciones de API para subtareas
+// ===== SUBTASK OPERATIONS (Master Template) =====
 async function apiGetSubtasks(eventId: string) {
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_BASE}/events/${eventId}/subtasks`, { headers });
@@ -131,6 +132,79 @@ async function apiUpdateMultipleSubtasks(subtasks: Array<{id: string, text?: str
   return res;
 }
 
+// ===== SUBTASK INSTANCES (Estado por Instancia) =====
+async function apiGetSubtasksForInstance(eventInstanceId: string) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/event-instances/${eventInstanceId}/subtasks`, { headers });
+  return res;
+}
+
+async function apiToggleSubtaskInstance(subtaskId: string, eventInstanceId: string, completed: boolean, notes?: string) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/subtask-instances/toggle`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      subtask_id: subtaskId,
+      event_instance_id: eventInstanceId,
+      completed: completed,
+      notes: notes
+    }),
+  });
+  return res;
+}
+
+async function apiToggleMultipleSubtaskInstances(
+  eventInstanceId: string, 
+  subtasks: Array<{subtask_id: string, completed: boolean, notes?: string}>
+) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/subtask-instances/toggle-multiple`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      event_instance_id: eventInstanceId,
+      subtasks: subtasks
+    }),
+  });
+  return res;
+}
+
+// ===== CUSTOM SUBTASKS (Subtareas Personalizadas) =====
+async function apiCreateCustomSubtask(eventInstanceId: string, text: string, description?: string, sortOrder: number = 0) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/custom-subtasks`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      event_instance_id: eventInstanceId,
+      text: text,
+      description: description,
+      sort_order: sortOrder
+    }),
+  });
+  return res;
+}
+
+async function apiUpdateCustomSubtask(customSubtaskId: string, updates: {text?: string, description?: string, completed?: boolean, sort_order?: number}) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/custom-subtasks/${customSubtaskId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(updates),
+  });
+  return res;
+}
+
+async function apiDeleteCustomSubtask(customSubtaskId: string) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/custom-subtasks/${customSubtaskId}`, { 
+    method: 'DELETE',
+    headers 
+  });
+  return res;
+}
+
 export {
   apiPutEventTimes,
   apiPutEvent,
@@ -142,5 +216,13 @@ export {
   apiCreateSubtask,
   apiUpdateSubtask,
   apiDeleteSubtask,
-  apiUpdateMultipleSubtasks
+  apiUpdateMultipleSubtasks,
+  // Subtask Instances
+  apiGetSubtasksForInstance,
+  apiToggleSubtaskInstance,
+  apiToggleMultipleSubtaskInstances,
+  // Custom Subtasks
+  apiCreateCustomSubtask,
+  apiUpdateCustomSubtask,
+  apiDeleteCustomSubtask
 };

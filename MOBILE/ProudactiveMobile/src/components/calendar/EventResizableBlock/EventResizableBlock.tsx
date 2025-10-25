@@ -1,3 +1,4 @@
+// EventResizableBlock.tsx - Resizable and draggable event block component
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
@@ -119,17 +120,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       return true;
     },
     onPanResponderGrant: () => {
-      // 🟣 TOUCH_EVENT - TopHandle
-      const timestamp = new Date().toISOString();
-      console.log('🟣 TOUCH_EVENT - TopHandle', {
-        timestamp,
-        eventId: ev.id,
-        eventTitle: ev.title,
-        eventDuration: ev.duration,
-        component: 'EventResizableBlock',
-        area: 'top_handle',
-        action: 'resize_start'
-      });
       
       setShowGhost(true);
       setIsResizing(true);
@@ -187,17 +177,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       return true;
     },
     onPanResponderGrant: () => {
-      // 🟣 TOUCH_EVENT - BottomHandle
-      const timestamp = new Date().toISOString();
-      console.log('🟣 TOUCH_EVENT - BottomHandle', {
-        timestamp,
-        eventId: ev.id,
-        eventTitle: ev.title,
-        eventDuration: ev.duration,
-        component: 'EventResizableBlock',
-        area: 'bottom_handle',
-        action: 'resize_start'
-      });
       
       setShowGhost(true);
       setIsResizing(true);
@@ -266,17 +245,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       return shouldCapture;
     },
     onPanResponderGrant: () => {
-      // 🟣 TOUCH_EVENT - CenterArea
-      const timestamp = new Date().toISOString();
-      console.log('🟣 TOUCH_EVENT - CenterArea', {
-        timestamp,
-        eventId: ev.id,
-        eventTitle: ev.title,
-        eventDuration: ev.duration,
-        component: 'EventResizableBlock',
-        area: 'center_area',
-        action: 'touch_start'
-      });
       
       // Iniciar timer de long press (1 segundo)
       longPressTimer.current = setTimeout(() => {
@@ -319,18 +287,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       
       // Si no se activó el drag mode, es un click corto - abrir modal
       if (!allowDragRef.current) {
-        // 🟣 TOUCH_EVENT - QuickPress
-        const timestamp = new Date().toISOString();
-        console.log('🟣 TOUCH_EVENT - QuickPress', {
-          timestamp,
-          eventId: ev.id,
-          eventTitle: ev.title,
-          eventDuration: ev.duration,
-          component: 'EventResizableBlock',
-          area: 'center_area',
-          action: 'quick_press',
-          gesture: { deltaY, deltaX }
-        });
         
         if (typeof onQuickPress === 'function') {
           onQuickPress(ev);
@@ -450,10 +406,7 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         <View 
           {...moveResponder.panHandlers} 
           style={{ position: 'absolute', top: 12, left: 0, right: 0, height: blockHeight - 24 }}
-          onLayout={(event) => {
-            const { height } = event.nativeEvent.layout;
-            console.log(`🎯 MOVE_RESPONDER - Altura real: ${height}px, blockHeight: ${blockHeight}px, duración: ${ev.duration}min`);
-          }}
+          onLayout={() => {}}
         />
       </View>
     </View>

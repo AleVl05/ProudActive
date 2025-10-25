@@ -1,3 +1,4 @@
+// GridBackground.tsx - Grid background component for calendar views
 import React from 'react';
 import { View } from 'react-native';
 

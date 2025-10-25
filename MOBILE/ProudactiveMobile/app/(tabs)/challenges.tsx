@@ -7,10 +7,13 @@ import {
   TouchableOpacity, 
   FlatList, 
   Alert,
-  SafeAreaView 
+  SafeAreaView,
+  Modal,
+  ScrollView
 } from 'react-native';
 import { Colors } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from '../../src/config/api';
 import authService from '../../services/auth';
 
@@ -120,6 +123,12 @@ export default function MarketScreen() {
   const [newRecipeTitle, setNewRecipeTitle] = useState('');
   const [newRecipeContent, setNewRecipeContent] = useState('');
   const [showRecipeForm, setShowRecipeForm] = useState(false);
+  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [recipeModalVisible, setRecipeModalVisible] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [isEditingContent, setIsEditingContent] = useState(false);
+  const [editingContent, setEditingContent] = useState('');
 
   // Cargar ítems al montar el componente
   useEffect(() => {
@@ -313,6 +322,90 @@ export default function MarketScreen() {
     }
   };
 
+  const openRecipeModal = (recipe: Recipe) => {
+    setSelectedRecipe(recipe);
+    setEditingTitle(recipe.title);
+    setEditingContent(recipe.content);
+    setIsEditingTitle(false);
+    setIsEditingContent(false);
+    setRecipeModalVisible(true);
+  };
+
+  const closeRecipeModal = () => {
+    setRecipeModalVisible(false);
+    setSelectedRecipe(null);
+    setIsEditingTitle(false);
+    setIsEditingContent(false);
+    setEditingTitle('');
+    setEditingContent('');
+  };
+
+  const startEditingTitle = () => {
+    setIsEditingTitle(true);
+    setIsEditingContent(true); // También activar edición de contenido
+  };
+
+  const saveTitleEdit = async () => {
+    if (!selectedRecipe || editingTitle.trim() === '') return;
+    
+    try {
+      // Aquí podrías agregar una API call para actualizar el título y contenido
+      // Por ahora solo actualizamos el estado local
+      setRecipes(prevRecipes => 
+        prevRecipes.map(recipe => 
+          recipe.id === selectedRecipe.id 
+            ? { ...recipe, title: editingTitle.trim(), content: editingContent.trim() }
+            : recipe
+        )
+      );
+      setSelectedRecipe({ 
+        ...selectedRecipe, 
+        title: editingTitle.trim(), 
+        content: editingContent.trim() 
+      });
+      setIsEditingTitle(false);
+      setIsEditingContent(false);
+    } catch (error) {
+      console.error('❌ Error updating recipe:', error);
+    }
+  };
+
+  const cancelTitleEdit = () => {
+    setEditingTitle(selectedRecipe?.title || '');
+    setEditingContent(selectedRecipe?.content || '');
+    setIsEditingTitle(false);
+    setIsEditingContent(false);
+  };
+
+  const startEditingContent = () => {
+    setIsEditingContent(true);
+  };
+
+  const saveContentEdit = async () => {
+    if (!selectedRecipe || editingContent.trim() === '') return;
+    
+    try {
+      // Aquí podrías agregar una API call para actualizar el contenido
+      // Por ahora solo actualizamos el estado local
+      setRecipes(prevRecipes => 
+        prevRecipes.map(recipe => 
+          recipe.id === selectedRecipe.id 
+            ? { ...recipe, content: editingContent.trim() }
+            : recipe
+        )
+      );
+      setSelectedRecipe({ ...selectedRecipe, content: editingContent.trim() });
+      setIsEditingContent(false);
+    } catch (error) {
+      console.error('❌ Error updating recipe content:', error);
+    }
+  };
+
+  const cancelContentEdit = () => {
+    setEditingContent(selectedRecipe?.content || '');
+    setIsEditingContent(false);
+  };
+
   const renderItem = ({ item }: { item: MarketItem }) => (
     <View style={styles.itemContainer}>
       <TouchableOpacity
@@ -347,12 +440,16 @@ export default function MarketScreen() {
 
   const renderRecipe = ({ item }: { item: Recipe }) => (
     <View style={styles.recipeContainer}>
-      <View style={styles.recipeContent}>
+      <TouchableOpacity 
+        style={styles.recipeContent}
+        onPress={() => openRecipeModal(item)}
+        activeOpacity={0.7}
+      >
         <Text style={styles.recipeTitle}>{item.title}</Text>
         <Text style={styles.recipeDescription} numberOfLines={2}>
           {item.content}
         </Text>
-      </View>
+      </TouchableOpacity>
       <TouchableOpacity
         style={styles.recipeDeleteButton}
         onPress={() => deleteRecipe(item.id)}
@@ -479,6 +576,120 @@ export default function MarketScreen() {
           }
         />
       </View>
+
+      {/* Modal para mostrar receta completa - Bloc de notas */}
+      <Modal
+        visible={recipeModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={closeRecipeModal}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          {/* Header mejorado */}
+          <View style={styles.modalHeader}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={closeRecipeModal}
+            >
+              <Ionicons name="chevron-back" size={20} color="white" />
+              <Text style={styles.backButtonText}>Atrás</Text>
+            </TouchableOpacity>
+            
+            {isEditingTitle ? (
+              <View style={styles.titleEditContainer}>
+                <TextInput
+                  style={styles.titleEditInput}
+                  value={editingTitle}
+                  onChangeText={setEditingTitle}
+                  autoFocus
+                  maxLength={50}
+                  placeholder="Título de la receta"
+                />
+                <View style={styles.titleEditActions}>
+                  <TouchableOpacity 
+                    style={styles.saveButton}
+                    onPress={saveTitleEdit}
+                  >
+                    <Ionicons name="checkmark" size={16} color="white" />
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.cancelButton}
+                    onPress={cancelTitleEdit}
+                  >
+                    <Ionicons name="close" size={16} color="white" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.titleDisplayContainer}>
+                <Text style={styles.modalTitle} numberOfLines={1}>
+                  {selectedRecipe?.title || 'Receta'}
+                </Text>
+                <TouchableOpacity 
+                  style={styles.editButton}
+                  onPress={startEditingTitle}
+                >
+                  <Ionicons name="pencil" size={16} color="white" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+          
+          {/* Contenido editable como bloc de notas */}
+          <View style={styles.notepadContainer}>
+            {isEditingContent ? (
+              <View style={styles.contentEditContainer}>
+                <View style={styles.contentEditHeader}>
+                  <Text style={styles.editLabel}>Editando receta</Text>
+                  <View style={styles.contentEditActions}>
+                    <TouchableOpacity 
+                      style={styles.saveButton}
+                      onPress={saveContentEdit}
+                    >
+                      <Ionicons name="checkmark" size={16} color="white" />
+                      <Text style={styles.saveButtonText}>Guardar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.cancelButton}
+                      onPress={cancelContentEdit}
+                    >
+                      <Ionicons name="close" size={16} color="white" />
+                      <Text style={styles.cancelButtonText}>Cancelar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <TextInput
+                  style={styles.contentTextInput}
+                  value={editingContent}
+                  onChangeText={setEditingContent}
+                  multiline
+                  textAlignVertical="top"
+                  placeholder="Escribe los ingredientes y preparación aquí..."
+                  autoFocus
+                />
+              </View>
+            ) : (
+              <View style={styles.contentDisplayContainer}>
+                <View style={styles.contentHeader}>
+                  <Text style={styles.contentLabel}>Receta</Text>
+                  <TouchableOpacity 
+                    style={styles.editButton}
+                    onPress={startEditingContent}
+                  >
+                    <Ionicons name="pencil" size={16} color="white" />
+                    <Text style={styles.editButtonText}>Editar</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.contentScrollView} showsVerticalScrollIndicator={true}>
+                  <Text style={styles.modalRecipeContent}>
+                    {selectedRecipe?.content || 'No hay contenido'}
+                  </Text>
+                </ScrollView>
+              </View>
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -763,5 +974,196 @@ const styles = StyleSheet.create({
     color: Colors.light.text,
     opacity: 0.6,
     marginTop: 8,
+  },
+  // Modal styles - Bloc de notas profesional
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 20,
+    backgroundColor: Colors.light.tint,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    minWidth: 80,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: 'white',
+    marginLeft: 6,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  titleDisplayContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    marginHorizontal: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+    textAlign: 'center',
+    flex: 1,
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 15,
+    marginLeft: 8,
+  },
+  editButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  titleEditContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginHorizontal: 20,
+  },
+  titleEditInput: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 18,
+    fontWeight: '600',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    marginRight: 12,
+  },
+  titleEditActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#28a745',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    justifyContent: 'center',
+  },
+  saveButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  cancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#dc3545',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    justifyContent: 'center',
+  },
+  cancelButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  // Bloc de notas container
+  notepadContainer: {
+    flex: 1,
+    margin: 20,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+    overflow: 'hidden',
+  },
+  contentDisplayContainer: {
+    flex: 1,
+  },
+  contentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  contentLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.light.text,
+  },
+  contentScrollView: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  modalRecipeContent: {
+    fontSize: 16,
+    color: Colors.light.text,
+    lineHeight: 26,
+    textAlign: 'left',
+  },
+  // Edición de contenido
+  contentEditContainer: {
+    flex: 1,
+  },
+  contentEditHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#e3f2fd',
+    borderBottomWidth: 1,
+    borderBottomColor: '#bbdefb',
+  },
+  editLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.light.tint,
+  },
+  contentEditActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  contentTextInput: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    fontSize: 16,
+    color: Colors.light.text,
+    lineHeight: 24,
+    textAlignVertical: 'top',
   },
 });

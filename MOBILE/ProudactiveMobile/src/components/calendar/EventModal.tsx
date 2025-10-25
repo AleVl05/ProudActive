@@ -1,3 +1,4 @@
+// EventModal.tsx - Modal for creating and editing events
 import React from 'react';
 import {
   View,

@@ -1,3 +1,4 @@
+// RecurrenceModal.tsx - Modal for configuring event recurrence
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,

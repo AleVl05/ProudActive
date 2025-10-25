@@ -1,3 +1,4 @@
+// DeleteModal.tsx - Modal for confirming event deletion
 import React from 'react';
 import {
   View,
