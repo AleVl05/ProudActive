@@ -17,25 +17,60 @@ class SubtaskController extends Controller
     public function index(Request $request, $eventId): JsonResponse
     {
         try {
+            \Log::info('📋 SubtaskController::index - START', [
+                'event_id' => $eventId,
+                'user_id' => $request->user()->id
+            ]);
+            
             // Debug: verificar si el evento existe
             $event = Event::find($eventId);
             if (!$event) {
+                \Log::warning('⚠️  SubtaskController::index - Event not found', ['event_id' => $eventId]);
                 return response()->json(['error' => 'Event not found'], 404);
             }
             
+            \Log::info('📋 SubtaskController::index - Event found', [
+                'event_id' => $event->id,
+                'title' => $event->title,
+                'is_recurring' => $event->is_recurring,
+                'series_id' => $event->series_id
+            ]);
+            
             // Debug: verificar acceso
             if ($event->user_id !== $request->user()->id) {
+                \Log::warning('⚠️  SubtaskController::index - Unauthorized access', [
+                    'event_user_id' => $event->user_id,
+                    'request_user_id' => $request->user()->id
+                ]);
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
-            // Obtener subtareas usando el modelo Eloquent
+            // Obtener subtareas usando el modelo Eloquent (solo las no eliminadas)
             $subtasks = $event->subtasks()->get();
+
+            \Log::info('✅ SubtaskController::index - Subtasks loaded', [
+                'count' => $subtasks->count(),
+                'subtasks' => $subtasks->map(function($st) {
+                    return [
+                        'id' => $st->id,
+                        'text' => $st->text,
+                        'completed' => $st->completed,
+                        'sort_order' => $st->sort_order
+                    ];
+                })->toArray()
+            ]);
 
             return response()->json([
                 'success' => true,
                 'data' => $subtasks
             ]);
         } catch (\Exception $e) {
+            \Log::error('❌ SubtaskController::index - ERROR', [
+                'event_id' => $eventId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'error' => 'Error al obtener subtareas: ' . $e->getMessage(),

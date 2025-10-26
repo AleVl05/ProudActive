@@ -24,7 +24,7 @@ class SubtaskInstance extends Model
         'overridden' => 'boolean',
         'completed_at' => 'datetime',
         'subtask_id' => 'integer',
-        'event_instance_id' => 'integer'
+        'event_instance_id' => 'string' // Cambiado a string para soportar IDs virtuales como "652_2025-10-22"
     ];
 
     /**

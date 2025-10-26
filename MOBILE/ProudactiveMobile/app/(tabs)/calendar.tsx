@@ -252,9 +252,17 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // ===== GESTIÓN DE SUBTAREAS =====
   const loadSubtasks = useCallback(async (eventId: string, event?: Event | MonthEvent | null, forceReload: boolean = false) => {
+    console.log('🔍 loadSubtasks - START', {
+      eventId,
+      hasEvent: !!event,
+      forceReload,
+      cacheHasEvent: !!subtasksCache[eventId]
+    });
+    
     // Verificar si ya tenemos las subtareas en caché (solo si no es force reload)
     if (!forceReload && subtasksCache[eventId]) {
       const cached = subtasksCache[eventId];
+      console.log('📦 loadSubtasks - Using CACHE', { count: cached.length });
       setSubtasks(cached);
       setOriginalSubtasks(JSON.parse(JSON.stringify(cached))); // Deep copy
       return;
@@ -265,15 +273,35 @@ export default function CalendarView({}: CalendarViewProps) {
       const eventData = event || selectedEvent;
       const isRecurringInstance = eventData && 'series_id' in eventData && eventData.series_id !== null && eventData.series_id !== undefined;
       
+      console.log('🔍 loadSubtasks - Event analysis', {
+        eventId,
+        title: eventData?.title,
+        isRecurringInstance,
+        series_id: eventData && 'series_id' in eventData ? eventData.series_id : null,
+        is_recurring: eventData && 'is_recurring' in eventData ? eventData.is_recurring : null
+      });
+      
       let response;
       let loadedSubtasks: SubtaskItem[] = [];
       
       if (isRecurringInstance) {
         // Usar endpoint de instancias para eventos recurrentes
+        console.log('🔄 loadSubtasks - Calling apiGetSubtasksForInstance', { eventId });
         response = await apiGetSubtasksForInstance(eventId);
+        
+        console.log('📥 loadSubtasks - Response from apiGetSubtasksForInstance', {
+          ok: response.ok,
+          status: response.status
+        });
         
         if (response.ok) {
           const result = await response.json();
+          console.log('📋 loadSubtasks - Result from instance endpoint', {
+            success: result.success,
+            subtasksCount: result.data?.subtasks?.length || 0,
+            masterEventId: result.data?.master_event_id,
+            isRecurringInstance: result.data?.is_recurring_instance
+          });
           
           // El endpoint devuelve subtareas con type, instance_id, etc.
           loadedSubtasks = result.data.subtasks.map((subtask: any) => ({
@@ -284,13 +312,34 @@ export default function CalendarView({}: CalendarViewProps) {
             instance_id: subtask.instance_id ? subtask.instance_id.toString() : null,
             sort_order: subtask.sort_order || 0
           }));
+          
+          console.log('✅ loadSubtasks - Loaded subtasks from instance', {
+            count: loadedSubtasks.length,
+            subtasks: loadedSubtasks.map(st => ({ id: st.id, text: st.text, type: st.type, completed: st.completed }))
+          });
+        } else {
+          const errorText = await response.text();
+          console.error('❌ loadSubtasks - Error response from instance endpoint', {
+            status: response.status,
+            error: errorText
+          });
         }
       } else {
         // Usar endpoint normal para eventos únicos o maestros
+        console.log('📝 loadSubtasks - Calling apiGetSubtasks (normal endpoint)', { eventId });
         response = await apiGetSubtasks(eventId);
+        
+        console.log('📥 loadSubtasks - Response from apiGetSubtasks', {
+          ok: response.ok,
+          status: response.status
+        });
         
         if (response.ok) {
           const result = await response.json();
+          console.log('📋 loadSubtasks - Result from normal endpoint', {
+            success: result.success,
+            subtasksCount: result.data?.length || 0
+          });
           
           loadedSubtasks = result.data.map((subtask: any) => ({
             id: subtask.id.toString(),
@@ -299,10 +348,26 @@ export default function CalendarView({}: CalendarViewProps) {
             type: 'master',
             sort_order: subtask.sort_order || 0
           }));
+          
+          console.log('✅ loadSubtasks - Loaded subtasks from normal endpoint', {
+            count: loadedSubtasks.length,
+            subtasks: loadedSubtasks.map(st => ({ id: st.id, text: st.text, completed: st.completed }))
+          });
+        } else {
+          const errorText = await response.text();
+          console.error('❌ loadSubtasks - Error response from normal endpoint', {
+            status: response.status,
+            error: errorText
+          });
         }
       }
       
       // Guardar en caché y mostrar
+      console.log('💾 loadSubtasks - Saving to cache and state', {
+        eventId,
+        count: loadedSubtasks.length
+      });
+      
       setSubtasksCache(prev => ({
         ...prev,
         [eventId]: loadedSubtasks
@@ -310,24 +375,78 @@ export default function CalendarView({}: CalendarViewProps) {
       setSubtasks(loadedSubtasks);
       setOriginalSubtasks(JSON.parse(JSON.stringify(loadedSubtasks))); // Deep copy para comparar cambios
       
+      console.log('✅ loadSubtasks - COMPLETE', {
+        eventId,
+        loadedCount: loadedSubtasks.length
+      });
+      
     } catch (error) {
-      console.error('Error al cargar subtareas:', error);
+      console.error('❌ loadSubtasks - EXCEPTION', {
+        eventId,
+        error: error instanceof Error ? error.message : error,
+        stack: error instanceof Error ? error.stack : undefined
+      });
       setSubtasks([]);
       setOriginalSubtasks([]);
     }
   }, [subtasksCache, selectedEvent]);
 
   // Función para migrar subtareas de un evento a otro
-  const migrateSubtasks = useCallback(async (oldEventId: string, newEventId: string) => {
+  const migrateSubtasks = useCallback(async (oldEventId: string, newEventId: string, oldEvent?: Event | null) => {
     try {
-      // 1. Obtener subtareas del evento anterior
-      const response = await apiGetSubtasks(oldEventId);
+      console.log('🔄 migrateSubtasks - START', { 
+        oldEventId, 
+        newEventId,
+        oldEventData: oldEvent ? {
+          id: oldEvent.id,
+          is_recurring: oldEvent.is_recurring,
+          series_id: oldEvent.series_id,
+          original_start_utc: oldEvent.original_start_utc
+        } : 'not provided'
+      });
+      
+      // DETECTAR: ¿El evento viejo es un MAESTRO de serie?
+      const isOldEventMaster = oldEvent && oldEvent.is_recurring && !oldEvent.series_id;
+      
+      // DETECTAR: ¿El evento viejo es un evento ÚNICO?
+      const isOldEventUnique = oldEvent && !oldEvent.is_recurring && !oldEvent.series_id;
+      
+      // DETECTAR: ¿El evento viejo es una INSTANCIA de serie (override)?
+      // Una instancia tiene series_id o original_start_utc
+      const isOldEventInstance = oldEvent && (oldEvent.series_id || oldEvent.original_start_utc);
+      
+      console.log('🔍 migrateSubtasks - Event classification', {
+        isOldEventMaster,
+        isOldEventUnique,
+        isOldEventInstance,
+        shouldDeleteFromOld: !isOldEventMaster && !isOldEventInstance // Solo borrar si NO es maestro NI instancia
+      });
+      
+      // 1. Determinar de dónde obtener las subtareas
+      // Si oldEvent es instancia, buscar en el master (series_id)
+      // Si es master o único, buscar en el evento mismo
+      let fetchEventId = oldEventId;
+      if (isOldEventInstance && oldEvent.series_id) {
+        fetchEventId = oldEvent.series_id.toString();
+        console.log('🔄 migrateSubtasks - oldEvent is instance, fetching subtasks from master', {
+          instanceId: oldEventId,
+          masterId: fetchEventId
+        });
+      }
+      
+      // 2. Obtener subtareas del evento (o del master si es instancia)
+      const response = await apiGetSubtasks(fetchEventId);
       if (response.ok) {
         const result = await response.json();
         const oldSubtasks = result.data;
         
+        console.log('📋 migrateSubtasks - Found subtasks to migrate', {
+          count: oldSubtasks.length,
+          fetchedFrom: fetchEventId,
+          originalEventId: oldEventId
+        });
         
-        // 2. Crear las subtareas en el nuevo evento
+        // 3. Crear las subtareas en el nuevo evento
         for (let i = 0; i < oldSubtasks.length; i++) {
           const oldSubtask = oldSubtasks[i];
           const createResponse = await apiCreateSubtask(
@@ -337,15 +456,82 @@ export default function CalendarView({}: CalendarViewProps) {
           );
           
           if (createResponse.ok) {
+            const createdResult = await createResponse.json();
+            const newSubtaskId = createdResult.data?.id;
+            
+            console.log('✅ migrateSubtasks - Created subtask', {
+              text: oldSubtask.text,
+              newEventId,
+              newSubtaskId,
+              wasCompleted: oldSubtask.completed
+            });
+            
+            // CRÍTICO: Si la subtarea original estaba completada, copiar ese estado
+            if (oldSubtask.completed && newSubtaskId) {
+              const updateResponse = await apiUpdateSubtask(newSubtaskId.toString(), {
+                completed: true
+              });
+              
+              if (updateResponse.ok) {
+                console.log('✅ migrateSubtasks - Copied completed state', {
+                  newSubtaskId
+                });
+              } else {
+                console.error('⚠️ migrateSubtasks - Failed to copy completed state', {
+                  newSubtaskId
+                });
+              }
+            }
           } else {
+            console.error('❌ migrateSubtasks - Failed to create subtask', {
+              text: oldSubtask.text
+            });
           }
         }
         
-        // 3. Recargar subtareas del nuevo evento
-        await loadSubtasks(newEventId);
+        // 4. CRÍTICO: Solo borrar subtareas del viejo si es un evento ÚNICO
+        // NO borrar si es maestro (otras instancias las usan) NI si es instancia (pertenecen al master)
+        if (!isOldEventMaster && !isOldEventInstance) {
+          console.log('🗑️  migrateSubtasks - Deleting old subtasks (old event is UNIQUE)', {
+            oldEventId: oldEventId
+          });
+          for (const oldSubtask of oldSubtasks) {
+            try {
+              await apiDeleteSubtask(oldSubtask.id.toString());
+              console.log('✅ migrateSubtasks - Deleted old subtask', {
+                id: oldSubtask.id,
+                text: oldSubtask.text
+              });
+            } catch (deleteError) {
+              console.error('⚠️  migrateSubtasks - Could not delete old subtask', {
+                id: oldSubtask.id,
+                error: deleteError
+              });
+            }
+          }
+        } else {
+          console.log('ℹ️  migrateSubtasks - SKIPPING deletion', {
+            reason: isOldEventMaster 
+              ? 'oldEvent is MASTER (other instances need these subtasks)' 
+              : 'oldEvent is INSTANCE (subtasks belong to master)',
+            isOldEventMaster,
+            isOldEventInstance
+          });
+        }
+        
+        // 5. Recargar subtareas del nuevo evento
+        await loadSubtasks(newEventId, undefined, true);
+        
+        console.log('✅ migrateSubtasks - COMPLETE');
+      } else {
+        console.error('❌ migrateSubtasks - Failed to fetch old subtasks', {
+          status: response.status
+        });
       }
     } catch (error) {
-      console.error('Error al migrar subtareas:', error);
+      console.error('❌ migrateSubtasks - EXCEPTION', {
+        error: error instanceof Error ? error.message : error
+      });
     }
   }, [loadSubtasks]);
 
@@ -366,8 +552,23 @@ export default function CalendarView({}: CalendarViewProps) {
       setNewSubtaskText('');
       setShowSubtaskInput(false);
       
-      // Si estamos editando un evento existente, crear la subtarea inmediatamente
-      if (selectedEvent) {
+      // IMPORTANTE: Detectar si es instancia recurrente
+      const isRecurringInstance = selectedEvent && 
+        'series_id' in selectedEvent && 
+        selectedEvent.series_id !== null;
+      
+      console.log('📝 handleAddSubtask - Context', {
+        hasSelectedEvent: !!selectedEvent,
+        isRecurringInstance,
+        eventId: selectedEvent?.id,
+        seriesId: selectedEvent && 'series_id' in selectedEvent ? selectedEvent.series_id : 'N/A'
+      });
+      
+      // Si estamos editando un evento existente Y NO es instancia recurrente
+      // → crear la subtarea inmediatamente
+      // Si ES instancia recurrente → dejar como temporal, el modal se mostrará al guardar
+      if (selectedEvent && !isRecurringInstance) {
+        console.log('📝 handleAddSubtask - Creating immediately (unique event)');
         try {
           const response = await apiCreateSubtask(
             selectedEvent.id, 
@@ -407,16 +608,37 @@ export default function CalendarView({}: CalendarViewProps) {
           setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
           console.error('Error al crear subtarea:', error);
         }
+      } else if (isRecurringInstance) {
+        console.log('📝 handleAddSubtask - Keeping as TEMP (recurring instance), modal will show on save');
+        // No hacer nada, quedará como temporal y el modal se mostrará al guardar
       }
     }
   }, [newSubtaskText, selectedEvent, subtasks]);
 
   const handleToggleSubtask = useCallback(async (id: string) => {
     try {
+      console.log('🔄 handleToggleSubtask - START', { subtaskId: id });
+      
       const subtask = subtasks.find(s => s.id === id);
-      if (!subtask || !selectedEvent) return;
+      if (!subtask || !selectedEvent) {
+        console.warn('⚠️  handleToggleSubtask - No subtask or event', {
+          hasSubtask: !!subtask,
+          hasSelectedEvent: !!selectedEvent
+        });
+        return;
+      }
       
       const newCompletedState = !subtask.completed;
+      
+      console.log('🔄 handleToggleSubtask - Toggling', {
+        subtaskId: id,
+        text: subtask.text,
+        currentState: subtask.completed,
+        newState: newCompletedState,
+        type: subtask.type,
+        eventId: selectedEvent.id,
+        eventTitle: selectedEvent.title
+      });
       
       // Optimistic update - actualizar UI inmediatamente
       const updatedSubtasks = subtasks.map(st => 
@@ -432,20 +654,38 @@ export default function CalendarView({}: CalendarViewProps) {
         [selectedEvent.id]: updatedSubtasks
       }));
       
+      console.log('✅ handleToggleSubtask - Optimistic update complete');
+      
       // Solo actualizar en el servidor si no es una subtarea temporal
       if (!id.startsWith('temp-')) {
         // Determinar si es instancia de serie recurrente
         const isRecurringInstance = 'series_id' in selectedEvent && selectedEvent.series_id !== null && selectedEvent.series_id !== undefined;
         
+        console.log('🌐 handleToggleSubtask - Syncing to server', {
+          isRecurringInstance,
+          subtaskType: subtask.type,
+          seriesId: 'series_id' in selectedEvent ? selectedEvent.series_id : null
+        });
+        
         if (isRecurringInstance && subtask.type === 'master') {
           // Para subtareas heredadas en instancias, usar subtask instances
+          console.log('🔄 handleToggleSubtask - Calling apiToggleSubtaskInstance');
           const response = await apiToggleSubtaskInstance(
             id,
             selectedEvent.id,
             newCompletedState
           );
           
+          console.log('📥 handleToggleSubtask - Response from apiToggleSubtaskInstance', {
+            ok: response.ok,
+            status: response.status
+          });
+          
           if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ handleToggleSubtask - Failed, reverting', {
+              error: errorText
+            });
             // Revertir si falla
             setSubtasks(prev => 
               prev.map(st => 
@@ -454,14 +694,26 @@ export default function CalendarView({}: CalendarViewProps) {
                   : st
               )
             );
+          } else {
+            console.log('✅ handleToggleSubtask - Instance toggle SUCCESS');
           }
         } else if (subtask.type === 'custom') {
           // Para subtareas custom, usar el endpoint de custom subtasks
+          console.log('🔄 handleToggleSubtask - Calling apiUpdateCustomSubtask');
           const response = await apiUpdateCustomSubtask(id, {
             completed: newCompletedState
           });
           
+          console.log('📥 handleToggleSubtask - Response from apiUpdateCustomSubtask', {
+            ok: response.ok,
+            status: response.status
+          });
+          
           if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ handleToggleSubtask - Failed, reverting', {
+              error: errorText
+            });
             // Revertir si falla
             setSubtasks(prev => 
               prev.map(st => 
@@ -470,14 +722,26 @@ export default function CalendarView({}: CalendarViewProps) {
                   : st
               )
             );
+          } else {
+            console.log('✅ handleToggleSubtask - Custom toggle SUCCESS');
           }
         } else {
           // Para eventos únicos o maestros, usar el endpoint normal
+          console.log('🔄 handleToggleSubtask - Calling apiUpdateSubtask (normal)');
           const response = await apiUpdateSubtask(id, {
             completed: newCompletedState
           });
           
+          console.log('📥 handleToggleSubtask - Response from apiUpdateSubtask', {
+            ok: response.ok,
+            status: response.status
+          });
+          
           if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ handleToggleSubtask - Failed, reverting', {
+              error: errorText
+            });
             // Revertir si falla
             setSubtasks(prev => 
               prev.map(st => 
@@ -486,11 +750,21 @@ export default function CalendarView({}: CalendarViewProps) {
                   : st
               )
             );
+          } else {
+            console.log('✅ handleToggleSubtask - Normal toggle SUCCESS');
           }
         }
+      } else {
+        console.log('ℹ️  handleToggleSubtask - Temporary subtask, no server sync');
       }
+      
+      console.log('✅ handleToggleSubtask - COMPLETE');
     } catch (error) {
-      console.error('Error al actualizar subtarea:', error);
+      console.error('❌ handleToggleSubtask - EXCEPTION', {
+        subtaskId: id,
+        error: error instanceof Error ? error.message : error,
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }, [subtasks, selectedEvent]);
 
@@ -1355,11 +1629,24 @@ export default function CalendarView({}: CalendarViewProps) {
     }
 
     // NUEVO: Detectar cambios estructurales en subtareas antes de guardar
-    if (selectedEvent && 'series_id' in selectedEvent && selectedEvent.series_id) {
+    // Detectar si es instancia recurrente (virtual o override)
+    const isRecurringInstance = selectedEvent && (
+      ('series_id' in selectedEvent && selectedEvent.series_id !== null) ||
+      ('is_recurring' in selectedEvent && selectedEvent.is_recurring && 'original_start_utc' in selectedEvent)
+    );
+    
+    if (isRecurringInstance) {
       const { hasChanges, changes } = detectSubtaskStructuralChanges();
+      
+      console.log('🔍 handleSaveEvent - Checking subtask changes', {
+        isRecurringInstance,
+        hasChanges,
+        changesDetail: changes
+      });
       
       if (hasChanges) {
         // Guardar cambios pendientes y mostrar modal
+        console.log('📢 handleSaveEvent - SHOWING MODAL for subtask changes');
         setPendingSubtaskChanges(changes);
         setSubtaskChangesModalVisible(true);
         return; // Detener el save hasta que el usuario decida
@@ -1370,6 +1657,39 @@ export default function CalendarView({}: CalendarViewProps) {
     const tempId = selectedEvent?.id; 
     const isNewEvent = !selectedEvent;
 
+    // CRÍTICO: Detectar si hay cambios reales que justifiquen recrear el evento
+    // Si solo se marcaron checkboxes (sin cambios estructurales), NO recrear
+    const hasRealChanges = selectedEvent && (
+      eventTitle !== selectedEvent.title ||
+      eventDescription !== (selectedEvent.description || '') ||
+      eventColor !== selectedEvent.color
+      // Agregar más campos si es necesario
+    );
+    
+    console.log('🔍 handleSaveEvent - Change detection', {
+      hasSelectedEvent: !!selectedEvent,
+      hasRealChanges,
+      titleChanged: selectedEvent ? eventTitle !== selectedEvent.title : 'N/A',
+      descChanged: selectedEvent ? eventDescription !== (selectedEvent.description || '') : 'N/A',
+      colorChanged: selectedEvent ? eventColor !== selectedEvent.color : 'N/A'
+    });
+
+    // Si NO hay cambios reales y NO hay cambios estructurales en subtareas → solo cerrar modal
+    if (!isNewEvent && !hasRealChanges && isRecurringInstance) {
+      const { hasChanges: hasSubtaskChanges } = detectSubtaskStructuralChanges();
+      
+      if (!hasSubtaskChanges) {
+        console.log('✅ handleSaveEvent - No real changes detected, closing modal without recreating event');
+        setModalVisible(false);
+        setEventTitle('');
+        setEventDescription('');
+        setSelectedEvent(null);
+        setSelectedCell(null);
+        setSelectedMonthCell(null);
+        await refreshEvents(); // Solo refrescar UI
+        return;
+      }
+    }
 
     // 🔥 NUEVA LÓGICA: Detectar si estamos editando recurrencia en un evento que viene de una serie
     // NOTA: Un evento liberado (sin series_id local) que se le aplica recurrencia debe crear nueva serie independiente
@@ -1414,9 +1734,10 @@ export default function CalendarView({}: CalendarViewProps) {
         const created = await postRes.json();
 
         if (postRes.ok && created?.data?.id) {      
+          console.log('🔄 handleSaveEvent - Migrating subtasks after creating new recurring event');
           
-          // 2. Migrar subtareas del evento anterior al nuevo
-          await migrateSubtasks(String(selectedEvent.id), String(created.data.id));
+          // 2. Migrar subtareas del evento anterior al nuevo (pasar selectedEvent para detectar si es maestro)
+          await migrateSubtasks(String(selectedEvent.id), String(created.data.id), selectedEvent);
           
           // 3. Eliminar el evento original que venía de la serie
           await apiDeleteEvent(String(selectedEvent.id));
@@ -1486,9 +1807,10 @@ export default function CalendarView({}: CalendarViewProps) {
           const created = await postRes.json();
 
           if (postRes.ok && created?.data?.id) {
+            console.log('🔄 handleSaveEvent - Migrating subtasks after converting to recurring');
 
-            // 2. Migrar subtareas del evento anterior al nuevo
-            await migrateSubtasks(String(selectedEvent.id), String(created.data.id));
+            // 2. Migrar subtareas del evento anterior al nuevo (pasar selectedEvent para detectar si es maestro)
+            await migrateSubtasks(String(selectedEvent.id), String(created.data.id), selectedEvent);
             
             // 3. Eliminar el evento liberado original
             await apiDeleteEvent(String(selectedEvent.id));
@@ -2003,6 +2325,14 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // Callback para abrir modal al hacer click rápido en evento
   const onQuickPress = useCallback((event: Event) => {
+    console.log('👆 onQuickPress - Event tapped', {
+      eventId: event.id,
+      title: event.title,
+      is_recurring: event.is_recurring,
+      series_id: event.series_id,
+      original_start_utc: event.original_start_utc
+    });
+    
     // 🟣 TOUCH_EVENT - EventResizableBlock
     const timestamp = new Date().toISOString();
 
@@ -2014,6 +2344,10 @@ export default function CalendarView({}: CalendarViewProps) {
     setModalVisible(true);
     
     // Cargar subtareas del evento (siempre forzar reload para ver cambios recientes)
+    console.log('📋 onQuickPress - About to load subtasks', {
+      eventId: event.id,
+      forceReload: true
+    });
     loadSubtasks(event.id, event, true);
   }, [loadSubtasks]);
 

@@ -166,7 +166,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   thisDayButton: {
-    backgroundColor: Colors.primary,
+    backgroundColor: '#2196F3', // Azul más visible
+    borderWidth: 1,
+    borderColor: '#1976D2',
   },
   seriesButton: {
     backgroundColor: '#4CAF50',

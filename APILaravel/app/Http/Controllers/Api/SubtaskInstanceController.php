@@ -20,10 +20,26 @@ class SubtaskInstanceController extends Controller
     public function getSubtasksForInstance(Request $request, $eventInstanceId): JsonResponse
     {
         try {
+            \Log::info('🔍 SubtaskInstanceController::getSubtasksForInstance - START', [
+                'event_instance_id' => $eventInstanceId,
+                'user_id' => $request->user()->id
+            ]);
+            
             $eventInstance = Event::findOrFail($eventInstanceId);
+            
+            \Log::info('🔍 SubtaskInstanceController::getSubtasksForInstance - Event instance found', [
+                'id' => $eventInstance->id,
+                'title' => $eventInstance->title,
+                'series_id' => $eventInstance->series_id,
+                'is_recurring' => $eventInstance->is_recurring
+            ]);
             
             // Verificar que el usuario tenga acceso
             if ($eventInstance->user_id !== $request->user()->id) {
+                \Log::warning('⚠️  SubtaskInstanceController::getSubtasksForInstance - Unauthorized', [
+                    'event_user_id' => $eventInstance->user_id,
+                    'request_user_id' => $request->user()->id
+                ]);
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
@@ -31,6 +47,30 @@ class SubtaskInstanceController extends Controller
             $masterEvent = $eventInstance->series_id 
                 ? Event::find($eventInstance->series_id) 
                 : $eventInstance;
+
+            // CRÍTICO: Si el master fue eliminado pero el override sigue existiendo
+            if (!$masterEvent) {
+                \Log::warning('⚠️  SubtaskInstanceController::getSubtasksForInstance - Master event deleted, returning empty subtasks', [
+                    'event_instance_id' => $eventInstanceId,
+                    'series_id' => $eventInstance->series_id
+                ]);
+                
+                // Devolver subtasks vacías en lugar de error
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'event_instance_id' => $eventInstanceId,
+                        'master_event_id' => null,
+                        'is_recurring_instance' => $eventInstance->series_id !== null,
+                        'subtasks' => []
+                    ]
+                ]);
+            }
+
+            \Log::info('🔍 SubtaskInstanceController::getSubtasksForInstance - Master event determined', [
+                'master_event_id' => $masterEvent->id,
+                'is_same_as_instance' => $masterEvent->id === $eventInstance->id
+            ]);
 
             // Obtener subtareas del maestro con su estado para esta instancia
             $masterSubtasks = Subtask::where('event_id', $masterEvent->id)
@@ -52,6 +92,10 @@ class SubtaskInstanceController extends Controller
                     ];
                 });
 
+            \Log::info('🔍 SubtaskInstanceController::getSubtasksForInstance - Master subtasks loaded', [
+                'count' => $masterSubtasks->count()
+            ]);
+
             // Obtener subtareas custom de esta instancia
             $customSubtasks = $eventInstance->customSubtasks()
                 ->ordered()
@@ -68,8 +112,18 @@ class SubtaskInstanceController extends Controller
                     ];
                 });
 
+            \Log::info('🔍 SubtaskInstanceController::getSubtasksForInstance - Custom subtasks loaded', [
+                'count' => $customSubtasks->count()
+            ]);
+
             // Combinar ambas listas
             $allSubtasks = $masterSubtasks->concat($customSubtasks)->sortBy('sort_order')->values();
+
+            \Log::info('✅ SubtaskInstanceController::getSubtasksForInstance - SUCCESS', [
+                'total_subtasks' => $allSubtasks->count(),
+                'master_count' => $masterSubtasks->count(),
+                'custom_count' => $customSubtasks->count()
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -81,6 +135,12 @@ class SubtaskInstanceController extends Controller
                 ]
             ]);
         } catch (\Exception $e) {
+            \Log::error('❌ SubtaskInstanceController::getSubtasksForInstance - ERROR', [
+                'event_instance_id' => $eventInstanceId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'error' => 'Error al obtener subtareas: ' . $e->getMessage()
@@ -94,6 +154,13 @@ class SubtaskInstanceController extends Controller
     public function toggleSubtaskInstance(Request $request): JsonResponse
     {
         try {
+            \Log::info('🔄 SubtaskInstanceController::toggleSubtaskInstance - START', [
+                'subtask_id' => $request->subtask_id,
+                'event_instance_id' => $request->event_instance_id,
+                'completed' => $request->completed,
+                'user_id' => $request->user()->id
+            ]);
+            
             $validator = Validator::make($request->all(), [
                 'subtask_id' => 'required|exists:subtasks,id',
                 'event_instance_id' => 'required|exists:events,id',
@@ -102,6 +169,10 @@ class SubtaskInstanceController extends Controller
             ]);
 
             if ($validator->fails()) {
+                \Log::warning('⚠️  SubtaskInstanceController::toggleSubtaskInstance - Validation failed', [
+                    'errors' => $validator->errors()->toArray()
+                ]);
+                
                 return response()->json([
                     'success' => false,
                     'errors' => $validator->errors()
@@ -111,8 +182,14 @@ class SubtaskInstanceController extends Controller
             // Verificar acceso del usuario
             $eventInstance = Event::findOrFail($request->event_instance_id);
             if ($eventInstance->user_id !== $request->user()->id) {
+                \Log::warning('⚠️  SubtaskInstanceController::toggleSubtaskInstance - Unauthorized', [
+                    'event_user_id' => $eventInstance->user_id,
+                    'request_user_id' => $request->user()->id
+                ]);
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
+
+            \Log::info('🔄 SubtaskInstanceController::toggleSubtaskInstance - Performing UPSERT');
 
             // UPSERT: crear o actualizar la instancia
             $subtaskInstance = SubtaskInstance::updateOrCreate(
@@ -127,11 +204,22 @@ class SubtaskInstanceController extends Controller
                 ]
             );
 
+            \Log::info('✅ SubtaskInstanceController::toggleSubtaskInstance - SUCCESS', [
+                'subtask_instance_id' => $subtaskInstance->id,
+                'completed' => $subtaskInstance->completed,
+                'was_existing' => $subtaskInstance->wasRecentlyCreated ? 'no' : 'yes'
+            ]);
+
             return response()->json([
                 'success' => true,
                 'data' => $subtaskInstance
             ]);
         } catch (\Exception $e) {
+            \Log::error('❌ SubtaskInstanceController::toggleSubtaskInstance - ERROR', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'error' => 'Error al actualizar estado de subtarea: ' . $e->getMessage()
