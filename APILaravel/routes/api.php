@@ -65,6 +65,7 @@ Route::prefix('v1')->group(function () {
         Route::get('event-instances/{eventInstanceId}/subtasks', [SubtaskInstanceController::class, 'getSubtasksForInstance']);
         Route::post('subtask-instances/toggle', [SubtaskInstanceController::class, 'toggleSubtaskInstance']);
         Route::post('subtask-instances/toggle-multiple', [SubtaskInstanceController::class, 'toggleMultipleSubtaskInstances']);
+        Route::post('subtask-instances/hide', [SubtaskInstanceController::class, 'hideSubtaskForInstance']);
 
         // Custom Subtasks - Subtareas personalizadas por instancia
         Route::post('custom-subtasks', [SubtaskInstanceController::class, 'storeCustomSubtask']);

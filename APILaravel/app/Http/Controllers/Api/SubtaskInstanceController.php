@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SubtaskInstance;
 use App\Models\Subtask;
 use App\Models\Event;
+use App\Models\CustomSubtask;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -90,6 +91,10 @@ class SubtaskInstanceController extends Controller
                         'notes' => $instance ? $instance->notes : null,
                         'instance_id' => $instance ? $instance->id : null,
                     ];
+                })
+                ->filter(function ($subtask) {
+                    // Filtrar subtareas que están ocultas para esta instancia específica (overridden=true)
+                    return !$subtask['overridden'];
                 });
 
             \Log::info('🔍 SubtaskInstanceController::getSubtasksForInstance - Master subtasks loaded', [
@@ -293,37 +298,162 @@ class SubtaskInstanceController extends Controller
     }
 
     /**
-     * Crear una subtarea custom para una instancia específica
+     * Ocultar una subtarea master en una instancia específica
+     * Crea un subtask_instance con overridden=true para que no se muestre
      */
-    public function storeCustomSubtask(Request $request): JsonResponse
+    public function hideSubtaskForInstance(Request $request): JsonResponse
     {
         try {
+            \Log::info('🔒 SubtaskInstanceController::hideSubtaskForInstance - START', [
+                'request_data' => $request->all(),
+                'user_id' => $request->user()->id
+            ]);
+
             $validator = Validator::make($request->all(), [
-                'event_instance_id' => 'required|exists:events,id',
-                'text' => 'required|string|max:500',
-                'description' => 'nullable|string',
-                'sort_order' => 'integer|min:0'
+                'subtask_id' => 'required|exists:subtasks,id',
+                'event_instance_id' => 'required|string'
             ]);
 
             if ($validator->fails()) {
+                \Log::warning('⚠️  SubtaskInstanceController::hideSubtaskForInstance - Validation failed', [
+                    'errors' => $validator->errors()
+                ]);
                 return response()->json([
                     'success' => false,
                     'errors' => $validator->errors()
                 ], 422);
             }
 
-            $eventInstance = Event::findOrFail($request->event_instance_id);
-            
-            // Verificar acceso
+            // Verificar que la subtarea pertenece al evento maestro correcto
+            // Usar withTrashed() para permitir ocultar subtareas que ya fueron soft-deleted
+            $subtask = Subtask::withTrashed()->findOrFail($request->subtask_id);
+            $eventInstanceId = $request->event_instance_id;
+
+            // Extraer series_id si es un ID virtual (e.g., "692_2025-10-30")
+            if (strpos($eventInstanceId, '_') !== false) {
+                $seriesId = explode('_', $eventInstanceId)[0];
+                $eventInstance = Event::findOrFail($seriesId);
+            } else {
+                $eventInstance = Event::findOrFail($eventInstanceId);
+            }
+
+            // Verificar acceso del usuario
             if ($eventInstance->user_id !== $request->user()->id) {
+                \Log::warning('⚠️  SubtaskInstanceController::hideSubtaskForInstance - Unauthorized', [
+                    'event_user_id' => $eventInstance->user_id,
+                    'request_user_id' => $request->user()->id
+                ]);
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
-            $customSubtask = $eventInstance->customSubtasks()->create([
+            // Verificar que la subtarea pertenece al evento maestro
+            $masterEventId = $eventInstance->series_id ?: $eventInstance->id;
+            if ($subtask->event_id != $masterEventId) {
+                \Log::warning('⚠️  SubtaskInstanceController::hideSubtaskForInstance - Subtask does not belong to master event', [
+                    'subtask_event_id' => $subtask->event_id,
+                    'master_event_id' => $masterEventId
+                ]);
+                return response()->json(['error' => 'Subtask does not belong to this event'], 422);
+            }
+
+            \Log::info('🔒 SubtaskInstanceController::hideSubtaskForInstance - Creating override record');
+
+            // Crear registro con overridden=true para ocultar la subtarea
+            $subtaskInstance = SubtaskInstance::updateOrCreate(
+                [
+                    'subtask_id' => $request->subtask_id,
+                    'event_instance_id' => $eventInstanceId
+                ],
+                [
+                    'completed' => false,
+                    'overridden' => true,
+                    'completed_at' => null,
+                    'notes' => null
+                ]
+            );
+
+            \Log::info('✅ SubtaskInstanceController::hideSubtaskForInstance - SUCCESS', [
+                'subtask_instance_id' => $subtaskInstance->id,
+                'overridden' => $subtaskInstance->overridden
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => $subtaskInstance
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('❌ SubtaskInstanceController::hideSubtaskForInstance - ERROR', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'Error al ocultar subtarea: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Crear una subtarea custom para una instancia específica
+     */
+    public function storeCustomSubtask(Request $request): JsonResponse
+    {
+        try {
+            \Log::info('🔧 SubtaskInstanceController::storeCustomSubtask - START', [
+                'event_instance_id' => $request->event_instance_id,
+                'text' => $request->text,
+                'user_id' => $request->user()->id
+            ]);
+            
+            $validator = Validator::make($request->all(), [
+                'event_instance_id' => 'required|string', // Cambiar a string para soportar instancias virtuales
+                'text' => 'required|string|max:500',
+                'description' => 'nullable|string',
+                'sort_order' => 'integer|min:0'
+            ]);
+
+            if ($validator->fails()) {
+                \Log::error('❌ Validation failed', ['errors' => $validator->errors()]);
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $eventInstanceId = $request->event_instance_id;
+            
+            // Si es una instancia virtual (formato "681_2025-10-22"), extraer el series_id
+            if (strpos($eventInstanceId, '_') !== false) {
+                $seriesId = explode('_', $eventInstanceId)[0];
+                \Log::info('🔍 Virtual instance detected', [
+                    'event_instance_id' => $eventInstanceId,
+                    'extracted_series_id' => $seriesId
+                ]);
+                $eventInstance = Event::findOrFail($seriesId);
+            } else {
+                \Log::info('🔍 Direct event ID', ['event_instance_id' => $eventInstanceId]);
+                $eventInstance = Event::findOrFail($eventInstanceId);
+            }
+            
+            // Verificar acceso
+            if ($eventInstance->user_id !== $request->user()->id) {
+                \Log::warning('⚠️  Unauthorized access attempt');
+                return response()->json(['error' => 'Unauthorized'], 403);
+            }
+
+            // Crear custom subtask con el event_instance_id original (puede ser virtual)
+            $customSubtask = CustomSubtask::create([
+                'event_instance_id' => $eventInstanceId, // Mantener el ID original (puede ser virtual)
                 'text' => $request->text,
                 'description' => $request->description,
                 'sort_order' => $request->get('sort_order', 0),
                 'completed' => false
+            ]);
+
+            \Log::info('✅ SubtaskInstanceController::storeCustomSubtask - SUCCESS', [
+                'custom_subtask_id' => $customSubtask->id,
+                'event_instance_id' => $eventInstanceId
             ]);
 
             return response()->json([
@@ -331,6 +461,11 @@ class SubtaskInstanceController extends Controller
                 'data' => $customSubtask
             ], 201);
         } catch (\Exception $e) {
+            \Log::error('❌ SubtaskInstanceController::storeCustomSubtask - ERROR', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'error' => 'Error al crear subtarea personalizada: ' . $e->getMessage()

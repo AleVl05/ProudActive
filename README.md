@@ -73,7 +73,7 @@ npx eas update --branch production --message "Cambios v1.2"
 - [ ] **Colores por categoría** - Amarillo=comidas, etc.
 - [ ] **Subtareas en creación** - Añadir subtareas al crear evento
 - [ ] **Recurrencia mismo día** - Si creo evento sábado en sábado, debe aparecer
-- [ ] **Subtareas en recurrentes** - Arreglar que no funcionan en eventos recurrentes
+- [x] **Subtareas en recurrentes** - ✅ COMPLETADO - Sistema completo con modal "Solo este día" vs "Toda la serie"
 
 1) Prioridades para la 1.2 (ordenadas)
 
@@ -1515,3 +1515,72 @@ bottomPadding: {
 - **Opciones organizadas**: Solo se muestran las opciones implementadas
 - **Código preparado**: Las opciones comentadas están listas para implementar
 - **UX mejorada**: Interfaz más limpia y funcional
+
+---
+
+## ✅ **SISTEMA DE SUBTAREAS EN EVENTOS RECURRENTES - COMPLETADO (Octubre 27, 2025)**
+
+### **Problema Resuelto:**
+Las subtareas en eventos recurrentes ahora funcionan correctamente con soporte completo para instancias virtuales y modificaciones por día específico.
+
+### **Funcionalidades Implementadas:**
+
+#### **1. Modal de Confirmación:**
+- **"Solo este día"**: Aplica cambios solo a la instancia específica (agrega/elimina subtareas)
+- **"Toda la serie"**: Aplica cambios a todos los días de la recurrencia
+
+#### **2. Subtareas Master vs Custom:**
+- **Master Subtasks**: Subtareas del evento maestro que se heredan en todas las instancias
+- **Custom Subtasks**: Subtareas específicas de una instancia particular
+- **Subtask Instances**: Estado de completado por instancia (overridden para ocultar master subtasks)
+
+#### **3. Arquitectura de Base de Datos:**
+```sql
+-- Subtareas del evento maestro
+subtasks (id, event_id, text, sort_order, deleted_at)
+
+-- Estado de completado por instancia + ocultamiento
+subtask_instances (id, subtask_id, event_instance_id VARCHAR(255), completed, overridden)
+
+-- Subtareas únicas de una instancia específica
+custom_subtasks (id, event_instance_id VARCHAR(255), text, completed, sort_order)
+```
+
+#### **4. IDs Virtuales:**
+- Instancias recurrentes usan formato `"MASTER_ID_FECHA"` (ej: `"692_2025-10-29"`)
+- `event_instance_id` soporta tanto IDs numéricos como virtuales mediante `VARCHAR(255)`
+- Validación en backend extrae `series_id` de IDs virtuales para permisos
+
+#### **5. Backend (Laravel):**
+- `SubtaskInstanceController::hideSubtaskForInstance`: Oculta subtareas master en instancias específicas usando `overridden=true`
+- `SubtaskInstanceController::getSubtasksForInstance`: Filtra subtareas ocultas y combina master + custom
+- `SubtaskInstanceController::storeCustomSubtask`: Crea subtareas únicas para instancias específicas
+- Migraciones para cambiar `event_instance_id` a `VARCHAR(255)` con `onDelete('SET NULL')`
+
+#### **6. Frontend (React Native):**
+- `handleApplySubtaskChangesToThisDay`: Crea custom subtasks y oculta master subtasks solo para la instancia
+- `handleApplySubtaskChangesToSeries`: Modifica el evento maestro afectando toda la serie
+- `handleDeleteSubtask`: NO elimina del servidor inmediatamente para instancias recurrentes (espera confirmación del modal)
+- `detectSubtaskStructuralChanges`: Detecta cambios en estructura (agregar/eliminar/modificar) vs cambios de estado (checkbox)
+
+### **Flujo de Uso:**
+1. Usuario edita subtareas en una instancia recurrente (ej: miércoles)
+2. Al guardar, aparece modal: "Solo este día" vs "Toda la serie"
+3. **Solo este día**: 
+   - Subtareas agregadas → se crean como `custom_subtasks` para esa instancia
+   - Subtareas eliminadas → se marcan con `overridden=true` en `subtask_instances`
+   - Otras instancias (jueves, viernes, etc.) NO se afectan
+4. **Toda la serie**:
+   - Subtareas agregadas → se agregan al evento maestro
+   - Subtareas eliminadas → se eliminan del evento maestro (soft delete)
+   - Todas las instancias reflejan los cambios
+
+### **Estado: ✅ 100% FUNCIONAL**
+- ✅ Subtareas en eventos únicos
+- ✅ Subtareas en eventos recurrentes
+- ✅ Modal de confirmación funcional
+- ✅ "Solo este día" funciona correctamente
+- ✅ "Toda la serie" funciona correctamente
+- ✅ Sin duplicación de subtareas
+- ✅ Estado de completado se preserva correctamente
+- ✅ IDs virtuales soportados en backend y frontend

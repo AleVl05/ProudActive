@@ -1,5 +1,5 @@
 // EventModal.tsx - Modal for creating and editing events
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   ScrollView,
   TextInput,
   Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -66,21 +68,42 @@ export default function EventModal({
   onDeleteEvent,
 }: EventModalProps) {
   const insets = useSafeAreaInsets();
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // 🎯 UX: Hacer scroll automático cuando se abre el input de subtareas
+  useEffect(() => {
+    if (showSubtaskInput) {
+      // Esperar menos tiempo y hacer scroll más suave
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 150); // 🎯 UX: Reducido de 300ms a 150ms para menos zoom exagerado
+    }
+  }, [showSubtaskInput]);
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <View style={styles.fullscreenModal}>
-        <View style={[styles.modalHeader, { paddingTop: insets.top }]}>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Ionicons name="close" size={24} color={Colors.light.text} />
-          </TouchableOpacity>
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.fullscreenModal}>
+          <View style={[styles.modalHeader, { paddingTop: insets.top }]}>
+            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+              <Ionicons name="close" size={24} color={Colors.light.text} />
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.createButton} onPress={onSave}>
-            <Text style={styles.createButtonText}>{selectedEvent ? 'Editar' : 'Crear'}</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.createButton} onPress={onSave}>
+              <Text style={styles.createButtonText}>{selectedEvent ? 'Editar' : 'Crear'}</Text>
+            </TouchableOpacity>
+          </View>
 
-        <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={true}>
+          <ScrollView 
+            ref={scrollViewRef}
+            style={styles.modalContent} 
+            showsVerticalScrollIndicator={true}
+            keyboardShouldPersistTaps="handled"
+          >
           <View style={styles.titleSection}>
             <Text style={styles.emoji}>☀️</Text>
             <Text style={styles.taskTitle}>Nueva tarea</Text>
@@ -202,7 +225,8 @@ export default function EventModal({
           {/* Padding adicional para evitar que el botón de borrar quede oculto detrás de los botones del celular */}
           <View style={styles.bottomPadding} />
         </ScrollView>
-      </View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -271,5 +295,5 @@ const styles = {
     color: '#ff4444',
     marginLeft: 8
   },
-  bottomPadding: { height: 32 }
+  bottomPadding: { height: 100 } // 🎯 UX: Espacio adicional para que el teclado no tape el contenido
 };

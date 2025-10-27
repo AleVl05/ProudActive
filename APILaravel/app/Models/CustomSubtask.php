@@ -23,7 +23,7 @@ class CustomSubtask extends Model
         'completed' => 'boolean',
         'completed_at' => 'datetime',
         'sort_order' => 'integer',
-        'event_instance_id' => 'integer'
+        'event_instance_id' => 'string' // Cambiado a string para soportar IDs virtuales como "684_2025-10-22"
     ];
 
     /**

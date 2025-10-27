@@ -205,6 +205,19 @@ async function apiDeleteCustomSubtask(customSubtaskId: string) {
   return res;
 }
 
+async function apiHideSubtaskForInstance(subtaskId: string, eventInstanceId: string) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/subtask-instances/hide`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      subtask_id: subtaskId,
+      event_instance_id: eventInstanceId
+    }),
+  });
+  return res;
+}
+
 export {
   apiPutEventTimes,
   apiPutEvent,
@@ -221,6 +234,7 @@ export {
   apiGetSubtasksForInstance,
   apiToggleSubtaskInstance,
   apiToggleMultipleSubtaskInstances,
+  apiHideSubtaskForInstance,
   // Custom Subtasks
   apiCreateCustomSubtask,
   apiUpdateCustomSubtask,

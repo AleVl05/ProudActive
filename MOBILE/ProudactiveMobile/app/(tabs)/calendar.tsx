@@ -40,6 +40,7 @@ import {
   apiGetSubtasksForInstance,
   apiToggleSubtaskInstance,
   apiToggleMultipleSubtaskInstances,
+  apiHideSubtaskForInstance,
   apiCreateCustomSubtask,
   apiUpdateCustomSubtask,
   apiDeleteCustomSubtask
@@ -221,6 +222,14 @@ export default function CalendarView({}: CalendarViewProps) {
   // Cache de subtareas para evitar llamadas repetidas a la API
   const [subtasksCache, setSubtasksCache] = useState<{[eventId: string]: SubtaskItem[]}>({});
   
+  // ===== HELPER: Calcular estado de subtareas del evento =====
+  const getSubtaskStatus = useCallback((eventId: string): { hasSubtasks: boolean; allCompleted: boolean } => {
+    const eventSubtasks = subtasksCache[eventId];
+    const hasSubtasks = eventSubtasks && eventSubtasks.length > 0;
+    const allCompleted = hasSubtasks && eventSubtasks.every(subtask => subtask.completed);
+    
+    return { hasSubtasks, allCompleted };
+  }, [subtasksCache]);
 
   // ===== HANDLERS DE MODALES =====
   const handleOpenRecurrenceModal = useCallback(() => {
@@ -782,8 +791,14 @@ export default function CalendarView({}: CalendarViewProps) {
       }));
     }
     
-    // Solo eliminar del servidor si no es una subtarea temporal
-    if (!id.startsWith('temp-')) {
+    // CRÍTICO: Para instancias recurrentes, NO eliminar del servidor inmediatamente
+    // Esperar a que el usuario elija "Solo este día" o "Toda la serie" en el modal
+    const isRecurringInstance = selectedEvent && ('series_id' in selectedEvent && selectedEvent.series_id);
+    
+    // Solo eliminar del servidor si:
+    // 1. NO es una subtarea temporal
+    // 2. NO es una instancia recurrente (si lo es, el modal manejará la eliminación)
+    if (!id.startsWith('temp-') && !isRecurringInstance) {
       try {
         const response = await apiDeleteSubtask(id);
         
@@ -797,8 +812,9 @@ export default function CalendarView({}: CalendarViewProps) {
         console.error('Error al eliminar subtarea:', error);
       }
     }
-    // Para subtareas temporales, la eliminación es solo local
-  }, [subtasks]);
+    // Para subtareas temporales o instancias recurrentes, la eliminación es solo local
+    // El modal manejará la eliminación en el servidor para instancias recurrentes
+  }, [subtasks, selectedEvent]);
 
   const handleEditSubtask = useCallback(async (id: string, newText: string) => {
     // Optimistic update - actualizar inmediatamente
@@ -892,60 +908,103 @@ export default function CalendarView({}: CalendarViewProps) {
     if (!selectedEvent || !pendingSubtaskChanges) return;
     
     try {
+      console.log('🔧 handleApplySubtaskChangesToThisDay - START', {
+        selectedEventId: selectedEvent.id,
+        changes: pendingSubtaskChanges
+      });
+      
       setSubtaskChangesModalVisible(false);
       
-      // 1. Liberar el evento (convertirlo en override si aún no lo es)
-      const isRecurringInstance = 'series_id' in selectedEvent && selectedEvent.series_id !== null;
-      
-      if (isRecurringInstance && 'startTime' in selectedEvent) {
-        // Ya es una instancia, solo necesitamos actualizar sus subtareas
-        // Las subtareas actuales se convertirán en custom_subtasks
+      // 1. Crear custom_subtasks para las subtareas NUEVAS (added)
+      for (const addedSubtask of pendingSubtaskChanges.added) {
+        console.log('🔧 Creating custom subtask for this day only', {
+          text: addedSubtask.text,
+          eventInstanceId: selectedEvent.id
+        });
         
-        // Eliminar todas las subtareas heredadas existentes de esta instancia
-        // y crear custom_subtasks con las actuales
-        for (const subtask of subtasks) {
-          if (!subtask.id.startsWith('temp-')) {
-            await apiCreateCustomSubtask(
-              selectedEvent.id,
-              subtask.text,
-              undefined,
-              subtask.sort_order || 0
-            );
+        try {
+          const response = await apiCreateCustomSubtask(
+            selectedEvent.id, // Usar el ID original (puede ser virtual como "684_2025-10-22")
+            addedSubtask.text,
+            undefined,
+            addedSubtask.sort_order || 0
+          );
+          
+          if (response.ok) {
+            console.log('✅ Custom subtask created successfully');
+          } else {
+            const errorData = await response.json();
+            console.error('❌ Failed to create custom subtask', { error: errorData });
           }
+        } catch (error) {
+          console.error('❌ Exception creating custom subtask', { error });
         }
-      } else if ('startTime' in selectedEvent) {
-        // No es instancia aún, crear override
-        const liberatedPayload = {
-          series_id: selectedEvent.id, // Referencia a sí mismo como maestro
-          original_start_utc: dateKeyToLocalDate(selectedEvent.date, selectedEvent.startTime).toISOString(),
-        };
-        
-        await apiPutEvent(selectedEvent.id, liberatedPayload);
-        
-        // Crear custom_subtasks
-        for (const subtask of subtasks) {
-          if (!subtask.id.startsWith('temp-')) {
-            await apiCreateCustomSubtask(
-              selectedEvent.id,
-              subtask.text,
-              undefined,
-              subtask.sort_order || 0
+      }
+      
+      // 2. Ocultar subtareas del master ELIMINADAS (removed) solo para esta instancia
+      for (const removedSubtask of pendingSubtaskChanges.removed) {
+        // Solo ocultar si es una subtarea master, no custom
+        if (removedSubtask.type === 'master') {
+          console.log('🔧 Hiding master subtask for this day only', {
+            subtaskId: removedSubtask.id,
+            text: removedSubtask.text,
+            eventInstanceId: selectedEvent.id
+          });
+          
+          try {
+            const response = await apiHideSubtaskForInstance(
+              removedSubtask.id,
+              selectedEvent.id
             );
+            
+            if (response.ok) {
+              console.log('✅ Master subtask hidden successfully');
+            } else {
+              const errorData = await response.json();
+              console.error('❌ Failed to hide master subtask', { error: errorData });
+            }
+          } catch (error) {
+            console.error('❌ Exception hiding master subtask', { error });
+          }
+        } else if (removedSubtask.type === 'custom') {
+          // Si es custom, eliminarla directamente
+          console.log('🔧 Deleting custom subtask', {
+            customSubtaskId: removedSubtask.id,
+            text: removedSubtask.text
+          });
+          
+          try {
+            const response = await apiDeleteCustomSubtask(removedSubtask.id);
+            
+            if (response.ok) {
+              console.log('✅ Custom subtask deleted successfully');
+            } else {
+              const errorData = await response.json();
+              console.error('❌ Failed to delete custom subtask', { error: errorData });
+            }
+          } catch (error) {
+            console.error('❌ Exception deleting custom subtask', { error });
           }
         }
       }
       
-      // 2. Limpiar estado
+      console.log('✅ handleApplySubtaskChangesToThisDay - COMPLETE', {
+        createdCustomSubtasks: pendingSubtaskChanges.added.length,
+        hiddenMasterSubtasks: pendingSubtaskChanges.removed.filter(s => s.type === 'master').length,
+        deletedCustomSubtasks: pendingSubtaskChanges.removed.filter(s => s.type === 'custom').length
+      });
+      
+      // 3. Limpiar estado
       setPendingSubtaskChanges(null);
       await refreshEvents();
       setModalVisible(false);
       handleCloseModal();
       
     } catch (error) {
-      console.error('Error al liberar evento:', error);
+      console.error('❌ Error al liberar evento:', error);
       Alert.alert('Error', 'No se pudieron aplicar los cambios solo a este día');
     }
-  }, [selectedEvent, pendingSubtaskChanges, subtasks]);
+  }, [selectedEvent, pendingSubtaskChanges]);
 
   // Handler: Aplicar cambios de subtareas a toda la serie
   const handleApplySubtaskChangesToSeries = useCallback(async () => {
@@ -2616,7 +2675,16 @@ export default function CalendarView({}: CalendarViewProps) {
                   }}
                 >
                 {event && (
-                    <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} currentView={currentView} />
+                    <EventResizableBlock 
+                      key={event.id} 
+                      ev={event} 
+                      onResizeCommit={onResizeCommit} 
+                      onMoveCommit={onMoveCommit} 
+                      onQuickPress={onQuickPress} 
+                      cellWidth={getCellWidth()} 
+                      currentView={currentView}
+                      subtaskStatus={getSubtaskStatus(event.id)}
+                    />
                 )}
                 </TouchableOpacity>
               </View>
@@ -2770,7 +2838,16 @@ export default function CalendarView({}: CalendarViewProps) {
                             }}
                           >
                             {event && (
-                                <EventResizableBlock key={event.id} ev={event} onResizeCommit={onResizeCommit} onMoveCommit={onMoveCommit} onQuickPress={onQuickPress} cellWidth={getCellWidth()} currentView={currentView} />
+                                <EventResizableBlock 
+                                  key={event.id} 
+                                  ev={event} 
+                                  onResizeCommit={onResizeCommit} 
+                                  onMoveCommit={onMoveCommit} 
+                                  onQuickPress={onQuickPress} 
+                                  cellWidth={getCellWidth()} 
+                                  currentView={currentView}
+                                  subtaskStatus={getSubtaskStatus(event.id)}
+                                />
                             )}
                             </TouchableOpacity>
                           </View>

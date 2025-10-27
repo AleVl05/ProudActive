@@ -6,6 +6,8 @@ import {
   Animated,
   PanResponder,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+
 import { CELL_HEIGHT } from '../../../utils/dateConstants';
 
 // Types
@@ -27,6 +29,7 @@ interface EventResizableBlockProps {
   onQuickPress: (event: Event) => void;
   cellWidth: number;
   currentView?: 'day' | 'week' | 'month' | 'year';
+  subtaskStatus?: { hasSubtasks: boolean; allCompleted: boolean };
 }
 
 const EventResizableBlock = React.memo(function EventResizableBlock({ 
@@ -35,7 +38,8 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   onMoveCommit, 
   onQuickPress, 
   cellWidth, 
-  currentView = 'week' 
+  currentView = 'week',
+  subtaskStatus = { hasSubtasks: false, allCompleted: false }
 }: EventResizableBlockProps) {
 
   const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
@@ -114,6 +118,54 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
 
   // 🔧 OPTIMIZACIÓN: Memoizar el cálculo de altura para evitar recálculos innecesarios
   const blockHeight = useMemo(() => (ev.duration / 30) * CELL_HEIGHT - 2, [ev.duration]);
+
+  // 🎨 ESTÉTICA: Calcular color del evento basándose en estado de subtareas (TRES ESTADOS)
+  const colorState = useMemo(() => {
+    const { hasSubtasks, allCompleted } = subtaskStatus;
+    
+    if (hasSubtasks && allCompleted) {
+      // Estado 3: Todas las subtareas completadas → degradé dorado
+      return {
+        type: 'gradient' as const,
+        colors: ['#B8860B', '#DAA520'], // Dorado oscuro a dorado medio
+        solidColor: '#B8860B', // Para ghost y handles
+      };
+    } else if (hasSubtasks && !allCompleted) {
+      // Estado 2: Tiene subtareas pero no todas completadas → gris oscuro
+      return {
+        type: 'solid' as const,
+        solidColor: '#4a4a4a', // Gris oscuro
+      };
+    } else {
+      // Estado 1: Sin subtareas → color original
+      return {
+        type: 'solid' as const,
+        solidColor: ev.color,
+      };
+    }
+  }, [subtaskStatus, ev.color]);
+
+  // 🎨 ESTÉTICA: Estilo de shadow para efecto de "resplandor" cuando está completado
+  const shadowStyle = useMemo(() => {
+    const { hasSubtasks, allCompleted } = subtaskStatus;
+    
+    if (hasSubtasks && allCompleted) {
+      return {
+        shadowColor: '#B8860B', // Dorado oscuro
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.7,
+        shadowRadius: 10,
+        elevation: 10,
+      };
+    }
+    return {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.2,
+      shadowRadius: 2,
+      elevation: 3,
+    };
+  }, [subtaskStatus]);
 
   const topResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => {
@@ -343,10 +395,10 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
             height: ghostHeight,
             borderWidth: 3,
             borderStyle: 'dashed',
-            borderColor: ev.color,
+            borderColor: colorState.solidColor, // 🎨 ESTÉTICA: Usar color efectivo
             borderRadius: 4,
-            backgroundColor: `${ev.color}40`, // 40% opacity para mejor visibilidad
-            zIndex: 200, // 🔧 FIX: Ghost por encima del evento
+            backgroundColor: `${colorState.solidColor}40`, // 40% opacity
+            zIndex: 200,
             shadowColor: '#000',
             shadowOffset: { width: 0, height: 2 },
             shadowOpacity: 0.25,
@@ -365,7 +417,7 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
             borderRadius: 2,
             opacity: 0.9,
             borderWidth: 1,
-            borderColor: ev.color
+            borderColor: colorState.solidColor // 🎨 ESTÉTICA: Usar color efectivo
           }} />
           <View style={{
             position: 'absolute',
@@ -377,38 +429,74 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
             borderRadius: 2,
             opacity: 0.9,
             borderWidth: 1,
-            borderColor: ev.color
+            borderColor: colorState.solidColor // 🎨 ESTÉTICA: Usar color efectivo
           }} />
         </Animated.View>
       )}
 
-      <View 
-        key={`${ev.id}-${forceRender}`} // 🔧 FIX: Forzar re-render con key única
-        style={[
-          styles.eventBlock, 
-          { 
-            backgroundColor: ev.color, 
-            height: blockHeight,
-            minHeight: blockHeight, // 🔧 OPTIMIZACIÓN: Usar altura memoizada
-            zIndex: 1000 // 🔧 FIX: Asegurar que esté encima del grid y del día actual
-          }
-        ]}
-      >
-        <Text style={[
-          styles.eventText,
-          currentView === 'day' && styles.eventTextDay,
-          currentView === 'week' && styles.eventTextWeek
-        ]} numberOfLines={2}>{ev.title}</Text>
-        {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
-        <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
-        <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
-        {/* Área central para mover el bloque completo */}
+      {/* 🎨 ESTÉTICA: Usar degradé o color sólido según estado de subtareas */}
+      {colorState.type === 'gradient' ? (
+        <LinearGradient
+          key={`${ev.id}-${forceRender}`}
+          colors={colorState.colors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }} // Diagonal: superior izquierda → inferior derecha
+          style={[
+            styles.eventBlock,
+            shadowStyle,
+            {
+              height: blockHeight,
+              minHeight: blockHeight,
+              zIndex: 1000,
+            }
+          ]}
+        >
+          <Text style={[
+            styles.eventText,
+            currentView === 'day' && styles.eventTextDay,
+            currentView === 'week' && styles.eventTextWeek,
+            { color: '#000' } // 🎨 ESTÉTICA: Texto negro sobre dorado
+          ]} numberOfLines={2}>{ev.title}</Text>
+          {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
+          <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
+          <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
+          {/* Área central para mover el bloque completo */}
+          <View 
+            {...moveResponder.panHandlers} 
+            style={{ position: 'absolute', top: 12, left: 0, right: 0, height: blockHeight - 24 }}
+            onLayout={() => {}}
+          />
+        </LinearGradient>
+      ) : (
         <View 
-          {...moveResponder.panHandlers} 
-          style={{ position: 'absolute', top: 12, left: 0, right: 0, height: blockHeight - 24 }}
-          onLayout={() => {}}
-        />
-      </View>
+          key={`${ev.id}-${forceRender}`}
+          style={[
+            styles.eventBlock, 
+            shadowStyle,
+            { 
+              backgroundColor: colorState.solidColor,
+              height: blockHeight,
+              minHeight: blockHeight,
+              zIndex: 1000,
+            }
+          ]}
+        >
+          <Text style={[
+            styles.eventText,
+            currentView === 'day' && styles.eventTextDay,
+            currentView === 'week' && styles.eventTextWeek
+          ]} numberOfLines={2}>{ev.title}</Text>
+          {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
+          <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
+          <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
+          {/* Área central para mover el bloque completo */}
+          <View 
+            {...moveResponder.panHandlers} 
+            style={{ position: 'absolute', top: 12, left: 0, right: 0, height: blockHeight - 24 }}
+            onLayout={() => {}}
+          />
+        </View>
+      )}
     </View>
   );
 });
