@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
-import { 
-  initializeNotifications, 
-  displayTestNotification, 
-  displayTaskNotification 
-} from '../services/notifications';
+// import { 
+//   initializeNotifications, 
+//   displayTestNotification, 
+//   displayTaskNotification 
+// } from '../services/notifications';
 
 export default function NotificationTester() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -12,44 +12,17 @@ export default function NotificationTester() {
 
   // Inicializar notificaciones al montar el componente
   useEffect(() => {
-    initializeNotifications().then((success) => {
-      setIsInitialized(success);
-    });
+    // TODO: Implementar con expo-notifications
+    console.log('⚠️ Sistema de notificaciones deshabilitado - Notifee removido');
+    setIsInitialized(false);
   }, []);
 
   const handleTestNotification = async () => {
-    setIsLoading(true);
-    try {
-      const success = await displayTestNotification();
-      if (success) {
-        Alert.alert('✅ Éxito', 'Notificación de prueba enviada con sonido personalizado');
-      } else {
-        Alert.alert('❌ Error', 'No se pudo enviar la notificación');
-      }
-    } catch (error) {
-      Alert.alert('❌ Error', 'Error inesperado al enviar notificación');
-    } finally {
-      setIsLoading(false);
-    }
+    Alert.alert('⚠️ Deshabilitado', 'Sistema de notificaciones deshabilitado - Notifee removido');
   };
 
   const handleTaskNotification = async () => {
-    setIsLoading(true);
-    try {
-      const success = await displayTaskNotification(
-        'Tarea Importante',
-        'Completar el proyecto Proudactive - ¡Vamos que se puede!'
-      );
-      if (success) {
-        Alert.alert('✅ Éxito', 'Notificación de tarea enviada');
-      } else {
-        Alert.alert('❌ Error', 'No se pudo enviar la notificación de tarea');
-      }
-    } catch (error) {
-      Alert.alert('❌ Error', 'Error inesperado al enviar notificación de tarea');
-    } finally {
-      setIsLoading(false);
-    }
+    Alert.alert('⚠️ Deshabilitado', 'Sistema de notificaciones deshabilitado - Notifee removido');
   };
 
   return (
@@ -58,44 +31,44 @@ export default function NotificationTester() {
       
       <View style={styles.statusContainer}>
         <Text style={styles.statusText}>
-          Estado: {isInitialized ? '✅ Inicializado' : '⏳ Inicializando...'}
+          Estado: ⚠️ Deshabilitado (Notifee removido)
         </Text>
       </View>
 
       <View style={styles.buttonContainer}>
         <TouchableOpacity 
-          style={[styles.button, styles.testButton]} 
+          style={[styles.button, styles.disabledButton]} 
           onPress={handleTestNotification}
-          disabled={!isInitialized || isLoading}
+          disabled={true}
         >
           <Text style={styles.buttonText}>
-            {isLoading ? '⏳ Enviando...' : '🔔 Probar Notificación'}
+            🔔 Probar Notificación (Deshabilitado)
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
-          style={[styles.button, styles.taskButton]} 
+          style={[styles.button, styles.disabledButton]} 
           onPress={handleTaskNotification}
-          disabled={!isInitialized || isLoading}
+          disabled={true}
         >
           <Text style={styles.buttonText}>
-            {isLoading ? '⏳ Enviando...' : '📋 Notificación de Tarea'}
+            📋 Notificación de Tarea (Deshabilitado)
           </Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.infoContainer}>
         <Text style={styles.infoText}>
-          💡 <Text style={styles.bold}>Instrucciones:</Text>
+          💡 <Text style={styles.bold}>Nota:</Text>
         </Text>
         <Text style={styles.infoText}>
-          • Presiona "Probar Notificación" para escuchar tu sonido personalizado
+          • El sistema de notificaciones fue deshabilitado al remover Notifee
         </Text>
         <Text style={styles.infoText}>
-          • La notificación aparecerá en la pantalla de bloqueo
+          • Para habilitar notificaciones, implementar con expo-notifications
         </Text>
         <Text style={styles.infoText}>
-          • Si no escuchas el sonido, verifica que el volumen esté activado
+          • O usar react-native-firebase para notificaciones avanzadas
         </Text>
       </View>
     </View>
@@ -116,15 +89,17 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   statusContainer: {
-    backgroundColor: '#e8f5e8',
+    backgroundColor: '#fff3cd',
     padding: 15,
     borderRadius: 10,
     marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#ffc107',
   },
   statusText: {
     fontSize: 16,
     textAlign: 'center',
-    color: '#2d5a2d',
+    color: '#856404',
     fontWeight: '600',
   },
   buttonContainer: {
@@ -136,11 +111,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
-  testButton: {
-    backgroundColor: '#007AFF',
-  },
-  taskButton: {
-    backgroundColor: '#34C759',
+  disabledButton: {
+    backgroundColor: '#ccc',
   },
   buttonText: {
     color: 'white',

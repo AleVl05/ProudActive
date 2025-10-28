@@ -3,7 +3,7 @@ import { Colors } from '@/constants/theme';
 import * as Updates from 'expo-updates';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import NotificationTester from '@/components/NotificationTester';
+// import NotificationTester from '@/components/NotificationTester'; // Deshabilitado - Notifee removido
 import authService, { User } from '../../services/auth';
 
 export default function ProfileScreen() {
@@ -195,10 +195,10 @@ export default function ProfileScreen() {
         )}
       </View>
 
-      {/* Probador de Notificaciones (solo en desarrollo) */}
-      <View style={styles.section}>
+      {/* Probador de Notificaciones (deshabilitado - Notifee removido) */}
+      {/* <View style={styles.section}>
         <NotificationTester />
-      </View>
+      </View> */}
       
       {/* Cerrar Sesión */}
       <TouchableOpacity style={[styles.button, styles.logoutButton]} onPress={handleLogout}>

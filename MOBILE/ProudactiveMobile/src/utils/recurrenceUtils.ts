@@ -254,6 +254,9 @@ export const generateRecurrentInstances = (
             category: override.category || 'General',
             date: new Date(override.start_utc).toISOString().slice(0, 10),
             is_recurring: false,
+            // 🆕 Heredar información de subtareas del evento maestro
+            subtasks_count: masterEvent.subtasks_count || 0,
+            subtasks_completed_count: masterEvent.subtasks_completed_count || 0,
           };
           instances.push(overrideEvent);
         } else {
@@ -274,6 +277,9 @@ export const generateRecurrentInstances = (
             recurrence_end_date: masterEvent.recurrence_end_date,
             series_id: masterEvent.id,
             original_start_utc: masterEvent.start_utc,
+            // 🆕 Heredar información de subtareas del evento maestro
+            subtasks_count: masterEvent.subtasks_count || 0,
+            subtasks_completed_count: masterEvent.subtasks_completed_count || 0,
           };
 
           instances.push(instance);

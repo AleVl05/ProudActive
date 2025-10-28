@@ -6,7 +6,7 @@ import {
   Animated,
   PanResponder,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+// import { LinearGradient } from 'expo-linear-gradient'; // Deshabilitado - Linear Gradient no funciona
 
 import { CELL_HEIGHT } from '../../../utils/dateConstants';
 
@@ -20,6 +20,9 @@ interface Event {
   date: string;
   color: string;
   category?: string;
+  // 🆕 Campos de información de subtareas
+  subtasks_count?: number;
+  subtasks_completed_count?: number;
 }
 
 interface EventResizableBlockProps {
@@ -124,11 +127,10 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
     const { hasSubtasks, allCompleted } = subtaskStatus;
     
     if (hasSubtasks && allCompleted) {
-      // Estado 3: Todas las subtareas completadas → degradé dorado
+      // Estado 3: Todas las subtareas completadas → color dorado sólido
       return {
-        type: 'gradient' as const,
-        colors: ['#B8860B', '#DAA520'], // Dorado oscuro a dorado medio
-        solidColor: '#B8860B', // Para ghost y handles
+        type: 'solid' as const,
+        solidColor: '#DAA520', // Dorado medio sólido
       };
     } else if (hasSubtasks && !allCompleted) {
       // Estado 2: Tiene subtareas pero no todas completadas → gris oscuro
@@ -434,69 +436,39 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         </Animated.View>
       )}
 
-      {/* 🎨 ESTÉTICA: Usar degradé o color sólido según estado de subtareas */}
-      {colorState.type === 'gradient' ? (
-        <LinearGradient
-          key={`${ev.id}-${forceRender}`}
-          colors={colorState.colors}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }} // Diagonal: superior izquierda → inferior derecha
-          style={[
-            styles.eventBlock,
-            shadowStyle,
-            {
-              height: blockHeight,
-              minHeight: blockHeight,
-              zIndex: 1000,
-            }
-          ]}
-        >
-          <Text style={[
-            styles.eventText,
-            currentView === 'day' && styles.eventTextDay,
-            currentView === 'week' && styles.eventTextWeek,
-            { color: '#000' } // 🎨 ESTÉTICA: Texto negro sobre dorado
-          ]} numberOfLines={2}>{ev.title}</Text>
-          {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
-          <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
-          <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
-          {/* Área central para mover el bloque completo */}
-          <View 
-            {...moveResponder.panHandlers} 
-            style={{ position: 'absolute', top: 12, left: 0, right: 0, height: blockHeight - 24 }}
-            onLayout={() => {}}
-          />
-        </LinearGradient>
-      ) : (
+      {/* 🎨 ESTÉTICA: Usar color sólido (LinearGradient deshabilitado) */}
+      <View 
+        key={`${ev.id}-${forceRender}`}
+        style={[
+          styles.eventBlock, 
+          shadowStyle,
+          { 
+            backgroundColor: colorState.solidColor,
+            height: blockHeight,
+            minHeight: blockHeight,
+            zIndex: 1000,
+          }
+        ]}
+      >
+        <Text style={[
+          styles.eventText,
+          currentView === 'day' && styles.eventTextDay,
+          currentView === 'week' && styles.eventTextWeek,
+          // 🆕 Texto negro para eventos dorados completados
+          colorState.solidColor === '#DAA520' && { color: '#000', fontWeight: '600' },
+          // 🆕 Texto blanco para eventos gris oscuro (con subtareas incompletas)
+          colorState.solidColor === '#4a4a4a' && { color: '#fff' }
+        ]} numberOfLines={2}>{ev.title}</Text>
+        {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
+        <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
+        <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
+        {/* Área central para mover el bloque completo */}
         <View 
-          key={`${ev.id}-${forceRender}`}
-          style={[
-            styles.eventBlock, 
-            shadowStyle,
-            { 
-              backgroundColor: colorState.solidColor,
-              height: blockHeight,
-              minHeight: blockHeight,
-              zIndex: 1000,
-            }
-          ]}
-        >
-          <Text style={[
-            styles.eventText,
-            currentView === 'day' && styles.eventTextDay,
-            currentView === 'week' && styles.eventTextWeek
-          ]} numberOfLines={2}>{ev.title}</Text>
-          {/* Handles invisibles superior e inferior (hitzone ampliada 12px) */}
-          <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12 }} />
-          <View {...bottomResponder.panHandlers} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 12 }} />
-          {/* Área central para mover el bloque completo */}
-          <View 
-            {...moveResponder.panHandlers} 
-            style={{ position: 'absolute', top: 12, left: 0, right: 0, height: blockHeight - 24 }}
-            onLayout={() => {}}
-          />
-        </View>
-      )}
+          {...moveResponder.panHandlers} 
+          style={{ position: 'absolute', top: 12, left: 0, right: 0, height: blockHeight - 24 }}
+          onLayout={() => {}}
+        />
+      </View>
     </View>
   );
 });
