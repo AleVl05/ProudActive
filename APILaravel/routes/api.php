@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\EventController;
+// use App\Http\Controllers\Api\MonthEventController;
 use App\Http\Controllers\Api\SubtaskController;
 use App\Http\Controllers\Api\SubtaskInstanceController;
 use App\Http\Controllers\Api\AuthController;
@@ -49,6 +50,8 @@ Route::prefix('v1')->group(function () {
         Route::get('events/{id}', [EventController::class, 'show']);
         Route::match(['put', 'patch'], 'events/{id}', [EventController::class, 'update']);
         Route::delete('events/{id}', [EventController::class, 'destroy']);
+
+        // Month Events - REMOVIDO
 
         // Calendarios y categorías
         Route::get('calendars', [EventController::class, 'calendars']);

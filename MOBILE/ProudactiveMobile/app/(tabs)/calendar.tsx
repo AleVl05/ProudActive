@@ -182,16 +182,39 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // ===== ESTADO PRINCIPAL =====
   const [events, setEvents] = useState<Event[]>([]);
+  
+  // Debug: Rastrear cambios de events (comentado para limpiar consola)
+  // useEffect(() => {
+  //   console.log('📅 events CHANGED', { 
+  //     newCount: events.length,
+  //     timestamp: new Date().toISOString(),
+  //     stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+  //   });
+  // }, [events]);
   const [monthEvents, setMonthEvents] = useState<MonthEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<Event | MonthEvent | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [eventTitle, setEventTitle] = useState('');
   const [eventDescription, setEventDescription] = useState('');
   const [eventColor, setEventColor] = useState('#6b53e2');
+  
+  // ===== ESTADO PARA PREVENIR DOBLE CLIC =====
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
   const [selectedMonthCell, setSelectedMonthCell] = useState<SelectedMonthCell | null>(null);
   const [currentView, setCurrentView] = useState<'day' | 'week' | 'month' | 'year'>('week');
   const [currentDate, setCurrentDate] = useState(new Date());
+  
+  // Debug: Rastrear cambios de currentDate (comentado para limpiar consola)
+  // useEffect(() => {
+  //   console.log('📅 currentDate CHANGED', { 
+  //     newDate: currentDate.toISOString().slice(0, 10),
+  //     timestamp: new Date().toISOString(),
+  //     stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+  //   });
+  // }, [currentDate]);
   const [recurrenceConfig, setRecurrenceConfig] = useState<RecurrenceConfig>(() => createDefaultRecurrenceConfig());
   const [recurrenceModalVisible, setRecurrenceModalVisible] = useState(false);
   const [tempRecurrenceConfig, setTempRecurrenceConfig] = useState<RecurrenceConfig | null>(null);
@@ -213,6 +236,7 @@ export default function CalendarView({}: CalendarViewProps) {
   const [newSubtaskText, setNewSubtaskText] = useState('');
   const [showSubtaskInput, setShowSubtaskInput] = useState(false);
   const [subtaskChangesModalVisible, setSubtaskChangesModalVisible] = useState(false);
+  const [eventLongPressHandlers, setEventLongPressHandlers] = useState<{[eventId: string]: () => void}>({});
   const [pendingSubtaskChanges, setPendingSubtaskChanges] = useState<{
     added: SubtaskItem[];
     removed: SubtaskItem[];
@@ -222,6 +246,56 @@ export default function CalendarView({}: CalendarViewProps) {
   // Cache de subtareas para evitar llamadas repetidas a la API
   const [subtasksCache, setSubtasksCache] = useState<{[eventId: string]: SubtaskItem[]}>({});
   
+  // ===== HELPER: Registrar handlers de long press =====
+  const longPressActiveRef = useRef<{[eventId: string]: boolean}>({});
+  const stableHandlersRef = useRef<Map<string, () => void>>(new Map());
+  
+  const registerEventLongPressHandler = useCallback((eventId: string, handler: () => void) => {
+    // Solo actualizar si el handler realmente cambió
+    const existing = stableHandlersRef.current.get(eventId);
+    if (existing === handler) {
+      return; // Ya está registrado, no hacer nada
+    }
+    stableHandlersRef.current.set(eventId, handler);
+    
+    setEventLongPressHandlers(prev => {
+      // Evitar actualizar si el handler no cambió para este eventId
+      if (prev[eventId] === handler) {
+        return prev;
+      }
+      return { ...prev, [eventId]: handler };
+    });
+  }, []);
+
+  // Cache de funciones wrapper estables por eventId
+  const wrapperCacheRef = useRef<Map<string, (handler: () => void) => void>>(new Map());
+
+  // Función estable para pasar a EventResizableBlock
+  const createLongPressHandler = useCallback((eventId: string) => {
+    // Obtener o crear wrapper estable para este eventId
+    if (!wrapperCacheRef.current.has(eventId)) {
+      const wrapperFn = (handler: () => void) => {
+        const existing = stableHandlersRef.current.get(eventId);
+        // Solo registrar si el handler realmente cambió
+        if (existing !== handler) {
+          const wrapped = () => {
+            longPressActiveRef.current[eventId] = true;
+            handler();
+            // Liberar después de un tiempo
+            setTimeout(() => {
+              longPressActiveRef.current[eventId] = false;
+            }, 600);
+          };
+          registerEventLongPressHandler(eventId, wrapped);
+        }
+      };
+      wrapperCacheRef.current.set(eventId, wrapperFn);
+    }
+    return wrapperCacheRef.current.get(eventId)!;
+  }, [registerEventLongPressHandler]);
+
+  
+
   // ===== HELPER: Calcular estado de subtareas del evento =====
   const getSubtaskStatus = useCallback((eventId: string): { hasSubtasks: boolean; allCompleted: boolean } => {
     const eventSubtasks = subtasksCache[eventId];
@@ -261,17 +335,17 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // ===== GESTIÓN DE SUBTAREAS =====
   const loadSubtasks = useCallback(async (eventId: string, event?: Event | MonthEvent | null, forceReload: boolean = false) => {
-    console.log('🔍 loadSubtasks - START', {
-      eventId,
-      hasEvent: !!event,
-      forceReload,
-      cacheHasEvent: !!subtasksCache[eventId]
-    });
+    // console.log('🔍 loadSubtasks - START', {
+    //   eventId,
+    //   hasEvent: !!event,
+    //   forceReload,
+    //   cacheHasEvent: !!subtasksCache[eventId]
+    // });
     
     // Verificar si ya tenemos las subtareas en caché (solo si no es force reload)
     if (!forceReload && subtasksCache[eventId]) {
       const cached = subtasksCache[eventId];
-      console.log('📦 loadSubtasks - Using CACHE', { count: cached.length });
+      // console.log('📦 loadSubtasks - Using CACHE', { count: cached.length });
       setSubtasks(cached);
       setOriginalSubtasks(JSON.parse(JSON.stringify(cached))); // Deep copy
       return;
@@ -282,35 +356,35 @@ export default function CalendarView({}: CalendarViewProps) {
       const eventData = event || selectedEvent;
       const isRecurringInstance = eventData && 'series_id' in eventData && eventData.series_id !== null && eventData.series_id !== undefined;
       
-      console.log('🔍 loadSubtasks - Event analysis', {
-        eventId,
-        title: eventData?.title,
-        isRecurringInstance,
-        series_id: eventData && 'series_id' in eventData ? eventData.series_id : null,
-        is_recurring: eventData && 'is_recurring' in eventData ? eventData.is_recurring : null
-      });
+      // console.log('🔍 loadSubtasks - Event analysis', {
+      //   eventId,
+      //   title: eventData?.title,
+      //   isRecurringInstance,
+      //   series_id: eventData && 'series_id' in eventData ? eventData.series_id : null,
+      //   is_recurring: eventData && 'is_recurring' in eventData ? eventData.is_recurring : null
+      // });
       
       let response;
       let loadedSubtasks: SubtaskItem[] = [];
       
       if (isRecurringInstance) {
         // Usar endpoint de instancias para eventos recurrentes
-        console.log('🔄 loadSubtasks - Calling apiGetSubtasksForInstance', { eventId });
+        // console.log('🔄 loadSubtasks - Calling apiGetSubtasksForInstance', { eventId });
         response = await apiGetSubtasksForInstance(eventId);
         
-        console.log('📥 loadSubtasks - Response from apiGetSubtasksForInstance', {
-          ok: response.ok,
-          status: response.status
-        });
+        // console.log('📥 loadSubtasks - Response from apiGetSubtasksForInstance', {
+        //   ok: response.ok,
+        //   status: response.status
+        // });
         
         if (response.ok) {
           const result = await response.json();
-          console.log('📋 loadSubtasks - Result from instance endpoint', {
-            success: result.success,
-            subtasksCount: result.data?.subtasks?.length || 0,
-            masterEventId: result.data?.master_event_id,
-            isRecurringInstance: result.data?.is_recurring_instance
-          });
+          // console.log('📋 loadSubtasks - Result from instance endpoint', {
+          //   success: result.success,
+          //   subtasksCount: result.data?.subtasks?.length || 0,
+          //   masterEventId: result.data?.master_event_id,
+          //   isRecurringInstance: result.data?.is_recurring_instance
+          // });
           
           // El endpoint devuelve subtareas con type, instance_id, etc.
           loadedSubtasks = result.data.subtasks.map((subtask: any) => ({
@@ -322,10 +396,10 @@ export default function CalendarView({}: CalendarViewProps) {
             sort_order: subtask.sort_order || 0
           }));
           
-          console.log('✅ loadSubtasks - Loaded subtasks from instance', {
-            count: loadedSubtasks.length,
-            subtasks: loadedSubtasks.map(st => ({ id: st.id, text: st.text, type: st.type, completed: st.completed }))
-          });
+          // console.log('✅ loadSubtasks - Loaded subtasks from instance', {
+          //   count: loadedSubtasks.length,
+          //   subtasks: loadedSubtasks.map(st => ({ id: st.id, text: st.text, type: st.type, completed: st.completed }))
+          // });
         } else {
           const errorText = await response.text();
           console.error('❌ loadSubtasks - Error response from instance endpoint', {
@@ -335,20 +409,20 @@ export default function CalendarView({}: CalendarViewProps) {
         }
       } else {
         // Usar endpoint normal para eventos únicos o maestros
-        console.log('📝 loadSubtasks - Calling apiGetSubtasks (normal endpoint)', { eventId });
+        // console.log('📝 loadSubtasks - Calling apiGetSubtasks (normal endpoint)', { eventId });
         response = await apiGetSubtasks(eventId);
         
-        console.log('📥 loadSubtasks - Response from apiGetSubtasks', {
-          ok: response.ok,
-          status: response.status
-        });
+        // console.log('📥 loadSubtasks - Response from apiGetSubtasks', {
+        //   ok: response.ok,
+        //   status: response.status
+        // });
         
         if (response.ok) {
           const result = await response.json();
-          console.log('📋 loadSubtasks - Result from normal endpoint', {
-            success: result.success,
-            subtasksCount: result.data?.length || 0
-          });
+          // console.log('📋 loadSubtasks - Result from normal endpoint', {
+          //   success: result.success,
+          //   subtasksCount: result.data?.length || 0
+          // });
           
           loadedSubtasks = result.data.map((subtask: any) => ({
             id: subtask.id.toString(),
@@ -358,10 +432,10 @@ export default function CalendarView({}: CalendarViewProps) {
             sort_order: subtask.sort_order || 0
           }));
           
-          console.log('✅ loadSubtasks - Loaded subtasks from normal endpoint', {
-            count: loadedSubtasks.length,
-            subtasks: loadedSubtasks.map(st => ({ id: st.id, text: st.text, completed: st.completed }))
-          });
+          // console.log('✅ loadSubtasks - Loaded subtasks from normal endpoint', {
+          //   count: loadedSubtasks.length,
+          //   subtasks: loadedSubtasks.map(st => ({ id: st.id, text: st.text, completed: st.completed }))
+          // });
         } else {
           const errorText = await response.text();
           console.error('❌ loadSubtasks - Error response from normal endpoint', {
@@ -372,10 +446,10 @@ export default function CalendarView({}: CalendarViewProps) {
       }
       
       // Guardar en caché y mostrar
-      console.log('💾 loadSubtasks - Saving to cache and state', {
-        eventId,
-        count: loadedSubtasks.length
-      });
+      // console.log('💾 loadSubtasks - Saving to cache and state', {
+      //   eventId,
+      //   count: loadedSubtasks.length
+      // });
       
       setSubtasksCache(prev => ({
         ...prev,
@@ -384,10 +458,10 @@ export default function CalendarView({}: CalendarViewProps) {
       setSubtasks(loadedSubtasks);
       setOriginalSubtasks(JSON.parse(JSON.stringify(loadedSubtasks))); // Deep copy para comparar cambios
       
-      console.log('✅ loadSubtasks - COMPLETE', {
-        eventId,
-        loadedCount: loadedSubtasks.length
-      });
+      // console.log('✅ loadSubtasks - COMPLETE', {
+      //   eventId,
+      //   loadedCount: loadedSubtasks.length
+      // });
       
     } catch (error) {
       console.error('❌ loadSubtasks - EXCEPTION', {
@@ -1000,6 +1074,9 @@ export default function CalendarView({}: CalendarViewProps) {
       setModalVisible(false);
       handleCloseModal();
       
+      console.log('✅ SubtaskChangesModal - Se ejecutó correctamente "Solo este día"');
+      refreshSubtasksColorsWithDelay(); // Recargar colores de subtareas automáticamente con delay de 3 segundos
+      
     } catch (error) {
       console.error('❌ Error al liberar evento:', error);
       Alert.alert('Error', 'No se pudieron aplicar los cambios solo a este día');
@@ -1042,11 +1119,107 @@ export default function CalendarView({}: CalendarViewProps) {
       setModalVisible(false);
       handleCloseModal();
       
+      console.log('✅ SubtaskChangesModal - Se ejecutó correctamente "Toda la serie"');
+      refreshSubtasksColorsWithDelay(); // Recargar colores de subtareas automáticamente con delay de 3 segundos
+      
     } catch (error) {
       console.error('Error al aplicar cambios a la serie:', error);
       Alert.alert('Error', 'No se pudieron aplicar los cambios a toda la serie');
     }
   }, [selectedEvent, pendingSubtaskChanges]);
+
+  // Función refinada para cargar subtareas de todos los eventos (solo cuando es necesario)
+  const loadAllEventsSubtasks = useCallback(async (events: Event[], forceReload: boolean = false, targetDate?: Date) => {
+    // console.log('🎯 loadAllEventsSubtasks - START', { count: events.length, forceReload });
+    
+    try {
+      // Si forceReload es true, procesar todos los eventos. Si no, solo los que no están en cache
+      const eventsToProcess = forceReload 
+        ? events 
+        : events.filter(event => !subtasksCache[event.id]);
+      
+      if (eventsToProcess.length === 0) {
+        // console.log('🎯 loadAllEventsSubtasks - All events already have subtasks loaded');
+        return;
+      }
+      
+      // console.log('🎯 loadAllEventsSubtasks - Processing', { 
+      //   total: events.length, 
+      //   toProcess: eventsToProcess.length,
+      //   forceReload
+      // });
+      
+      // 🎯 FILTRAR SOLO EVENTOS DE LA SEMANA/DÍA ACTUAL
+      let visibleEvents: Event[] = [];
+      
+      // Usar targetDate si se proporciona, sino usar currentDate
+      const dateToUse = targetDate || currentDate;
+      
+      if (currentView === 'week') {
+        const weekStart = startOfWeek(dateToUse);
+        const weekEnd = addDays(weekStart, 6);
+        const weekStartStr = weekStart.toISOString().slice(0, 10);
+        const weekEndStr = weekEnd.toISOString().slice(0, 10);
+        
+        visibleEvents = eventsToProcess.filter(event => {
+          const eventDate = event.date;
+          return eventDate >= weekStartStr && eventDate <= weekEndStr;
+        });
+        
+        // console.log('🎯 FILTRO SEMANA - Rango:', weekStartStr, 'a', weekEndStr, '| Eventos visibles:', visibleEvents.length, 'de', eventsToProcess.length);
+      } else if (currentView === 'day') {
+        // Para la vista de día, cargar toda la semana para mejor experiencia visual
+        const weekStart = startOfWeek(dateToUse);
+        const weekEnd = addDays(weekStart, 6);
+        const weekStartStr = weekStart.toISOString().slice(0, 10);
+        const weekEndStr = weekEnd.toISOString().slice(0, 10);
+        
+        visibleEvents = eventsToProcess.filter(event => {
+          const eventDate = event.date;
+          return eventDate >= weekStartStr && eventDate <= weekEndStr;
+        });
+        
+        // console.log('🎯 FILTRO DÍA (SEMANA) - Rango:', weekStartStr, 'a', weekEndStr, '| Eventos visibles:', visibleEvents.length, 'de', eventsToProcess.length);
+      } else {
+        // Para month y year, usar todos los eventos por ahora
+        visibleEvents = eventsToProcess;
+        console.log('🎯 FILTRO MES/AÑO - Usando todos los eventos:', eventsToProcess.length);
+      }
+      
+      // Procesar en lotes más grandes para mejor performance
+      const batchSize = 10; // Aumentado de 3 a 10
+      
+      // Procesar todos los lotes en paralelo para máxima velocidad
+      const allBatches = [];
+      for (let i = 0; i < visibleEvents.length; i += batchSize) {
+        const batch = visibleEvents.slice(i, i + batchSize);
+        allBatches.push(batch);
+      }
+      
+      // Procesar todos los lotes simultáneamente
+      const allBatchPromises = allBatches.map(async (batch, batchIndex) => {
+        const batchPromises = batch.map(async (event) => {
+          try {
+            // console.log('🎯 DEBUG - Event:', event.title, 'Date:', event.date);
+            await loadSubtasks(event.id, event, true);
+            // console.log('🎯 loadAllEventsSubtasks - Loaded subtasks for', event.id);
+          } catch (error) {
+            console.log('🎯 loadAllEventsSubtasks - Error loading', event.id, error instanceof Error ? error.message : String(error));
+          }
+        });
+        
+        await Promise.all(batchPromises);
+        // console.log(`🎯 BATCH ${batchIndex + 1}/${allBatches.length} COMPLETE`);
+      });
+      
+      // Esperar a que todos los lotes terminen
+      await Promise.all(allBatchPromises);
+      
+      // console.log('🎯 loadAllEventsSubtasks - END');
+    } catch (error) {
+      console.log('🎯 loadAllEventsSubtasks - Error:', error instanceof Error ? error.message : String(error));
+    }
+  }, [loadSubtasks, subtasksCache]);
 
   // Función para refrescar eventos después de crear/editar
   const refreshEvents = useCallback(async () => {
@@ -1065,6 +1238,48 @@ export default function CalendarView({}: CalendarViewProps) {
     } catch (error) {
     }
   }, [currentDate]);
+
+  // ===== DUPLICAR EVENTO =====
+  const handleDuplicateEvent = useCallback(async (event: Event) => {
+    try {
+      const slot = 30; // +30m debajo
+      const dayMinutes = 24 * 60;
+      const newStartTimeRaw = event.startTime + event.duration + slot;
+      const safeStart = Math.min(newStartTimeRaw, dayMinutes - event.duration);
+
+      const startLocal = dateKeyToLocalDate(event.date, safeStart);
+      const endLocal = dateKeyToLocalDate(event.date, safeStart + event.duration);
+
+      const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+      if (!calendarId) throw new Error('No hay calendars disponibles');
+
+      const payload = {
+        calendar_id: calendarId,
+        title: event.title,
+        description: event.description || '',
+        start_utc: startLocal.toISOString(),
+        end_utc: endLocal.toISOString(),
+        color: event.color,
+        is_recurring: false,
+        recurrence_rule: null,
+        recurrence_end_date: null,
+      };
+
+      const postRes = await apiPostEvent(payload);
+      const created = await postRes.json();
+
+      if (postRes.ok && created?.data?.id) {
+        await migrateSubtasks(String(event.id), String(created.data.id), event);
+        await refreshEvents();
+        Alert.alert('Éxito', 'Evento duplicado correctamente.');
+      } else {
+        Alert.alert('Error', 'No se pudo duplicar el evento');
+      }
+    } catch (e) {
+      console.error('Error al duplicar evento:', e);
+      Alert.alert('Error', 'No se pudo duplicar el evento');
+    }
+  }, [refreshEvents, migrateSubtasks]);
 
   // Función para eliminar un evento único
   const handleDeleteSingleEvent = useCallback(async (eventId: string) => {
@@ -1459,7 +1674,10 @@ export default function CalendarView({}: CalendarViewProps) {
       const expandedStart = new Date(rangeStart);
       expandedStart.setMonth(expandedStart.getMonth() - 6); // 6 meses atrás para capturar eventos recurrentes
       
-      const response = await apiFetchEvents(expandedStart.toISOString(), rangeEnd.toISOString());
+      const expandedEnd = new Date(rangeEnd);
+      expandedEnd.setMonth(expandedEnd.getMonth() + 6); // 6 meses adelante para capturar eventos futuros
+      
+      const response = await apiFetchEvents(expandedStart.toISOString(), expandedEnd.toISOString());
       if (!response.ok) {
         return null;
       }
@@ -1535,7 +1753,17 @@ export default function CalendarView({}: CalendarViewProps) {
   }, [normalizeApiEvent]);
 
   useEffect(() => {
-    if (currentView !== 'week' && currentView !== 'day') return;
+    // console.log('🔄 useEffect PRINCIPAL - START', { 
+    //   currentView, 
+    //   currentDate: currentDate.toISOString().slice(0, 10),
+    //   eventsCount: events.length,
+    //   timestamp: new Date().toISOString()
+    // });
+    
+    if (currentView !== 'week' && currentView !== 'day') {
+      // console.log('🔄 useEffect PRINCIPAL - SKIP (not week/day)');
+      return;
+    }
 
     const rangeStart = new Date(currentView === 'week' ? startOfWeek(currentDate) : currentDate);
     rangeStart.setHours(0, 0, 0, 0);
@@ -1543,19 +1771,45 @@ export default function CalendarView({}: CalendarViewProps) {
     const rangeEnd = new Date(rangeEndBase);
     rangeEnd.setHours(23, 59, 59, 999);
 
+    // console.log('🔄 useEffect PRINCIPAL - Range', { 
+    //   rangeStart: rangeStart.toISOString().slice(0, 10),
+    //   rangeEnd: rangeEnd.toISOString().slice(0, 10)
+    // });
+
     let ignore = false;
 
     (async () => {
+      // console.log('🔄 useEffect PRINCIPAL - Calling fetchEventsForRange');
       const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
+      // console.log('🔄 useEffect PRINCIPAL - fetchEventsForRange result', { 
+      //   fetchedCount: fetched?.length || 0,
+      //   ignore
+      // });
+      
       if (!ignore && fetched) {
-        setEvents(prev => [...prev, ...fetched]);
+        // console.log('🔄 useEffect PRINCIPAL - Setting events', { 
+        //   prevCount: events.length,
+        //   newCount: fetched.length,
+        //   totalWillBe: events.length + fetched.length
+        // });
+        setEvents(fetched);
+        // console.log('🔄 useEffect PRINCIPAL - setEvents (REPLACED)', { 
+        //   prevLength: events.length,
+        //   fetchedLength: fetched.length,
+        //   newLength: fetched.length
+        // });
+        
+        // Solo cargar subtareas al cargar el calendario inicialmente
+        // console.log('📅 useEffect - Loading subtasks for initial load');
+        await loadAllEventsSubtasks(fetched);
       }
     })();
 
     return () => {
+      // console.log('🔄 useEffect PRINCIPAL - CLEANUP');
       ignore = true;
     };
-  }, [currentView, currentDate, startOfWeek, addDays, fetchEventsForRange]);
+  }, [currentView, currentDate, startOfWeek, addDays, fetchEventsForRange, loadAllEventsSubtasks]);
 
   // Obtener ancho de celda
   const getCellWidth = useCallback(() => {
@@ -2164,25 +2418,88 @@ export default function CalendarView({}: CalendarViewProps) {
   }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, recurrenceConfig, subtasks, migrateSubtasks]);
 
   // ===== NAVEGACIÓN =====
-  const navigateDate = useCallback((direction: 'prev' | 'next') => {
+  const navigateDate = useCallback(async (direction: 'prev' | 'next') => {
+    console.log('🧭 navigateDate - START', { 
+      direction, 
+      currentView, 
+      currentDate: currentDate.toISOString().slice(0, 10),
+      eventsCount: events.length,
+      timestamp: new Date().toISOString()
+    });
+    
     if (currentView === 'day') {
       const newDate = addDays(currentDate, direction === 'next' ? 1 : -1);
+      console.log('🧭 navigateDate - Day navigation', { 
+        oldDate: currentDate.toISOString().slice(0, 10),
+        newDate: newDate.toISOString().slice(0, 10)
+      });
       setCurrentDate(newDate);
       // Reset de scrolls
       verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
       contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
+      
+      // Calcular la semana del nuevo día para cargar toda la semana
+      const newWeekStart = startOfWeek(newDate);
+      console.log('🧭 navigateDate - Day week calculation', { 
+        newDate: newDate.toISOString().slice(0, 10),
+        newWeekStart: newWeekStart.toISOString().slice(0, 10)
+      });
+      
+      // Cargar eventos y subtareas para toda la semana del nuevo día
+      setTimeout(async () => {
+        console.log('🧭 navigateDate - Loading events and subtasks for new day week');
+        
+        // Calcular el rango de la semana del nuevo día
+        const newWeekEnd = addDays(newWeekStart, 6);
+        const rangeStart = new Date(newWeekStart);
+        rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás para capturar eventos recurrentes
+        const rangeEnd = new Date(newWeekEnd);
+        rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
+        
+        // Cargar eventos de la semana del nuevo día
+        const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
+        if (fetched) {
+          setEvents(fetched);
+          // Ahora cargar las subtareas con los nuevos eventos
+          await loadAllEventsSubtasks(fetched, true, newWeekStart);
+        }
+      }, 200);
       return;
     }
 
     if (currentView === 'week') {
       const weekStart = startOfWeek(currentDate);
       const newWeekStart = addDays(weekStart, direction === 'next' ? 7 : -7);
+      console.log('🧭 navigateDate - Week navigation', { 
+        oldWeekStart: weekStart.toISOString().slice(0, 10),
+        newWeekStart: newWeekStart.toISOString().slice(0, 10)
+      });
       setCurrentDate(newWeekStart);
       // Reset de scroll horizontal/vertical
       setTimeout(() => {
         contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
         headerHorizontalRef.current?.scrollTo({ x: 0, animated: false });
         verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
+        
+        // Cargar eventos y subtareas para la nueva semana después del scroll
+        setTimeout(async () => {
+          console.log('🧭 navigateDate - Loading events and subtasks for new week');
+          
+          // Calcular el rango de la nueva semana
+          const newWeekEnd = addDays(newWeekStart, 6);
+          const rangeStart = new Date(newWeekStart);
+          rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás para capturar eventos recurrentes
+          const rangeEnd = new Date(newWeekEnd);
+          rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
+          
+          // Cargar eventos de la nueva semana
+          const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
+          if (fetched) {
+            setEvents(fetched);
+            // Ahora cargar las subtareas con los nuevos eventos
+            await loadAllEventsSubtasks(fetched, true, newWeekStart);
+          }
+        }, 200);
       }, 20);
       return;
     }
@@ -2197,7 +2514,23 @@ export default function CalendarView({}: CalendarViewProps) {
       }, 20);
       return;
     }
-  }, [currentView, currentDate, addDays, addMonths, startOfWeek]);
+  }, [currentView, currentDate, addDays, addMonths, startOfWeek, loadAllEventsSubtasks, events]);
+
+  // Función para recargar colores de subtareas (extraída del botón de recarga)
+  const refreshSubtasksColors = useCallback(() => {
+    loadAllEventsSubtasks(events, true).then(() => {
+      // console.log('🔄 refreshSubtasksColors - COMPLETE');
+    }).catch((error) => {
+      console.log('🔄 refreshSubtasksColors - Error:', error instanceof Error ? error.message : String(error));
+    });
+  }, [loadAllEventsSubtasks, events]);
+
+  // Función para recargar con delay (para evitar conflictos con la DB)
+  const refreshSubtasksColorsWithDelay = useCallback(() => {
+    setTimeout(() => {
+      refreshSubtasksColors();
+    }, 3000); // 3 segundos de delay
+  }, [refreshSubtasksColors]);
 
   // Cambio de vista desde los botones superiores
   // - Si elige 'day' volvemos al día de hoy
@@ -2544,6 +2877,15 @@ export default function CalendarView({}: CalendarViewProps) {
           <TouchableOpacity onPress={() => navigateDate('next')}>
             <Text style={styles.navButton}>›</Text>
           </TouchableOpacity>
+          <TouchableOpacity onPress={refreshSubtasksColors} style={{
+            display: 'none' // Ocultar visualmente el botón pero mantener la funcionalidad
+          }}>
+            <Text style={{
+              fontSize: 18, 
+              fontWeight: 'bold', 
+              color: Colors.light.tint 
+            }}>↻</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -2635,68 +2977,140 @@ export default function CalendarView({}: CalendarViewProps) {
           showsVerticalScrollIndicator={false}
         />
       ) : currentView === 'day' ? (
-        <FlatList
-          style={styles.calendarContainer}
-          data={timeSlots}
-          keyExtractor={(_, index) => index.toString()}
-          renderItem={({ item: time, index: timeIndex }) => {
-            const dateKey = toDateKey(currentDate);
-            const key = `${dateKey}-${timeIndex * 30}`;
-            const event = eventsByCell[key];
-            
-            // Detectar si es la hora actual
-            const now = new Date();
-            const currentHour = now.getHours();
-            const currentMinute = now.getMinutes();
-            const currentTimeInMinutes = currentHour * 60 + currentMinute;
-            const slotStartTime = START_HOUR * 60 + (timeIndex * 30);
-            const slotEndTime = slotStartTime + 30;
-            const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
-            
-            return (
-              <View style={[
-                styles.timeRow,
-                isCurrentHour && styles.currentHourRow
-              ]}>
-                <View style={[
-                  styles.timeColumn,
-                  isCurrentHour && styles.currentHourColumn
-                ]}>
-                  <Text style={[
-                    styles.timeText,
-                    isCurrentHour && styles.currentHourText
-                  ]}>{time}</Text>
-                </View>
-                <TouchableOpacity 
-                  style={[styles.cell, { width: getCellWidth() }]} 
-                  onPress={() => {
-                    
-                    
-                  }}
-                >
-                {event && (
-                    <EventResizableBlock 
-                      key={event.id} 
-                      ev={event} 
-                      onResizeCommit={onResizeCommit} 
-                      onMoveCommit={onMoveCommit} 
-                      onQuickPress={onQuickPress} 
-                      cellWidth={getCellWidth()} 
-                      currentView={currentView}
-                      subtaskStatus={getSubtaskStatus(event.id)}
-                    />
-                )}
-                </TouchableOpacity>
+        <View style={styles.dayContainer}>
+          <ScrollView
+            ref={verticalScrollRef}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ flexGrow: 1 }}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+          >
+            <View style={{ flexDirection: 'row' }}>
+              {/* Columna de horas (fija) */}
+              <View style={styles.fixedTimeColumn}>
+                {timeSlots.map((time, idx) => {
+                  // Detectar si es la hora actual
+                  const now = new Date();
+                  const currentHour = now.getHours();
+                  const currentMinute = now.getMinutes();
+                  const currentTimeInMinutes = currentHour * 60 + currentMinute;
+                  const slotStartTime = START_HOUR * 60 + (idx * 30);
+                  const slotEndTime = slotStartTime + 30;
+                  const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
+                  
+                  return (
+                    <View key={`h-${idx}`} style={[styles.timeRow, { width: 60 }]}> 
+                      <View style={[
+                        styles.timeColumn,
+                        isCurrentHour && styles.currentHourColumn
+                      ]}>
+                        <Text style={[
+                          styles.timeText,
+                          isCurrentHour && styles.currentHourText
+                        ]}>{time}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
               </View>
-            );
-          }}
-          getItemLayout={(_, index) => ({ length: CELL_HEIGHT, offset: CELL_HEIGHT * index, index })}
-          initialNumToRender={10}
-          maxToRenderPerBatch={5}
-          windowSize={10}
-          removeClippedSubviews
-          showsVerticalScrollIndicator={false}
-        />
+
+              {/* Contenido de la grilla - solo un día */}
+              <View style={{ position: 'absolute', left: 60, top: 0, width: getCellWidth(), height: timeSlots.length * CELL_HEIGHT }}>
+                {timeSlots.map((time, timeIndex) => {
+                  const dateKey = toDateKey(currentDate);
+                  const key = `${dateKey}-${timeIndex * 30}`;
+                  const event = eventsByCell[key];
+                  
+                  // Detectar si es la hora actual
+                  const now = new Date();
+                  const currentHour = now.getHours();
+                  const currentMinute = now.getMinutes();
+                  const currentTimeInMinutes = currentHour * 60 + currentMinute;
+                  const slotStartTime = START_HOUR * 60 + (timeIndex * 30);
+                  const slotEndTime = slotStartTime + 30;
+                  const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={`cell-${timeIndex}`}
+                      style={[
+                        styles.gridCell,
+                        { 
+                          width: getCellWidth(),
+                          height: CELL_HEIGHT,
+                          top: timeIndex * CELL_HEIGHT
+                        },
+                        isCurrentHour && styles.currentHourCell
+                      ]}
+                      onPress={() => {
+                        // Verificar si hay un evento en esta celda
+                        const hasOccupyingEvent = !!event;
+                        
+                        if (!hasOccupyingEvent) {
+                          // Crear nuevo evento - limpiar estado previo
+                          setSelectedEvent(null);
+                          setEventTitle('');
+                          setEventDescription('');
+                          setEventColor(getRandomColor());
+                          setRecurrenceConfig(createDefaultRecurrenceConfig());
+                          setSubtasks([]);
+                          setNewSubtaskText('');
+                          setShowSubtaskInput(false);
+                          setSelectedCell({ dayIndex: 0, timeIndex, startTime: timeIndex * 30 });
+                          setModalVisible(true);
+                        } else {
+                          // Si hubo long press en este evento, no abrir modal al soltar
+                          if (longPressActiveRef.current[event.id]) {
+                            return;
+                          }
+                          // Editar evento existente
+                          onQuickPress(event);
+                        }
+                      }}
+                      onLongPress={() => {
+                        // 🎯 LONG PRESS para eventos en vista de día
+                        if (event) {
+                          console.log('🎯 LONG PRESS DETECTED - Day View Event:', event.title, 'ID:', event.id);
+                          
+                          // Usar el handler del EventResizableBlock si existe
+                          const handler = eventLongPressHandlers[event.id];
+                          if (handler) {
+                            handler();
+                          }
+                        }
+                      }}
+                      delayLongPress={1500}
+                    >
+                      {event && (
+                        <EventResizableBlock 
+                          key={event.id} 
+                          ev={event} 
+                          onResizeCommit={onResizeCommit} 
+                          onMoveCommit={onMoveCommit} 
+                          onQuickPress={onQuickPress} 
+                          cellWidth={getCellWidth()} 
+                          currentView={currentView}
+                          subtaskStatus={getSubtaskStatus(event.id)}
+                          onLongPress={createLongPressHandler(event.id)}
+                          onDuplicate={handleDuplicateEvent}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Fondo del grid para día */}
+              <View style={{ marginLeft: 60 }}>
+                <GridBackground 
+                  width={getCellWidth()} 
+                  height={timeSlots.length * CELL_HEIGHT} 
+                  cellHeight={CELL_HEIGHT} 
+                />
+              </View>
+            </View>
+          </ScrollView>
+        </View>
       ) : (
         // Vista semanal: ScrollView vertical con columna de horas fija y contenido horizontal scrollable
         <View style={styles.weekContainer}>
@@ -2832,10 +3246,46 @@ export default function CalendarView({}: CalendarViewProps) {
                               } else {
                                 // 🔧 FIX: Si hay un evento ocupando la celda, abrir su modal
                                 if (occupyingEvent) {
+                                  // Si hubo long press en este evento, no abrir modal al soltar
+                                  if (longPressActiveRef.current[occupyingEvent.id]) {
+                                    return;
+                                  }
                                   onQuickPress(occupyingEvent);
                                 }
                               }
                             }}
+                            onLongPress={() => {
+                              // 🎯 LONG PRESS para eventos extendidos
+                              let hasOccupyingEvent = !!event;
+                              let occupyingEvent = event;
+                              
+                              if (!event) {
+                                // Buscar eventos que empiezan antes y ocupan esta celda
+                                for (let i = 0; i < 48; i++) {
+                                  const checkTime = startTime - (i * 30);
+                                  if (checkTime < 0) break;
+                                  
+                                  const checkKey = `${dateKey}-${checkTime}`;
+                                  const checkEvent = eventsByCell[checkKey];
+                                  if (checkEvent && checkEvent.startTime <= startTime && (checkEvent.startTime + checkEvent.duration) > startTime) {
+                                    hasOccupyingEvent = true;
+                                    occupyingEvent = checkEvent;
+                                    break;
+                                  }
+                                }
+                              }
+                              
+                              if (hasOccupyingEvent && occupyingEvent) {
+                                console.log('🎯 LONG PRESS DETECTED - Extended Event:', occupyingEvent.title, 'ID:', occupyingEvent.id);
+                                
+                                // Usar el handler del EventResizableBlock si existe
+                                const handler = eventLongPressHandlers[occupyingEvent.id];
+                                if (handler) {
+                                  handler();
+                                }
+                              }
+                            }}
+                            delayLongPress={1500}
                           >
                             {event && (
                                 <EventResizableBlock 
@@ -2847,6 +3297,8 @@ export default function CalendarView({}: CalendarViewProps) {
                                   cellWidth={getCellWidth()} 
                                   currentView={currentView}
                                   subtaskStatus={getSubtaskStatus(event.id)}
+                                  onLongPress={createLongPressHandler(event.id)}
+                                  onDuplicate={handleDuplicateEvent}
                                 />
                             )}
                             </TouchableOpacity>
@@ -2931,6 +3383,7 @@ export default function CalendarView({}: CalendarViewProps) {
           modified: pendingSubtaskChanges?.modified.length || 0,
         }}
       />
+
     </View>
   );
 }
@@ -2954,9 +3407,13 @@ const styles = StyleSheet.create({
   monthTitle: { fontSize: 14, fontWeight: '600', color: Colors.light.text },
   monthRow: { flexDirection: 'row', height: CELL_HEIGHT },
   weekContainer: { flexDirection: 'row', flex: 1 },
+  dayContainer: { flexDirection: 'row', flex: 1 },
   fixedTimeColumn: { width: 60, backgroundColor: '#f8f9fa', borderRightWidth: 1, borderRightColor: '#e0e0e0' },
   weekContent: { flex: 1 },
   dayHeader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  gridCell: { position: 'absolute', borderWidth: 0.5, borderColor: '#e0e0e0', backgroundColor: 'transparent' },
+  currentHourCell: { backgroundColor: 'rgba(107, 83, 226, 0.1)' },
+  currentTimeLine: { position: 'absolute', height: 2, backgroundColor: '#ff4444', zIndex: 10 },
   dayText: { fontSize: 14, fontWeight: '600', color: Colors.light.tint },
   calendarContainer: { flex: 1 },
   timeRow: { flexDirection: 'row', height: CELL_HEIGHT },
@@ -3369,6 +3826,20 @@ const recurrenceStyles = StyleSheet.create({
     color: 'white', 
     fontSize: 16, 
     fontWeight: '600' 
+  },
+  
+  // Botón de refresh
+  refreshButton: { 
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#f0f0f0'
+  },
+  refreshButtonText: { 
+    fontSize: 18, 
+    fontWeight: 'bold', 
+    color: Colors.light.tint 
   },
 });
 

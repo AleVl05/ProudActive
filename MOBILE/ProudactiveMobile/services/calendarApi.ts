@@ -82,6 +82,41 @@ async function apiFetchEvents(startIso: string, endIso: string) {
   return res;
 }
 
+// ===== MONTH EVENTS =====
+async function apiFetchMonthEvents(year: number, month: number, calendarId?: string | number) {
+  const headers = await getAuthHeaders();
+  const params = new URLSearchParams({ year: String(year), month: String(month + 1) }); // month 1-12
+  if (calendarId) params.append('calendar_id', String(calendarId));
+  const res = await fetch(`${API_BASE}/month-events?${params.toString()}`, { headers });
+  return res;
+}
+
+async function apiPostMonthEvent(payload: any) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/month-events`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  return res;
+}
+
+async function apiPutMonthEvent(eventId: string, payload: any) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/month-events/${eventId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  return res;
+}
+
+async function apiDeleteMonthEvent(eventId: string) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/month-events/${eventId}`, { method: 'DELETE', headers });
+  return res;
+}
+
 // ===== SUBTASK OPERATIONS (Master Template) =====
 async function apiGetSubtasks(eventId: string) {
   const headers = await getAuthHeaders();
@@ -225,6 +260,10 @@ export {
   apiPostEvent,
   apiDeleteEvent,
   apiFetchEvents,
+  apiFetchMonthEvents,
+  apiPostMonthEvent,
+  apiPutMonthEvent,
+  apiDeleteMonthEvent,
   apiGetSubtasks,
   apiCreateSubtask,
   apiUpdateSubtask,

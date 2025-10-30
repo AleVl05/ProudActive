@@ -5,10 +5,13 @@ import {
   Text,
   Animated,
   PanResponder,
+  TouchableOpacity,
+  Modal,
 } from 'react-native';
 // import { LinearGradient } from 'expo-linear-gradient'; // Deshabilitado - Linear Gradient no funciona
 
 import { CELL_HEIGHT } from '../../../utils/dateConstants';
+import ContextMenu from '../ContextMenu';
 
 // Types
 interface Event {
@@ -19,7 +22,14 @@ interface Event {
   duration: number;
   date: string;
   color: string;
-  category?: string;
+  category: string;
+  // Campos de recurrencia
+  is_recurring?: boolean;
+  recurrence_rule?: string | object | null;
+  recurrence_end_date?: string | null;
+  // Campos para detectar si viene de una serie
+  series_id?: string | number | null;
+  original_start_utc?: string | null;
   // 🆕 Campos de información de subtareas
   subtasks_count?: number;
   subtasks_completed_count?: number;
@@ -33,6 +43,8 @@ interface EventResizableBlockProps {
   cellWidth: number;
   currentView?: 'day' | 'week' | 'month' | 'year';
   subtaskStatus?: { hasSubtasks: boolean; allCompleted: boolean };
+  onLongPress?: (handler: () => void) => void; // Nueva prop para manejar long press externo
+  onDuplicate?: (event: Event) => void; // Volver a exponer duplicar hacia el padre
 }
 
 const EventResizableBlock = React.memo(function EventResizableBlock({ 
@@ -42,7 +54,9 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   onQuickPress, 
   cellWidth, 
   currentView = 'week',
-  subtaskStatus = { hasSubtasks: false, allCompleted: false }
+  subtaskStatus = { hasSubtasks: false, allCompleted: false },
+  onLongPress,
+  onDuplicate
 }: EventResizableBlockProps) {
 
   const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
@@ -51,8 +65,11 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   const [showGhost, setShowGhost] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const allowDragRef = useRef(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const menuVisibleRef = useRef(false);
   const initial = useRef({ startTime: ev.startTime, duration: ev.duration, date: ev.date }).current;
 
   // Función para calcular el estilo del texto según la duración
@@ -90,6 +107,52 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       }
     };
   }, []);
+
+  // Cerrar menú cuando se toque fuera
+  useEffect(() => {
+    if (showContextMenu) {
+      const timer = setTimeout(() => {
+        setShowContextMenu(false);
+        menuVisibleRef.current = false;
+      }, 5000); // Cerrar automáticamente después de 5 segundos
+      
+      return () => clearTimeout(timer);
+    }
+  }, [showContextMenu]);
+
+  // Función para activar long press externamente
+  const triggerLongPress = useCallback(() => {
+    console.log('🎯 LONG PRESS DETECTED - Event (External):', ev.title, 'ID:', ev.id);
+    
+    // Calcular posición del menú (arriba del evento)
+    const eventHeight = (ev.duration / 30) * CELL_HEIGHT - 2;
+    const menuHeight = 100; // Altura aproximada del menú
+    const menuY = -menuHeight - 10; // 10px de separación
+    
+    setMenuPosition({ x: 0, y: menuY });
+    setShowContextMenu(true);
+  }, [ev]);
+
+  // Exponer la función de long press al componente padre usando useRef
+  const longPressHandlerRef = useRef<(() => void) | null>(null);
+  const prevHandlerRef = useRef<(() => void) | null>(null);
+  const prevOnLongPressRef = useRef<typeof onLongPress>(null);
+  
+  useEffect(() => {
+    longPressHandlerRef.current = triggerLongPress;
+  }, [triggerLongPress]);
+
+  useEffect(() => {
+    // Solo registrar si onLongPress o el handler interno realmente cambiaron
+    const handlerChanged = prevHandlerRef.current !== longPressHandlerRef.current;
+    const onLongPressChanged = prevOnLongPressRef.current !== onLongPress;
+    
+    if (onLongPress && longPressHandlerRef.current && (handlerChanged || onLongPressChanged)) {
+      prevHandlerRef.current = longPressHandlerRef.current;
+      prevOnLongPressRef.current = onLongPress;
+      onLongPress(longPressHandlerRef.current);
+    }
+  }, [onLongPress, triggerLongPress]);
 
   // 🔧 OPTIMIZACIÓN: Solo forzar re-render cuando realmente cambia la duración
   const [forceRender, setForceRender] = useState(0);
@@ -285,10 +348,10 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   // PanResponder para mover el bloque completo
   const moveResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => {
-      return true; // Siempre capturar para manejar click y long press
+      return false; // no captura inicial (tap corto pasa si no hay movimiento)
     },
     onStartShouldSetPanResponderCapture: () => {
-      return true;
+      return true; // capturar en la fase de captura para que no pase al fondo (evita "blanco")
     },
     onMoveShouldSetPanResponder: (_, gesture) => {
       const dx = Math.abs(gesture.dx || 0);
@@ -299,35 +362,51 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       return shouldCapture;
     },
     onPanResponderGrant: () => {
-      
-      // Iniciar timer de long press (1 segundo)
+      // Solo iniciar timer de long press (1.5 segundos). NO activar drag aquí
       longPressTimer.current = setTimeout(() => {
+        console.log('🎯 LONG PRESS DETECTED - Event:', ev.title, 'ID:', ev.id);
+        
+        // Calcular posición del menú (arriba del evento)
+        const eventHeight = (ev.duration / 30) * CELL_HEIGHT - 2;
+        const menuHeight = 100; // Altura aproximada del menú
+        const menuY = -menuHeight - 10; // 10px de separación
+        
+        setMenuPosition({ x: 0, y: menuY });
+        setShowContextMenu(true);
+        menuVisibleRef.current = true;
+      }, 1500);
+    },
+    onPanResponderMove: (_, gesture) => {
+      const deltaY = gesture.dy;
+      const deltaX = gesture.dx;
+      
+      // Si hay movimiento, cancelar long press y cerrar menú
+      if (Math.abs(deltaY) > 5 || Math.abs(deltaX) > 5) {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+        setShowContextMenu(false);
+        menuVisibleRef.current = false;
+      }
+      
+      const MOVE_THRESHOLD = 8;
+      const passedThreshold = Math.abs(deltaY) >= MOVE_THRESHOLD || Math.abs(deltaX) >= MOVE_THRESHOLD;
+      if (passedThreshold && !allowDragRef.current) {
         allowDragRef.current = true;
         setShowGhost(true);
         setIsMoving(true);
         ghostTopOffset.setValue(0);
         ghostLeftOffset.setValue(0);
         ghostHeight.setValue((initial.duration / 30) * CELL_HEIGHT - 2);
-      }, 1000);
-    },
-    onPanResponderMove: (_, gesture) => {
-      const deltaY = gesture.dy;
-      const deltaX = gesture.dx;
+      }
       
-      // Calcular movimiento vertical (cambio de horario)
-      const deltaSlotsY = Math.round(deltaY / CELL_HEIGHT);
-      const deltaMinY = deltaSlotsY * 30;
-      const newStartTime = Math.max(0, initial.startTime + deltaMinY);
-      
-      // Calcular movimiento horizontal (cambio de fecha)
-      const deltaSlotsX = Math.round(deltaX / cellWidth);
-      const newDate = new Date(initial.date);
-      newDate.setDate(newDate.getDate() + deltaSlotsX);
-      const newDateString = newDate.toISOString().slice(0, 10);
-      
-      // Actualizar posición del ghost
-      ghostTopOffset.setValue(deltaSlotsY * CELL_HEIGHT);
-      ghostLeftOffset.setValue(deltaSlotsX * cellWidth);
+      if (allowDragRef.current) {
+        const deltaSlotsY = Math.round(deltaY / CELL_HEIGHT);
+        const deltaSlotsX = Math.round(deltaX / cellWidth);
+        ghostTopOffset.setValue(deltaSlotsY * CELL_HEIGHT);
+        ghostLeftOffset.setValue(deltaSlotsX * cellWidth);
+      }
     },
     onPanResponderRelease: (_, gesture) => {
       // Limpiar timer si existe
@@ -339,8 +418,19 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const deltaY = gesture.dy;
       const deltaX = gesture.dx;
       
+      // Si se mostró el menú de long press, NO tratar esto como tap corto
+      if (menuVisibleRef.current || showContextMenu) {
+        setIsMoving(false);
+        setShowGhost(false);
+        allowDragRef.current = false;
+        return;
+      }
+
       // Si no se activó el drag mode, es un click corto - abrir modal
       if (!allowDragRef.current) {
+        // Cerrar menú si está abierto
+        setShowContextMenu(false);
+        menuVisibleRef.current = false;
         
         if (typeof onQuickPress === 'function') {
           onQuickPress(ev);
@@ -465,10 +555,30 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         {/* Área central para mover el bloque completo */}
         <View 
           {...moveResponder.panHandlers} 
-          style={{ position: 'absolute', top: 12, left: 0, right: 0, height: blockHeight - 24 }}
+          style={{ position: 'absolute', top: 12, left: 0, right: 0, height: Math.max(blockHeight - 24, 12) }}
           onLayout={() => {}}
         />
       </View>
+
+      {/* Menú contextual */}
+      <ContextMenu
+        visible={showContextMenu}
+        position={menuPosition}
+        currentView={currentView}
+        onDuplicate={() => {
+          if (typeof onDuplicate === 'function') {
+            onDuplicate(ev);
+          }
+          setShowContextMenu(false);
+          menuVisibleRef.current = false;
+        }}
+        onDelete={() => {
+          console.log('🗑️ Eliminar Evento:', ev.title);
+          setShowContextMenu(false);
+          menuVisibleRef.current = false;
+        }}
+        eventTitle={ev.title}
+      />
     </View>
   );
 });

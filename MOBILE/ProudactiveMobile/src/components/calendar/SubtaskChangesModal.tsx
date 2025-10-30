@@ -67,7 +67,10 @@ const SubtaskChangesModal: React.FC<SubtaskChangesModalProps> = ({
           <View style={styles.buttonsContainer}>
             <TouchableOpacity
               style={[styles.button, styles.thisDayButton]}
-              onPress={onApplyThisDay}
+              onPress={() => {
+                console.log('🔄 SubtaskChangesModal - Se hizo clic en "Solo este día"');
+                onApplyThisDay();
+              }}
             >
               <Text style={styles.buttonText}>Solo este día</Text>
               <Text style={styles.buttonSubtext}>
@@ -77,7 +80,10 @@ const SubtaskChangesModal: React.FC<SubtaskChangesModalProps> = ({
             
             <TouchableOpacity
               style={[styles.button, styles.seriesButton]}
-              onPress={onApplyToSeries}
+              onPress={() => {
+                console.log('🔄 SubtaskChangesModal - Se hizo clic en "Toda la serie"');
+                onApplyToSeries();
+              }}
             >
               <Text style={styles.buttonText}>Toda la serie</Text>
               <Text style={styles.buttonSubtext}>
