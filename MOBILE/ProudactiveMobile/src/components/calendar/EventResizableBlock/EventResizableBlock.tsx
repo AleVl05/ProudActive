@@ -13,6 +13,7 @@ import {
 
 import { CELL_HEIGHT } from '../../../utils/dateConstants';
 import ContextMenu from '../ContextMenu';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 
 // Types
 interface Event {
@@ -202,6 +203,13 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
 
   // 🔧 OPTIMIZACIÓN: Memoizar el cálculo de altura para evitar recálculos innecesarios
   const blockHeight = useMemo(() => (ev.duration / 30) * CELL_HEIGHT - 2, [ev.duration]);
+  
+  // 🎯 Mostrar icono de agarre si el bloque tiene 2 o más bloques de altura (60+ minutos o 2+ días en mes)
+  const showGripIcon = useMemo(() => {
+    // Para día/semana: 60+ minutos = 2+ bloques de 30min
+    // Para mes: 60+ minutos = 2+ días (cada día = 30 minutos en el cálculo)
+    return ev.duration >= 60;
+  }, [ev.duration]);
 
   // 🎨 ESTÉTICA: Calcular color del evento basándose en estado de subtareas (TRES ESTADOS)
   const colorState = useMemo(() => {
@@ -227,6 +235,16 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       };
     }
   }, [subtaskStatus, ev.color]);
+  
+  // 🎯 Color del icono de agarre según el color del bloque
+  const gripIconColor = useMemo(() => {
+    // Para eventos dorados (completados), usar negro
+    if (colorState.solidColor === '#DAA520') {
+      return 'rgba(0, 0, 0, 0.6)';
+    }
+    // Para otros colores, usar blanco semitransparente
+    return 'rgba(255, 255, 255, 0.7)';
+  }, [colorState.solidColor]);
 
   // 🎨 ESTÉTICA: Estilo de shadow para efecto de "resplandor" cuando está completado
   const shadowStyle = useMemo(() => {
@@ -770,6 +788,44 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
               }
             ]}
           >
+            {/* 🎯 Icono de agarre en la parte superior para bloques grandes */}
+            {showGripIcon && (
+              <View style={{
+                position: 'absolute',
+                top: 4,
+                left: 0,
+                right: 0,
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 11,
+              }}>
+                {/* Tres líneas horizontales apiladas como indicador de agarre */}
+                <View style={{
+                  width: 24,
+                  height: 8,
+                  justifyContent: 'space-between',
+                }}>
+                  <View style={{
+                    width: '100%',
+                    height: 1.5,
+                    backgroundColor: gripIconColor,
+                    borderRadius: 0.75,
+                  }} />
+                  <View style={{
+                    width: '100%',
+                    height: 1.5,
+                    backgroundColor: gripIconColor,
+                    borderRadius: 0.75,
+                  }} />
+                  <View style={{
+                    width: '100%',
+                    height: 1.5,
+                    backgroundColor: gripIconColor,
+                    borderRadius: 0.75,
+                  }} />
+                </View>
+              </View>
+            )}
             <Text style={[
               styles.eventText,
               currentView === 'day' && styles.eventTextDay,
@@ -777,7 +833,9 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
               // 🆕 Texto negro para eventos dorados completados
               colorState.solidColor === '#DAA520' && { color: '#000', fontWeight: '600' },
               // 🆕 Texto blanco para eventos gris oscuro (con subtareas incompletas)
-              colorState.solidColor === '#4a4a4a' && { color: '#fff' }
+              colorState.solidColor === '#4a4a4a' && { color: '#fff' },
+              // Ajustar padding top si hay icono de agarre
+              showGripIcon && { paddingTop: 16 }
             ]} numberOfLines={2}>{ev.title}</Text>
             {/* Handles invisibles superior e inferior (hitzone ampliada) */}
             {/* Handler superior - 12px de altura fija */}
