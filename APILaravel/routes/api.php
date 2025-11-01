@@ -3,7 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\EventController;
-// use App\Http\Controllers\Api\MonthEventController;
+use App\Http\Controllers\Api\MonthEventController;
 use App\Http\Controllers\Api\SubtaskController;
 use App\Http\Controllers\Api\SubtaskInstanceController;
 use App\Http\Controllers\Api\AuthController;
@@ -51,7 +51,11 @@ Route::prefix('v1')->group(function () {
         Route::match(['put', 'patch'], 'events/{id}', [EventController::class, 'update']);
         Route::delete('events/{id}', [EventController::class, 'destroy']);
 
-        // Month Events - REMOVIDO
+        // Month Events - CRUD completo
+        Route::get('month-events', [MonthEventController::class, 'index']);
+        Route::post('month-events', [MonthEventController::class, 'store']);
+        Route::match(['put', 'patch'], 'month-events/{id}', [MonthEventController::class, 'update']);
+        Route::delete('month-events/{id}', [MonthEventController::class, 'destroy']);
 
         // Calendarios y categorías
         Route::get('calendars', [EventController::class, 'calendars']);

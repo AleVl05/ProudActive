@@ -32,6 +32,10 @@ import {
   apiPostEvent,
   apiDeleteEvent,
   apiFetchEvents,
+  apiFetchMonthEvents,
+  apiPostMonthEvent,
+  apiPutMonthEvent,
+  apiDeleteMonthEvent,
   apiGetSubtasks,
   apiCreateSubtask,
   apiUpdateSubtask,
@@ -249,6 +253,8 @@ export default function CalendarView({}: CalendarViewProps) {
   // ===== HELPER: Registrar handlers de long press =====
   const longPressActiveRef = useRef<{[eventId: string]: boolean}>({});
   const stableHandlersRef = useRef<Map<string, () => void>>(new Map());
+  // 🔧 FIX: Ref para rastrear si un evento está en modo drag activo
+  const dragActiveRef = useRef<{[eventId: string]: boolean}>({});
   
   const registerEventLongPressHandler = useCallback((eventId: string, handler: () => void) => {
     // Solo actualizar si el handler realmente cambió
@@ -402,10 +408,7 @@ export default function CalendarView({}: CalendarViewProps) {
           // });
         } else {
           const errorText = await response.text();
-          console.error('❌ loadSubtasks - Error response from instance endpoint', {
-            status: response.status,
-            error: errorText
-          });
+          // Error loading subtasks from instance endpoint
         }
       } else {
         // Usar endpoint normal para eventos únicos o maestros
@@ -438,10 +441,7 @@ export default function CalendarView({}: CalendarViewProps) {
           // });
         } else {
           const errorText = await response.text();
-          console.error('❌ loadSubtasks - Error response from normal endpoint', {
-            status: response.status,
-            error: errorText
-          });
+          // Error loading subtasks from normal endpoint
         }
       }
       
@@ -464,11 +464,7 @@ export default function CalendarView({}: CalendarViewProps) {
       // });
       
     } catch (error) {
-      console.error('❌ loadSubtasks - EXCEPTION', {
-        eventId,
-        error: error instanceof Error ? error.message : error,
-        stack: error instanceof Error ? error.stack : undefined
-      });
+      // Exception loading subtasks
       setSubtasks([]);
       setOriginalSubtasks([]);
     }
@@ -477,17 +473,6 @@ export default function CalendarView({}: CalendarViewProps) {
   // Función para migrar subtareas de un evento a otro
   const migrateSubtasks = useCallback(async (oldEventId: string, newEventId: string, oldEvent?: Event | null) => {
     try {
-      console.log('🔄 migrateSubtasks - START', { 
-        oldEventId, 
-        newEventId,
-        oldEventData: oldEvent ? {
-          id: oldEvent.id,
-          is_recurring: oldEvent.is_recurring,
-          series_id: oldEvent.series_id,
-          original_start_utc: oldEvent.original_start_utc
-        } : 'not provided'
-      });
-      
       // DETECTAR: ¿El evento viejo es un MAESTRO de serie?
       const isOldEventMaster = oldEvent && oldEvent.is_recurring && !oldEvent.series_id;
       
@@ -498,23 +483,12 @@ export default function CalendarView({}: CalendarViewProps) {
       // Una instancia tiene series_id o original_start_utc
       const isOldEventInstance = oldEvent && (oldEvent.series_id || oldEvent.original_start_utc);
       
-      console.log('🔍 migrateSubtasks - Event classification', {
-        isOldEventMaster,
-        isOldEventUnique,
-        isOldEventInstance,
-        shouldDeleteFromOld: !isOldEventMaster && !isOldEventInstance // Solo borrar si NO es maestro NI instancia
-      });
-      
       // 1. Determinar de dónde obtener las subtareas
       // Si oldEvent es instancia, buscar en el master (series_id)
       // Si es master o único, buscar en el evento mismo
       let fetchEventId = oldEventId;
       if (isOldEventInstance && oldEvent.series_id) {
         fetchEventId = oldEvent.series_id.toString();
-        console.log('🔄 migrateSubtasks - oldEvent is instance, fetching subtasks from master', {
-          instanceId: oldEventId,
-          masterId: fetchEventId
-        });
       }
       
       // 2. Obtener subtareas del evento (o del master si es instancia)
@@ -522,12 +496,6 @@ export default function CalendarView({}: CalendarViewProps) {
       if (response.ok) {
         const result = await response.json();
         const oldSubtasks = result.data;
-        
-        console.log('📋 migrateSubtasks - Found subtasks to migrate', {
-          count: oldSubtasks.length,
-          fetchedFrom: fetchEventId,
-          originalEventId: oldEventId
-        });
         
         // 3. Crear las subtareas en el nuevo evento
         for (let i = 0; i < oldSubtasks.length; i++) {
@@ -542,79 +510,36 @@ export default function CalendarView({}: CalendarViewProps) {
             const createdResult = await createResponse.json();
             const newSubtaskId = createdResult.data?.id;
             
-            console.log('✅ migrateSubtasks - Created subtask', {
-              text: oldSubtask.text,
-              newEventId,
-              newSubtaskId,
-              wasCompleted: oldSubtask.completed
-            });
-            
             // CRÍTICO: Si la subtarea original estaba completada, copiar ese estado
             if (oldSubtask.completed && newSubtaskId) {
               const updateResponse = await apiUpdateSubtask(newSubtaskId.toString(), {
                 completed: true
               });
               
-              if (updateResponse.ok) {
-                console.log('✅ migrateSubtasks - Copied completed state', {
-                  newSubtaskId
-                });
-              } else {
-                console.error('⚠️ migrateSubtasks - Failed to copy completed state', {
-                  newSubtaskId
-                });
+              if (!updateResponse.ok) {
+                // Failed to copy completed state
               }
             }
-          } else {
-            console.error('❌ migrateSubtasks - Failed to create subtask', {
-              text: oldSubtask.text
-            });
           }
         }
         
         // 4. CRÍTICO: Solo borrar subtareas del viejo si es un evento ÚNICO
         // NO borrar si es maestro (otras instancias las usan) NI si es instancia (pertenecen al master)
         if (!isOldEventMaster && !isOldEventInstance) {
-          console.log('🗑️  migrateSubtasks - Deleting old subtasks (old event is UNIQUE)', {
-            oldEventId: oldEventId
-          });
           for (const oldSubtask of oldSubtasks) {
             try {
               await apiDeleteSubtask(oldSubtask.id.toString());
-              console.log('✅ migrateSubtasks - Deleted old subtask', {
-                id: oldSubtask.id,
-                text: oldSubtask.text
-              });
             } catch (deleteError) {
-              console.error('⚠️  migrateSubtasks - Could not delete old subtask', {
-                id: oldSubtask.id,
-                error: deleteError
-              });
+              // Could not delete old subtask
             }
           }
-        } else {
-          console.log('ℹ️  migrateSubtasks - SKIPPING deletion', {
-            reason: isOldEventMaster 
-              ? 'oldEvent is MASTER (other instances need these subtasks)' 
-              : 'oldEvent is INSTANCE (subtasks belong to master)',
-            isOldEventMaster,
-            isOldEventInstance
-          });
         }
         
         // 5. Recargar subtareas del nuevo evento
         await loadSubtasks(newEventId, undefined, true);
-        
-        console.log('✅ migrateSubtasks - COMPLETE');
-      } else {
-        console.error('❌ migrateSubtasks - Failed to fetch old subtasks', {
-          status: response.status
-        });
       }
     } catch (error) {
-      console.error('❌ migrateSubtasks - EXCEPTION', {
-        error: error instanceof Error ? error.message : error
-      });
+      // Exception migrating subtasks
     }
   }, [loadSubtasks]);
 
@@ -640,18 +565,10 @@ export default function CalendarView({}: CalendarViewProps) {
         'series_id' in selectedEvent && 
         selectedEvent.series_id !== null;
       
-      console.log('📝 handleAddSubtask - Context', {
-        hasSelectedEvent: !!selectedEvent,
-        isRecurringInstance,
-        eventId: selectedEvent?.id,
-        seriesId: selectedEvent && 'series_id' in selectedEvent ? selectedEvent.series_id : 'N/A'
-      });
-      
       // Si estamos editando un evento existente Y NO es instancia recurrente
       // → crear la subtarea inmediatamente
       // Si ES instancia recurrente → dejar como temporal, el modal se mostrará al guardar
       if (selectedEvent && !isRecurringInstance) {
-        console.log('📝 handleAddSubtask - Creating immediately (unique event)');
         try {
           const response = await apiCreateSubtask(
             selectedEvent.id, 
@@ -689,10 +606,8 @@ export default function CalendarView({}: CalendarViewProps) {
         } catch (error) {
           // Si falla, remover la subtarea temporal
           setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
-          console.error('Error al crear subtarea:', error);
         }
       } else if (isRecurringInstance) {
-        console.log('📝 handleAddSubtask - Keeping as TEMP (recurring instance), modal will show on save');
         // No hacer nada, quedará como temporal y el modal se mostrará al guardar
       }
     }
@@ -1239,6 +1154,102 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [currentDate]);
 
+  // ===== MONTH EVENTS: Transformación de datos =====
+  
+  // Convertir MonthEvent backend → frontend (start_date, end_date → startDay, duration)
+  const monthEventBackendToFrontend = useCallback((backendEvent: any, year: number, month: number): MonthEvent => {
+    // Parsear fechas sin problemas de timezone usando YYYY-MM-DD directamente
+    const startParts = backendEvent.start_date.split('-');
+    const endParts = backendEvent.end_date.split('-');
+    const startDay = parseInt(startParts[2], 10);
+    const endDay = parseInt(endParts[2], 10);
+    
+    // Calcular duración en días (diferencia de días + 1 para ser inclusivo)
+    // Ejemplo: día 2 a día 2 = 1 día, día 2 a día 3 = 2 días
+    const duration = Math.max(1, endDay - startDay + 1);
+    
+    return {
+      id: backendEvent.id.toString(),
+      title: backendEvent.title,
+      description: backendEvent.description || '',
+      startDay,
+      duration,
+      color: backendEvent.color || '#6b53e2',
+      category: backendEvent.category || 'General',
+      year,
+      month, // month ya viene en formato 0-11 del backend
+    };
+  }, []);
+
+  // Convertir MonthEvent frontend → backend (startDay, duration → start_date, end_date)
+  const monthEventFrontendToBackend = useCallback((frontendEvent: MonthEvent): any => {
+    // Calcular fechas directamente sin usar Date objects para evitar problemas de timezone
+    const startDay = frontendEvent.startDay;
+    const endDay = frontendEvent.startDay + frontendEvent.duration - 1;
+    const year = frontendEvent.year;
+    const month = frontendEvent.month + 1; // Convertir de 0-11 a 1-12
+    
+    // Formatear como YYYY-MM-DD usando valores locales (sin timezone)
+    const formatDate = (day: number) => {
+      const dayStr = String(day).padStart(2, '0');
+      const monthStr = String(month).padStart(2, '0');
+      return `${year}-${monthStr}-${dayStr}`;
+    };
+    
+    return {
+      start_date: formatDate(startDay),
+      end_date: formatDate(endDay),
+    };
+  }, []);
+
+  // Cargar month events desde API
+  const fetchMonthEvents = useCallback(async (year: number, month: number) => {
+    try {
+      const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+      const response = await apiFetchMonthEvents(year, month, calendarId);
+      
+      if (!response.ok) {
+        return [];
+      }
+
+      const body = await response.json();
+      if (!body?.success || !Array.isArray(body.data)) {
+        return [];
+      }
+
+      // Transformar todos los eventos del backend al formato frontend
+      // IMPORTANTE: El backend puede devolver eventos de meses adyacentes que se solapan
+      // Solo procesar eventos que pertenecen al mes actual
+      const monthEvents: MonthEvent[] = body.data
+        .filter((backendEvent: any) => {
+          // Filtrar por año y mes correctos
+          const eventStartParts = backendEvent.start_date.split('-');
+          const eventYear = parseInt(eventStartParts[0], 10);
+          const eventMonth = parseInt(eventStartParts[1], 10) - 1; // Backend usa 1-12, frontend usa 0-11
+          return eventYear === year && eventMonth === month;
+        })
+        .map((backendEvent: any) => 
+          monthEventBackendToFrontend(backendEvent, year, month)
+        );
+
+      return monthEvents;
+    } catch (error) {
+      return [];
+    }
+  }, [monthEventBackendToFrontend]);
+
+  // Refrescar month events (similar a refreshEvents pero para month)
+  const refreshMonthEvents = useCallback(async () => {
+    try {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const fetched = await fetchMonthEvents(year, month);
+      setMonthEvents(fetched);
+    } catch (error) {
+      // Error refreshing month events
+    }
+  }, [currentDate, fetchMonthEvents]);
+
   // ===== DUPLICAR EVENTO =====
   const handleDuplicateEvent = useCallback(async (event: Event) => {
     try {
@@ -1284,25 +1295,37 @@ export default function CalendarView({}: CalendarViewProps) {
   // Función para eliminar un evento único
   const handleDeleteSingleEvent = useCallback(async (eventId: string) => {
     try {
-      const deleteRes = await apiDeleteEvent(String(eventId));
+      // Detectar si es MonthEvent o Event normal
+      const event = selectedEvent;
+      const isMonthEvent = event && 'startDay' in event;
       
-      if (deleteRes.ok) {
-        
-        // Cerrar todos los modales inmediatamente
-        setModalVisible(false);
-        setDeleteModalVisible(false);
-        setEventTitle('');
-        setEventDescription('');
-        setSelectedEvent(null);
-        setSelectedCell(null);
-        
-        // Refrescar eventos para actualizar la interfaz
-        await refreshEvents();
+      if (isMonthEvent) {
+        const deleteRes = await apiDeleteMonthEvent(String(eventId));
+        if (deleteRes.ok) {
+          setModalVisible(false);
+          setDeleteModalVisible(false);
+          setEventTitle('');
+          setEventDescription('');
+          setSelectedEvent(null);
+          setSelectedCell(null);
+          await refreshMonthEvents();
+        }
       } else {
+        const deleteRes = await apiDeleteEvent(String(eventId));
+        if (deleteRes.ok) {
+          setModalVisible(false);
+          setDeleteModalVisible(false);
+          setEventTitle('');
+          setEventDescription('');
+          setSelectedEvent(null);
+          setSelectedCell(null);
+          await refreshEvents();
+        }
       }
     } catch (error) {
+      // Error deleting event
     }
-  }, [refreshEvents]);
+  }, [refreshEvents, refreshMonthEvents, selectedEvent]);
 
   const handleDeleteEvent = useCallback(() => {
     if (!selectedEvent) return;
@@ -1555,10 +1578,15 @@ export default function CalendarView({}: CalendarViewProps) {
   }, []);
 
   const toDateKey = useCallback((d: Date) => {
-    return d.toISOString().slice(0, 10); // 'YYYY-MM-DD'
+    // Usar fecha local para evitar problemas de timezone
+    // Formato: YYYY-MM-DD usando fecha local (no UTC)
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }, []);
 
-  // Ranuras de tiempo (cada 30 minutos)
+  // Ranuras de tiempo (cada 30 minutos) para vista día/semana
   const timeSlots = useMemo(() => {
     const slots: string[] = [];
     for (let hour = START_HOUR; hour < END_HOUR; hour++) {
@@ -1587,7 +1615,7 @@ export default function CalendarView({}: CalendarViewProps) {
     return index;
   }, [events]);
 
-  // Indexar eventos mensuales por año-mes-día
+  // Indexar eventos mensuales por año-mes-día (para búsqueda por key)
   const monthEventsByDay = useMemo(() => {
     const index: { [key: string]: MonthEvent } = {};
     monthEvents.forEach(ev => {
@@ -1596,6 +1624,20 @@ export default function CalendarView({}: CalendarViewProps) {
     });
     return index;
   }, [monthEvents]);
+
+  // Indexar eventos mensuales por día del mes (1-31) para el grid
+  const monthEventsByDayIndex = useMemo(() => {
+    const index: { [day: number]: MonthEvent } = {};
+    monthEvents.forEach(ev => {
+      // Solo indexar eventos del mes/año actual
+      const currentYear = currentDate.getFullYear();
+      const currentMonth = currentDate.getMonth();
+      if (ev.year === currentYear && ev.month === currentMonth) {
+        index[ev.startDay] = ev;
+      }
+    });
+    return index;
+  }, [monthEvents, currentDate]);
 
   const formatTime = useCallback((timeIndex: number) => {
     const totalMinutes = START_HOUR * 60 + (timeIndex * 30);
@@ -1752,61 +1794,97 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [normalizeApiEvent]);
 
+  // Cargar month events cuando se cambia a vista de mes
   useEffect(() => {
-    // console.log('🔄 useEffect PRINCIPAL - START', { 
-    //   currentView, 
-    //   currentDate: currentDate.toISOString().slice(0, 10),
-    //   eventsCount: events.length,
-    //   timestamp: new Date().toISOString()
-    // });
+    // Solo ejecutar si estamos en vista de mes
+    if (currentView !== 'month') {
+      return;
+    }
     
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    
+    // Función async dentro del useEffect para evitar dependencia de fetchMonthEvents
+    (async () => {
+      try {
+        const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+        const response = await apiFetchMonthEvents(year, month, calendarId);
+        
+        if (!response.ok) {
+          return;
+        }
+
+        const body = await response.json();
+        if (!body?.success || !Array.isArray(body.data)) {
+          return;
+        }
+
+        // Transformar todos los eventos del backend al formato frontend
+        // Parsear fechas sin problemas de timezone usando YYYY-MM-DD directamente
+        const monthEvents: MonthEvent[] = body.data
+          .filter((backendEvent: any) => {
+            // Filtrar por año y mes correctos
+            const eventStartParts = backendEvent.start_date.split('-');
+            const eventYear = parseInt(eventStartParts[0], 10);
+            const eventMonth = parseInt(eventStartParts[1], 10) - 1; // Backend usa 1-12, frontend usa 0-11
+            return eventYear === year && eventMonth === month;
+          })
+          .map((backendEvent: any) => {
+            // Parsear fechas sin problemas de timezone usando YYYY-MM-DD directamente
+            const startParts = backendEvent.start_date.split('-');
+            const endParts = backendEvent.end_date.split('-');
+            const startDay = parseInt(startParts[2], 10);
+            const endDay = parseInt(endParts[2], 10);
+            
+            // Calcular duración en días (diferencia + 1 para ser inclusivo)
+            // Ejemplo: día 2 a día 2 = 1 día, día 2 a día 3 = 2 días
+            const duration = Math.max(1, endDay - startDay + 1);
+            
+            return {
+              id: backendEvent.id.toString(),
+              title: backendEvent.title,
+              description: backendEvent.description || '',
+              startDay,
+              duration,
+              color: backendEvent.color || '#6b53e2',
+              category: backendEvent.category || 'General',
+              year,
+              month,
+            };
+          });
+
+        setMonthEvents(monthEvents);
+      } catch (error) {
+        // Error loading month events
+      }
+    })();
+  }, [currentView, currentDate.getFullYear(), currentDate.getMonth()]);
+
+  useEffect(() => {
     if (currentView !== 'week' && currentView !== 'day') {
-      // console.log('🔄 useEffect PRINCIPAL - SKIP (not week/day)');
       return;
     }
 
-    const rangeStart = new Date(currentView === 'week' ? startOfWeek(currentDate) : currentDate);
+    // Tanto para week como day, usar semana completa (igual que funcionaba antes)
+    const weekStart = startOfWeek(currentDate);
+    const rangeStart = new Date(weekStart);
     rangeStart.setHours(0, 0, 0, 0);
-    const rangeEndBase = currentView === 'week' ? addDays(rangeStart, 6) : new Date(rangeStart);
-    const rangeEnd = new Date(rangeEndBase);
+    const rangeEnd = addDays(rangeStart, 6);
     rangeEnd.setHours(23, 59, 59, 999);
-
-    // console.log('🔄 useEffect PRINCIPAL - Range', { 
-    //   rangeStart: rangeStart.toISOString().slice(0, 10),
-    //   rangeEnd: rangeEnd.toISOString().slice(0, 10)
-    // });
 
     let ignore = false;
 
     (async () => {
-      // console.log('🔄 useEffect PRINCIPAL - Calling fetchEventsForRange');
       const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
-      // console.log('🔄 useEffect PRINCIPAL - fetchEventsForRange result', { 
-      //   fetchedCount: fetched?.length || 0,
-      //   ignore
-      // });
       
       if (!ignore && fetched) {
-        // console.log('🔄 useEffect PRINCIPAL - Setting events', { 
-        //   prevCount: events.length,
-        //   newCount: fetched.length,
-        //   totalWillBe: events.length + fetched.length
-        // });
         setEvents(fetched);
-        // console.log('🔄 useEffect PRINCIPAL - setEvents (REPLACED)', { 
-        //   prevLength: events.length,
-        //   fetchedLength: fetched.length,
-        //   newLength: fetched.length
-        // });
-        
         // Solo cargar subtareas al cargar el calendario inicialmente
-        // console.log('📅 useEffect - Loading subtasks for initial load');
         await loadAllEventsSubtasks(fetched);
       }
     })();
 
     return () => {
-      // console.log('🔄 useEffect PRINCIPAL - CLEANUP');
       ignore = true;
     };
   }, [currentView, currentDate, startOfWeek, addDays, fetchEventsForRange, loadAllEventsSubtasks]);
@@ -1815,11 +1893,13 @@ export default function CalendarView({}: CalendarViewProps) {
   const getCellWidth = useCallback(() => {
     if (currentView === 'day') {
       return width - 60;
+    } else if (currentView === 'month') {
+      return width - 60; // Mismo ancho que vista de día
     } else if (currentView === 'week') {
       return ((width - 60) / 7) * 2; // doble ancho por día
     }
     return (width - 60) / 7;
-  }, [currentView]);
+  }, [currentView, width]);
 
   // Formatea el header superior usando currentDate
   const formatHeaderDate = useCallback(() => {
@@ -1828,7 +1908,11 @@ export default function CalendarView({}: CalendarViewProps) {
     const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
     if (currentView === 'day') {
-      return `Hoy, ${dayNames[d.getDay()]}, ${d.getDate()} de ${monthNames[d.getMonth()]}`;
+      // Usar fecha local en lugar de UTC para evitar problemas de timezone
+      const localDay = d.getDate();
+      const localMonth = d.getMonth();
+      const localDayName = dayNames[d.getDay()];
+      return `Hoy, ${localDayName}, ${localDay} de ${monthNames[localMonth]}`;
     } else if (currentView === 'week') {
       const weekStart = startOfWeek(currentDate);
       const weekEnd = addDays(weekStart, 6);
@@ -2217,7 +2301,31 @@ export default function CalendarView({}: CalendarViewProps) {
 
         }
       } else {
-        setMonthEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, title: eventTitle, description: eventDescription, color: eventColor } : ev));
+        // Si es MonthEvent, actualizar en API
+        if ('startDay' in selectedEvent) {
+          try {
+            const monthEvent = selectedEvent as MonthEvent;
+            const backendData = monthEventFrontendToBackend(monthEvent);
+            const updatePayload = {
+              title: eventTitle,
+              description: eventDescription,
+              color: eventColor,
+              ...backendData,
+            };
+            
+            const updateRes = await apiPutMonthEvent(String(selectedEvent.id), updatePayload);
+            if (updateRes.ok) {
+              await refreshMonthEvents();
+            }
+          } catch (error) {
+            // Error updating month event
+          }
+        } else {
+          // Fallback: si no es MonthEvent pero está en monthEvents, actualizar localmente
+          if (selectedEvent && 'startDay' in selectedEvent === false) {
+            // No hacer nada, solo para eventos normales que no son month events
+          }
+        }
       }
     } else if (selectedCell) {
       // Lógica para crear un nuevo evento
@@ -2386,20 +2494,46 @@ export default function CalendarView({}: CalendarViewProps) {
       }
 
     } else if (selectedMonthCell) {
-      const year = currentDate.getFullYear();
-      const month = currentDate.getMonth();
-      const newMonthEvent: MonthEvent = {
-        id: Date.now().toString(),
-        title: eventTitle,
-        description: eventDescription,
-        startDay: selectedMonthCell.day,
-        duration: 1,
-        color: eventColor,
-        category: 'General',
-        year,
-        month,
-      };
-      setMonthEvents(prev => [...prev, newMonthEvent]);
+      // Crear nuevo month event en API
+      try {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        
+        const tempMonthEvent: MonthEvent = {
+          id: Date.now().toString(),
+          title: eventTitle,
+          description: eventDescription,
+          startDay: selectedMonthCell.day,
+          duration: 1,
+          color: eventColor,
+          category: 'General',
+          year,
+          month,
+        };
+        
+        const backendData = monthEventFrontendToBackend(tempMonthEvent);
+        const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+        if (!calendarId) throw new Error('No hay calendars disponibles');
+        
+        const payload = {
+          calendar_id: calendarId,
+          title: eventTitle,
+          description: eventDescription,
+          color: eventColor,
+          ...backendData,
+        };
+        
+        const res = await apiPostMonthEvent(payload);
+        const createdEvent = await res.json();
+        
+        if (res.ok && createdEvent?.data?.id) {
+          await refreshMonthEvents();
+        } else {
+          Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
+        }
+      } catch (e) {
+        Alert.alert('Error', 'No se pudo crear el evento en el servidor.');
+      }
     }
 
 
@@ -2415,7 +2549,7 @@ export default function CalendarView({}: CalendarViewProps) {
     setNewSubtaskText('');
     setShowSubtaskInput(false);
     // NO resetear recurrenceConfig aquí - se mantiene para próximos eventos
-  }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, recurrenceConfig, subtasks, migrateSubtasks]);
+  }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, recurrenceConfig, subtasks, migrateSubtasks, monthEventFrontendToBackend, refreshMonthEvents, getRandomColor]);
 
   // ===== NAVEGACIÓN =====
   const navigateDate = useCallback(async (direction: 'prev' | 'next') => {
@@ -2512,9 +2646,17 @@ export default function CalendarView({}: CalendarViewProps) {
         contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
         headerHorizontalRef.current?.scrollTo({ x: 0, animated: false });
       }, 20);
+      
+      // Cargar month events para el nuevo mes
+      setTimeout(async () => {
+        const year = newDate.getFullYear();
+        const month = newDate.getMonth();
+        const fetched = await fetchMonthEvents(year, month);
+        setMonthEvents(fetched);
+      }, 100);
       return;
     }
-  }, [currentView, currentDate, addDays, addMonths, startOfWeek, loadAllEventsSubtasks, events]);
+  }, [currentView, currentDate, addDays, addMonths, startOfWeek, loadAllEventsSubtasks, events, fetchMonthEvents]);
 
   // Función para recargar colores de subtareas (extraída del botón de recarga)
   const refreshSubtasksColors = useCallback(() => {
@@ -2947,35 +3089,239 @@ export default function CalendarView({}: CalendarViewProps) {
 
       {/* Contenido: month / day / week */}
       {currentView === 'month' ? (
-        <FlatList
-          style={styles.calendarContainer}
-          data={monthDays}
-          keyExtractor={(item, index) => `day-${index}`}
-          renderItem={({ item: day }) => {
-            const key = `${currentDate.getFullYear()}-${currentDate.getMonth()}-${day}`;
-            const event = monthEventsByDay[key];
-            return (
-              <View style={styles.monthRow}>
-                <View style={styles.timeColumn}>
-                  <Text style={styles.timeText}>{day}</Text>
-                </View>
-                <TouchableOpacity style={[styles.cell, { width: getCellWidth() }]} onPress={() => handleMonthCellPress(day)}>
-                  {event && (
-                    <View style={[styles.eventBlock, { backgroundColor: event.color, height: (event.duration) * CELL_HEIGHT - 2 }]}> 
-                      <Text style={styles.eventText} numberOfLines={2}>{event.title}</Text>
+        <View style={styles.dayContainer}>
+          <ScrollView
+            ref={verticalScrollRef}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ flexGrow: 1 }}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+          >
+            <View style={{ flexDirection: 'row' }}>
+              {/* Columna de días (fija) */}
+              <View style={styles.fixedTimeColumn}>
+                {monthDays.map((day, idx) => {
+                  const now = new Date();
+                  const currentDay = now.getDate();
+                  const currentMonth = now.getMonth();
+                  const currentYear = now.getFullYear();
+                  const isCurrentDay = day === currentDay && 
+                                       currentMonth === currentDate.getMonth() && 
+                                       currentYear === currentDate.getFullYear();
+                  
+                  return (
+                    <View key={`day-${idx}`} style={[styles.timeRow, { width: 60 }]}> 
+                      <View style={[
+                        styles.timeColumn,
+                        isCurrentDay && styles.currentHourColumn
+                      ]}>
+                        <Text style={[
+                          styles.timeText,
+                          isCurrentDay && styles.currentHourText
+                        ]}>{day}</Text>
+                      </View>
                     </View>
-                  )}
-                </TouchableOpacity>
+                  );
+                })}
               </View>
-            );
-          }}
-          getItemLayout={(_, index) => ({ length: CELL_HEIGHT, offset: CELL_HEIGHT * index, index })}
-          initialNumToRender={10}
-          maxToRenderPerBatch={5}
-          windowSize={10}
-          removeClippedSubviews
-          showsVerticalScrollIndicator={false}
-        />
+
+              {/* Contenido de la grilla - días del mes */}
+              <View style={{ position: 'absolute', left: 60, top: 0, width: getCellWidth(), height: monthDays.length * CELL_HEIGHT }}>
+                {monthDays.map((day, dayIndex) => {
+                  const event = monthEventsByDayIndex[day];
+                  
+                  const now = new Date();
+                  const currentDay = now.getDate();
+                  const currentMonth = now.getMonth();
+                  const currentYear = now.getFullYear();
+                  const isCurrentDay = day === currentDay && 
+                                       currentMonth === currentDate.getMonth() && 
+                                       currentYear === currentDate.getFullYear();
+                  
+                  return (
+                    <TouchableOpacity
+                      key={`cell-${dayIndex}`}
+                      style={[
+                        styles.gridCell,
+                        { 
+                          width: getCellWidth(),
+                          height: CELL_HEIGHT,
+                          top: dayIndex * CELL_HEIGHT
+                        },
+                        isCurrentDay && styles.currentHourCell
+                      ]}
+                      onPress={() => {
+                        // Verificar si hay un evento en esta celda
+                        const hasOccupyingEvent = !!event;
+                        
+                        if (!hasOccupyingEvent) {
+                          // Crear nuevo evento - limpiar estado previo
+                          setSelectedEvent(null);
+                          setEventTitle('');
+                          setEventDescription('');
+                          setEventColor(getRandomColor());
+                          setRecurrenceConfig(createDefaultRecurrenceConfig());
+                          setSubtasks([]);
+                          setNewSubtaskText('');
+                          setShowSubtaskInput(false);
+                          setSelectedMonthCell({ dayIndex: day - 1, day });
+                          setModalVisible(true);
+                        } else {
+                          // Si hubo long press en este evento, no abrir modal al soltar
+                          if (longPressActiveRef.current[event.id]) {
+                            return;
+                          }
+                          // Editar evento existente
+                          setSelectedEvent(event);
+                          setEventTitle(event.title);
+                          setEventDescription(event.description || '');
+                          setEventColor(event.color);
+                          setRecurrenceConfig(createDefaultRecurrenceConfig());
+                          setModalVisible(true);
+                          loadSubtasks(event.id, event);
+                        }
+                      }}
+                      onLongPress={() => {
+                        // LONG PRESS para eventos en vista de mes
+                        if (event) {
+                          // Usar el handler del EventResizableBlock si existe
+                          const handler = eventLongPressHandlers[event.id];
+                          if (handler) {
+                            handler();
+                          }
+                        }
+                      }}
+                      delayLongPress={1500}
+                    >
+                      {event && (() => {
+                        // Adaptar MonthEvent a Event para EventResizableBlock
+                        // EventResizableBlock espera duration en minutos, pero para mes usamos días
+                        // Convertir días a minutos para que funcione (1 día = 1440 minutos)
+                        
+                        
+                        // Para vista de mes, usar duración en "slots de día" en lugar de minutos
+                        // CELL_HEIGHT es 50px, cada día en mes es 1 CELL_HEIGHT (50px)
+                        // Entonces: 1 día = 1 slot de 30 minutos = 30 minutos de duración
+                        // Pero en realidad queremos: 1 día = 1 * CELL_HEIGHT de altura
+                        // Entonces necesitamos que duration sea 30 para 1 día
+                        const adaptedEvent: Event = {
+                          id: event.id,
+                          title: event.title,
+                          description: event.description,
+                          startTime: (event.startDay - 1) * 30, // Día 1 = 0 min, día 2 = 30 min (1 slot)
+                          duration: event.duration * 30, // 1 día = 30 minutos (1 slot de altura)
+                          date: `${event.year}-${String(event.month + 1).padStart(2, '0')}-${String(event.startDay).padStart(2, '0')}`,
+                          color: event.color,
+                          category: event.category,
+                        };
+                        
+                        return (
+                          <EventResizableBlock 
+                            key={event.id} 
+                            ev={adaptedEvent} 
+                            onResizeCommit={async (ev: Event, newStartTime: number, newDuration: number) => {
+                              // Convertir minutos de vuelta a días (30 minutos = 1 día en vista de mes)
+                              const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
+                              const newDurationDays = Math.max(1, Math.round(newDuration / 30));
+                              
+                              const updated = { 
+                                ...event, 
+                                startDay: newStartDay, // Actualizar también startDay si se resize desde arriba
+                                duration: newDurationDays 
+                              };
+                              const backendData = monthEventFrontendToBackend(updated);
+                              
+                              await apiPutMonthEvent(event.id, backendData);
+                              await refreshMonthEvents();
+                            }}
+                            onMoveCommit={async (ev: Event, newStartTime: number, newDate: string) => {
+                              // Convertir newStartTime (en minutos) de vuelta a día del mes
+                              // newStartTime viene como: (día - 1) * 30
+                              // Entonces: día = (newStartTime / 30) + 1
+                              const newDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
+                              // IMPORTANTE: Preservar la duración original del evento
+                              const updated = { ...event, startDay: newDay, duration: event.duration };
+                              const backendData = monthEventFrontendToBackend(updated);
+                              await apiPutMonthEvent(event.id, backendData);
+                              await refreshMonthEvents();
+                            }}
+                            onQuickPress={(ev) => {
+                              setSelectedEvent(event);
+                              setEventTitle(event.title);
+                              setEventDescription(event.description || '');
+                              setEventColor(event.color);
+                              setRecurrenceConfig(createDefaultRecurrenceConfig());
+                              setModalVisible(true);
+                              loadSubtasks(event.id, event);
+                            }}
+                            cellWidth={getCellWidth()} 
+                            currentView={currentView}
+                            subtaskStatus={getSubtaskStatus(event.id)}
+                            onLongPress={undefined}
+                            onDuplicate={async (ev) => {
+                              // Duplicar month event
+                              try {
+                                const year = currentDate.getFullYear();
+                                const month = currentDate.getMonth();
+                                const slot = 1; // +1 día debajo
+                                const newStartDay = Math.min(event.startDay + event.duration + slot, monthDays.length);
+                                
+                                const tempMonthEvent: MonthEvent = {
+                                  id: Date.now().toString(),
+                                  title: event.title,
+                                  description: event.description || '',
+                                  startDay: newStartDay,
+                                  duration: event.duration,
+                                  color: event.color,
+                                  category: event.category,
+                                  year,
+                                  month,
+                                };
+                                
+                                const backendData = monthEventFrontendToBackend(tempMonthEvent);
+                                const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+                                if (!calendarId) throw new Error('No hay calendars disponibles');
+                                
+                                const payload = {
+                                  calendar_id: calendarId,
+                                  title: event.title,
+                                  description: event.description || '',
+                                  color: event.color,
+                                  ...backendData,
+                                };
+                                
+                                const postRes = await apiPostMonthEvent(payload);
+                                const created = await postRes.json();
+                                
+                                if (postRes.ok && created?.data?.id) {
+                                  await refreshMonthEvents();
+                                  Alert.alert('Éxito', 'Evento duplicado correctamente.');
+                                } else {
+                                  Alert.alert('Error', 'No se pudo duplicar el evento');
+                                }
+                              } catch (e) {
+                                Alert.alert('Error', 'No se pudo duplicar el evento');
+                              }
+                            }}
+                          />
+                        );
+                      })()}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Fondo del grid para mes */}
+              <View style={{ marginLeft: 60 }}>
+                <GridBackground 
+                  width={getCellWidth()} 
+                  height={monthDays.length * CELL_HEIGHT} 
+                  cellHeight={CELL_HEIGHT} 
+                />
+              </View>
+            </View>
+          </ScrollView>
+        </View>
       ) : currentView === 'day' ? (
         <View style={styles.dayContainer}>
           <ScrollView
@@ -3059,8 +3405,8 @@ export default function CalendarView({}: CalendarViewProps) {
                           setSelectedCell({ dayIndex: 0, timeIndex, startTime: timeIndex * 30 });
                           setModalVisible(true);
                         } else {
-                          // Si hubo long press en este evento, no abrir modal al soltar
-                          if (longPressActiveRef.current[event.id]) {
+                          // 🔧 FIX: Si hubo long press o drag activo en este evento, no abrir modal al soltar
+                          if (longPressActiveRef.current[event.id] || dragActiveRef.current[event.id]) {
                             return;
                           }
                           // Editar evento existente
@@ -3070,8 +3416,6 @@ export default function CalendarView({}: CalendarViewProps) {
                       onLongPress={() => {
                         // 🎯 LONG PRESS para eventos en vista de día
                         if (event) {
-                          console.log('🎯 LONG PRESS DETECTED - Day View Event:', event.title, 'ID:', event.id);
-                          
                           // Usar el handler del EventResizableBlock si existe
                           const handler = eventLongPressHandlers[event.id];
                           if (handler) {
@@ -3093,6 +3437,9 @@ export default function CalendarView({}: CalendarViewProps) {
                           subtaskStatus={getSubtaskStatus(event.id)}
                           onLongPress={createLongPressHandler(event.id)}
                           onDuplicate={handleDuplicateEvent}
+                          onDragStateChange={(isActive) => {
+                            dragActiveRef.current[event.id] = isActive;
+                          }}
                         />
                       )}
                     </TouchableOpacity>
@@ -3246,8 +3593,8 @@ export default function CalendarView({}: CalendarViewProps) {
                               } else {
                                 // 🔧 FIX: Si hay un evento ocupando la celda, abrir su modal
                                 if (occupyingEvent) {
-                                  // Si hubo long press en este evento, no abrir modal al soltar
-                                  if (longPressActiveRef.current[occupyingEvent.id]) {
+                                  // 🔧 FIX: Si hubo long press o drag activo en este evento, no abrir modal al soltar
+                                  if (longPressActiveRef.current[occupyingEvent.id] || dragActiveRef.current[occupyingEvent.id]) {
                                     return;
                                   }
                                   onQuickPress(occupyingEvent);
@@ -3287,20 +3634,93 @@ export default function CalendarView({}: CalendarViewProps) {
                             }}
                             delayLongPress={1500}
                           >
-                            {event && (
-                                <EventResizableBlock 
-                                  key={event.id} 
-                                  ev={event} 
-                                  onResizeCommit={onResizeCommit} 
-                                  onMoveCommit={onMoveCommit} 
-                                  onQuickPress={onQuickPress} 
-                                  cellWidth={getCellWidth()} 
-                                  currentView={currentView}
-                                  subtaskStatus={getSubtaskStatus(event.id)}
-                                  onLongPress={createLongPressHandler(event.id)}
-                                  onDuplicate={handleDuplicateEvent}
-                                />
-                            )}
+                            {(() => {
+                              // 🔧 FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
+                              if (event) {
+                                return (
+                                  <EventResizableBlock 
+                                    key={event.id} 
+                                    ev={event} 
+                                    onResizeCommit={onResizeCommit} 
+                                    onMoveCommit={onMoveCommit} 
+                                    onQuickPress={onQuickPress} 
+                                    cellWidth={getCellWidth()} 
+                                    currentView={currentView}
+                                    subtaskStatus={getSubtaskStatus(event.id)}
+                                    onLongPress={createLongPressHandler(event.id)}
+                                    onDuplicate={handleDuplicateEvent}
+                                    onDragStateChange={(isActive) => {
+                                      dragActiveRef.current[event.id] = isActive;
+                                    }}
+                                  />
+                                );
+                              }
+                              
+                              // 🔧 FIX: Buscar eventos que ocupan esta celda pero empiezan antes
+                              let occupyingEvent = null;
+                              let isFirstCell = false;
+                              let isLastCell = false;
+                              
+                              for (let i = 0; i < 48; i++) {
+                                const checkTime = startTime - (i * 30);
+                                if (checkTime < 0) break;
+                                
+                                const checkKey = `${dateKey}-${checkTime}`;
+                                const checkEvent = eventsByCell[checkKey];
+                                if (checkEvent && checkEvent.startTime <= startTime && (checkEvent.startTime + checkEvent.duration) > startTime) {
+                                  occupyingEvent = checkEvent;
+                                  // Verificar si esta es la primera celda del evento
+                                  isFirstCell = (checkEvent.startTime === startTime);
+                                  // Verificar si esta es la última celda del evento
+                                  // El evento termina en esta celda si el endTime está dentro de este slot
+                                  const eventEndTime = checkEvent.startTime + checkEvent.duration;
+                                  // Esta es la última celda si el evento termina en este slot o en el siguiente
+                                  // Pero el evento visualmente ocupa hasta el final de este slot
+                                  isLastCell = (eventEndTime > startTime && eventEndTime <= startTime + 30);
+                                  break;
+                                }
+                              }
+                              
+                              // 🔧 FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
+                              if (occupyingEvent && !isFirstCell && isLastCell) {
+                                // Debug log comentado - Extended Block
+                                // console.log('🔵 DEBUG - Extended Block (LAST CELL):', {
+                                //   eventId: occupyingEvent.id,
+                                //   eventTitle: occupyingEvent.title,
+                                //   startTime,
+                                //   dateKey,
+                                //   isFirstCell,
+                                //   isLastCell,
+                                //   eventStartTime: occupyingEvent.startTime,
+                                //   eventDuration: occupyingEvent.duration,
+                                //   eventEndTime: occupyingEvent.startTime + occupyingEvent.duration
+                                // });
+                                
+                                // Renderizar EventResizableBlock SOLO para el handler de abajo en la última celda
+                                // Usamos el mismo evento pero solo renderizamos el handler de abajo
+                                return (
+                                  <EventResizableBlock 
+                                    key={`${occupyingEvent.id}-bottom-handler`} 
+                                    ev={occupyingEvent} 
+                                    onResizeCommit={onResizeCommit} 
+                                    onMoveCommit={onMoveCommit} 
+                                    onQuickPress={onQuickPress} 
+                                    cellWidth={getCellWidth()} 
+                                    currentView={currentView}
+                                    subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
+                                    onLongPress={createLongPressHandler(occupyingEvent.id)}
+                                    onDuplicate={handleDuplicateEvent}
+                                    renderOnlyBottomHandler={true}
+                                    currentCellStartTime={startTime}
+                                    onDragStateChange={(isActive) => {
+                                      dragActiveRef.current[occupyingEvent.id] = isActive;
+                                    }}
+                                  />
+                                );
+                              }
+                              
+                              return null;
+                            })()}
                             </TouchableOpacity>
                           </View>
                         );
