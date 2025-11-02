@@ -146,7 +146,6 @@ interface RecurrenceRule {
 interface EventResizableBlockProps {
   ev: Event;
   onResizeCommit: (event: Event, newStartTime: number, newDuration: number) => void;
-  onMoveCommit: (event: Event, newStartTime: number, newDate: string) => void;
   cellWidth: number;
   onQuickPress?: (ev: Event) => void; // <-- NEW
   currentView?: 'day' | 'week' | 'month' | 'year'; // <-- NEW: Para estilos condicionales
@@ -253,8 +252,6 @@ export default function CalendarView({}: CalendarViewProps) {
   // ===== HELPER: Registrar handlers de long press =====
   const longPressActiveRef = useRef<{[eventId: string]: boolean}>({});
   const stableHandlersRef = useRef<Map<string, () => void>>(new Map());
-  // 🔧 FIX: Ref para rastrear si un evento está en modo drag activo
-  const dragActiveRef = useRef<{[eventId: string]: boolean}>({});
   
   const registerEventLongPressHandler = useCallback((eventId: string, handler: () => void) => {
     // Solo actualizar si el handler realmente cambió
@@ -2836,61 +2833,16 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, []); // <-- La dependencia vacía [] es clave, ahora no sufre de "estado obsoleto"
 
-  // Función para identificar el tipo de evento
-  const getEventType = (event: Event): string => {
-    // Instancia generada (cuadradito de serie)
-    if (typeof event.id === 'string' && event.id.includes('_')) {
-      return 'INSTANCIA_GENERADA';
-    }
-    
-    // Override (evento liberado)
-    if (event.series_id && event.original_start_utc) {
-      return 'OVERRIDE';
-    }
-    
-    // Serie original
-    if (event.is_recurring) {
-      return 'SERIE_ORIGINAL';
-    }
-    
-    // Evento único
-    return 'EVENTO_UNICO';
-  };
-
-  // Callback para abrir modal al hacer click rápido en evento
-  const onQuickPress = useCallback((event: Event) => {
-    console.log('👆 onQuickPress - Event tapped', {
-      eventId: event.id,
-      title: event.title,
-      is_recurring: event.is_recurring,
-      series_id: event.series_id,
-      original_start_utc: event.original_start_utc
-    });
-    
-    // 🟣 TOUCH_EVENT - EventResizableBlock
-    const timestamp = new Date().toISOString();
-
-    setSelectedEvent(event);
-    setEventTitle(event.title);
-    setEventDescription(event.description || '');
-    setEventColor(event.color);
-    setRecurrenceConfig(extractRecurrenceFromEvent(event));
-    setModalVisible(true);
-    
-    // Cargar subtareas del evento (siempre forzar reload para ver cambios recientes)
-    console.log('📋 onQuickPress - About to load subtasks', {
-      eventId: event.id,
-      forceReload: true
-    });
-    loadSubtasks(event.id, event, true);
-  }, [loadSubtasks]);
-
   // Callback de commit desde bloque movible
   const onMoveCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDate: string) => {
     const eventId = eventToUpdate.id;
 
+    if (resizeLockRef.current.has(eventId)) {
+      return;
+    }
+    resizeLockRef.current.add(eventId);
 
-    // Actualización optimista de la UI
+    // 1. Actualización optimista de la UI
     setEvents(prev => prev.map(ev => 
       ev.id === eventId 
         ? { ...ev, startTime: newStartTime, date: newDate }
@@ -2908,7 +2860,6 @@ export default function CalendarView({}: CalendarViewProps) {
 
       if (isGeneratedInstance) {
         // Crear override para instancia generada
-        
         const seriesId = parseInt(match[1], 10);
         
         // Calcular original_start_utc usando zona horaria correcta
@@ -2989,8 +2940,60 @@ export default function CalendarView({}: CalendarViewProps) {
       Alert.alert('Error', 'No se pudo mover el evento. Reintentando...');
       // Revertir cambios
       setEvents(prev => prev.map(ev => ev.id === eventId ? eventToUpdate : ev));
+    } finally {
+      resizeLockRef.current.delete(eventId);
     }
   }, []);
+
+  // Función para identificar el tipo de evento
+  const getEventType = (event: Event): string => {
+    // Instancia generada (cuadradito de serie)
+    if (typeof event.id === 'string' && event.id.includes('_')) {
+      return 'INSTANCIA_GENERADA';
+    }
+    
+    // Override (evento liberado)
+    if (event.series_id && event.original_start_utc) {
+      return 'OVERRIDE';
+    }
+    
+    // Serie original
+    if (event.is_recurring) {
+      return 'SERIE_ORIGINAL';
+    }
+    
+    // Evento único
+    return 'EVENTO_UNICO';
+  };
+
+  // Callback para abrir modal al hacer click rápido en evento
+  const onQuickPress = useCallback((event: Event) => {
+    console.log('👆 onQuickPress - Event tapped', {
+      eventId: event.id,
+      title: event.title,
+      is_recurring: event.is_recurring,
+      series_id: event.series_id,
+      original_start_utc: event.original_start_utc
+    });
+    
+    // 🟣 TOUCH_EVENT - EventResizableBlock
+    const timestamp = new Date().toISOString();
+
+    setSelectedEvent(event);
+    setEventTitle(event.title);
+    setEventDescription(event.description || '');
+    setEventColor(event.color);
+    setRecurrenceConfig(extractRecurrenceFromEvent(event));
+    setModalVisible(true);
+    
+    // Cargar subtareas del evento (siempre forzar reload para ver cambios recientes)
+    console.log('📋 onQuickPress - About to load subtasks', {
+      eventId: event.id,
+      forceReload: true
+    });
+    loadSubtasks(event.id, event, true);
+  }, [loadSubtasks]);
+
 
   // ===== RENDERIZADO PRINCIPAL =====
   return (
@@ -3234,17 +3237,6 @@ export default function CalendarView({}: CalendarViewProps) {
                               await apiPutMonthEvent(event.id, backendData);
                               await refreshMonthEvents();
                             }}
-                            onMoveCommit={async (ev: Event, newStartTime: number, newDate: string) => {
-                              // Convertir newStartTime (en minutos) de vuelta a día del mes
-                              // newStartTime viene como: (día - 1) * 30
-                              // Entonces: día = (newStartTime / 30) + 1
-                              const newDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
-                              // IMPORTANTE: Preservar la duración original del evento
-                              const updated = { ...event, startDay: newDay, duration: event.duration };
-                              const backendData = monthEventFrontendToBackend(updated);
-                              await apiPutMonthEvent(event.id, backendData);
-                              await refreshMonthEvents();
-                            }}
                             onQuickPress={(ev) => {
                               setSelectedEvent(event);
                               setEventTitle(event.title);
@@ -3377,16 +3369,18 @@ export default function CalendarView({}: CalendarViewProps) {
                   const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
                   
                   return (
-                    <TouchableOpacity
+                    <Pressable
                       key={`cell-${timeIndex}`}
-                      style={[
+                      android_ripple={event ? null : undefined} // Deshabilitar ripple cuando hay evento para evitar estado blanco
+                      style={({ pressed }) => [
                         styles.gridCell,
                         { 
                           width: getCellWidth(),
                           height: CELL_HEIGHT,
                           top: timeIndex * CELL_HEIGHT
                         },
-                        isCurrentHour && styles.currentHourCell
+                        isCurrentHour && styles.currentHourCell,
+                        event && pressed && { opacity: 1 } // Mantener opacidad constante cuando hay evento
                       ]}
                       onPress={() => {
                         // Verificar si hay un evento en esta celda
@@ -3405,8 +3399,8 @@ export default function CalendarView({}: CalendarViewProps) {
                           setSelectedCell({ dayIndex: 0, timeIndex, startTime: timeIndex * 30 });
                           setModalVisible(true);
                         } else {
-                          // 🔧 FIX: Si hubo long press o drag activo en este evento, no abrir modal al soltar
-                          if (longPressActiveRef.current[event.id] || dragActiveRef.current[event.id]) {
+                          // 🔧 FIX: Si hubo long press activo en este evento, no abrir modal al soltar
+                          if (longPressActiveRef.current[event.id]) {
                             return;
                           }
                           // Editar evento existente
@@ -3429,7 +3423,7 @@ export default function CalendarView({}: CalendarViewProps) {
                         <EventResizableBlock 
                           key={event.id} 
                           ev={event} 
-                          onResizeCommit={onResizeCommit} 
+                          onResizeCommit={onResizeCommit}
                           onMoveCommit={onMoveCommit} 
                           onQuickPress={onQuickPress} 
                           cellWidth={getCellWidth()} 
@@ -3437,12 +3431,9 @@ export default function CalendarView({}: CalendarViewProps) {
                           subtaskStatus={getSubtaskStatus(event.id)}
                           onLongPress={createLongPressHandler(event.id)}
                           onDuplicate={handleDuplicateEvent}
-                          onDragStateChange={(isActive) => {
-                            dragActiveRef.current[event.id] = isActive;
-                          }}
                         />
                       )}
-                    </TouchableOpacity>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -3560,8 +3551,12 @@ export default function CalendarView({}: CalendarViewProps) {
                             {isToday && (
                               <View style={styles.todayLine} />
                             )}
-                            <TouchableOpacity
-                              style={styles.cellTouchable}
+                            <Pressable
+                              android_ripple={null} // Deshabilitar ripple para evitar estado blanco
+                              style={({ pressed }) => [
+                                styles.cellTouchable,
+                                pressed && { opacity: 1 } // Mantener opacidad constante
+                              ]}
                               onPress={() => {
                               // 🟣 TOUCH_EVENT - WeekViewCell
                               const timestamp = new Date().toISOString();
@@ -3593,8 +3588,8 @@ export default function CalendarView({}: CalendarViewProps) {
                               } else {
                                 // 🔧 FIX: Si hay un evento ocupando la celda, abrir su modal
                                 if (occupyingEvent) {
-                                  // 🔧 FIX: Si hubo long press o drag activo en este evento, no abrir modal al soltar
-                                  if (longPressActiveRef.current[occupyingEvent.id] || dragActiveRef.current[occupyingEvent.id]) {
+                                  // 🔧 FIX: Si hubo long press activo en este evento, no abrir modal al soltar
+                                  if (longPressActiveRef.current[occupyingEvent.id]) {
                                     return;
                                   }
                                   onQuickPress(occupyingEvent);
@@ -3641,17 +3636,14 @@ export default function CalendarView({}: CalendarViewProps) {
                                   <EventResizableBlock 
                                     key={event.id} 
                                     ev={event} 
-                                    onResizeCommit={onResizeCommit} 
-                                    onMoveCommit={onMoveCommit} 
+                                    onResizeCommit={onResizeCommit}
+                          onMoveCommit={onMoveCommit} 
                                     onQuickPress={onQuickPress} 
                                     cellWidth={getCellWidth()} 
                                     currentView={currentView}
                                     subtaskStatus={getSubtaskStatus(event.id)}
                                     onLongPress={createLongPressHandler(event.id)}
                                     onDuplicate={handleDuplicateEvent}
-                                    onDragStateChange={(isActive) => {
-                                      dragActiveRef.current[event.id] = isActive;
-                                    }}
                                   />
                                 );
                               }
@@ -3702,8 +3694,8 @@ export default function CalendarView({}: CalendarViewProps) {
                                   <EventResizableBlock 
                                     key={`${occupyingEvent.id}-bottom-handler`} 
                                     ev={occupyingEvent} 
-                                    onResizeCommit={onResizeCommit} 
-                                    onMoveCommit={onMoveCommit} 
+                                    onResizeCommit={onResizeCommit}
+                          onMoveCommit={onMoveCommit} 
                                     onQuickPress={onQuickPress} 
                                     cellWidth={getCellWidth()} 
                                     currentView={currentView}
@@ -3712,16 +3704,13 @@ export default function CalendarView({}: CalendarViewProps) {
                                     onDuplicate={handleDuplicateEvent}
                                     renderOnlyBottomHandler={true}
                                     currentCellStartTime={startTime}
-                                    onDragStateChange={(isActive) => {
-                                      dragActiveRef.current[occupyingEvent.id] = isActive;
-                                    }}
                                   />
                                 );
                               }
                               
                               return null;
                             })()}
-                            </TouchableOpacity>
+                            </Pressable>
                           </View>
                         );
                       })}

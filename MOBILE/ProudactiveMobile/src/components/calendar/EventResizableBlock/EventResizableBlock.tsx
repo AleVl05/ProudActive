@@ -1,13 +1,11 @@
-// EventResizableBlock.tsx - Resizable and draggable event block component
+// EventResizableBlock.tsx - Resizable event block component (drag and drop removed)
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
   Animated,
   PanResponder,
-  TouchableOpacity,
   Pressable,
-  Modal,
 } from 'react-native';
 // import { LinearGradient } from 'expo-linear-gradient'; // Deshabilitado - Linear Gradient no funciona
 
@@ -40,7 +38,7 @@ interface Event {
 interface EventResizableBlockProps {
   ev: Event;
   onResizeCommit: (event: Event, newStartTime: number, newDuration: number) => void;
-  onMoveCommit: (event: Event, newStartTime: number, newDate: string) => void;
+  onMoveCommit?: (event: Event, newStartTime: number, newDate: string) => void; // Nueva prop para mover eventos
   onQuickPress: (event: Event) => void;
   cellWidth: number;
   currentView?: 'day' | 'week' | 'month' | 'year';
@@ -54,7 +52,7 @@ interface EventResizableBlockProps {
 const EventResizableBlock = React.memo(function EventResizableBlock({ 
   ev, 
   onResizeCommit, 
-  onMoveCommit, 
+  onMoveCommit,
   onQuickPress, 
   cellWidth, 
   currentView = 'week',
@@ -68,20 +66,20 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   const ghostHeight = useRef(new Animated.Value((ev.duration / 30) * CELL_HEIGHT - 2)).current;
   const ghostTopOffset = useRef(new Animated.Value(0)).current;
   const ghostLeftOffset = useRef(new Animated.Value(0)).current;
+  const ghostTopOffsetRef = useRef(0); // Ref para rastrear el valor actual del offset Y
+  const ghostLeftOffsetRef = useRef(0); // Ref para rastrear el valor actual del offset X
   const [showGhost, setShowGhost] = useState(false);
-  const [isMoving, setIsMoving] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [isMoving, setIsMoving] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
-  const allowDragRef = useRef(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dragActivationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dragActivatedRef = useRef(false); // Flag para saber si ya se activó el drag después del hold
-  const isScrollDetectedRef = useRef(false); // Flag para indicar que se detectó scroll (no tap)
+  const dragActivationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuVisibleRef = useRef(false);
-  const touchStartTimeRef = useRef<number | null>(null); // Para detectar quick press
-  const touchPositionRef = useRef<{ x: number; y: number } | null>(null); // Posición del toque inicial
-  const isFingerDownRef = useRef(false); // Flag para saber si el dedo está abajo
+  const isResizingRef = useRef(false); // Ref para rastrear estado de resize de forma síncrona
+  const isMovingRef = useRef(false); // Ref para rastrear estado de drag de forma síncrona
+  const dragTouchStartRef = useRef<{ x: number; y: number; time: number; relativeY?: number } | null>(null);
+  const hasMovedRef = useRef(false); // Para detectar si hubo movimiento durante el timer
   // Usar useRef para almacenar los valores iniciales y actualizarlos cuando ev cambia
   const initialRef = useRef({ startTime: ev.startTime, duration: ev.duration, date: ev.date });
   
@@ -121,10 +119,13 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
 
   useEffect(() => {
     return () => {
-      allowDragRef.current = false;
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
+      }
+      if (dragActivationTimer.current) {
+        clearTimeout(dragActivationTimer.current);
+        dragActivationTimer.current = null;
       }
     };
   }, []);
@@ -141,9 +142,11 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
     }
   }, [showContextMenu]);
 
-  // Función para activar long press externamente
-  const triggerLongPress = useCallback(() => {
-    console.log('🎯 LONG PRESS DETECTED - Event (External):', ev.title, 'ID:', ev.id);
+  // Función para mostrar el menú contextual (long press)
+  const showContextMenuHandler = useCallback(() => {
+    if (isResizing || showContextMenu) {
+      return; // No mostrar menú si está resizing o ya está visible
+    }
     
     // Calcular posición del menú (arriba del evento)
     const eventHeight = (ev.duration / 30) * CELL_HEIGHT - 2;
@@ -152,7 +155,13 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
     
     setMenuPosition({ x: 0, y: menuY });
     setShowContextMenu(true);
-  }, [ev]);
+    menuVisibleRef.current = true;
+  }, [ev, isResizing, showContextMenu]);
+  
+  // Función para activar long press externamente (compatibilidad con código existente)
+  const triggerLongPress = useCallback(() => {
+    showContextMenuHandler();
+  }, [showContextMenuHandler]);
 
   // Exponer la función de long press al componente padre usando useRef
   const longPressHandlerRef = useRef<(() => void) | null>(null);
@@ -200,7 +209,9 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
 
   const commitMove = useCallback((newStartTime: number, newDate: string) => {
     if (newStartTime < 0) return;
-    onMoveCommit(ev, newStartTime, newDate);
+    if (onMoveCommit) {
+      onMoveCommit(ev, newStartTime, newDate);
+    }
   }, [ev, onMoveCommit]);
 
   // 🔧 OPTIMIZACIÓN: Memoizar el cálculo de altura para evitar recálculos innecesarios
@@ -270,6 +281,202 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
     };
   }, [subtaskStatus]);
 
+  // Refs para detectar movimiento en handlers de resize (para distinguir entre resize y long press)
+  const topHandlerTouchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const bottomHandlerTouchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  
+  // PanResponder para drag and drop del área central
+  const dragResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false, // No capturar inmediatamente - permitir scroll
+    onStartShouldSetPanResponderCapture: () => false, // No capturar en capture phase
+    onMoveShouldSetPanResponder: (_, gesture) => {
+      // Solo capturar si el drag está activado
+      if (isMovingRef.current) {
+        return true;
+      }
+      // Si hay movimiento significativo y NO está activado el drag, NO capturar (permitir scroll)
+      if (Math.abs(gesture.dx) > 5 || Math.abs(gesture.dy) > 5) {
+        // Cancelar timer de activación si existe
+        if (dragActivationTimer.current) {
+          hasMovedRef.current = true;
+          clearTimeout(dragActivationTimer.current);
+          dragActivationTimer.current = null;
+          dragTouchStartRef.current = null;
+        }
+        return false; // No capturar - permitir scroll
+      }
+      return false;
+    },
+    onPanResponderGrant: () => {
+      // Este solo se llama si isMovingRef.current es true (ya activado)
+      // No necesitamos hacer nada aquí porque el drag ya está activado
+    },
+    onPanResponderMove: (_, gesture) => {
+      // Si el drag está activado, mover el bloque
+      if (isMovingRef.current) {
+        // Cancelar el timer de 2 segundos si hay movimiento (significa que está haciendo drag activo)
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+        
+        const deltaY = gesture.dy;
+        const deltaX = gesture.dx;
+        const deltaSlotsY = Math.round(deltaY / CELL_HEIGHT);
+        const deltaSlotsX = Math.round(deltaX / cellWidth);
+        
+        // Si hay offset inicial (renderOnlyBottomHandler), sumarlo al movimiento
+        const initialOffset = dragTouchStartRef.current?.relativeY || 0;
+        const newTopOffset = initialOffset + (deltaSlotsY * CELL_HEIGHT);
+        const newLeftOffset = deltaSlotsX * cellWidth;
+        ghostTopOffset.setValue(newTopOffset);
+        ghostLeftOffset.setValue(newLeftOffset);
+        ghostTopOffsetRef.current = newTopOffset;
+        ghostLeftOffsetRef.current = newLeftOffset;
+      }
+    },
+    onPanResponderRelease: (_, gesture) => {
+      // Limpiar todos los timers
+      if (dragActivationTimer.current) {
+        clearTimeout(dragActivationTimer.current);
+        dragActivationTimer.current = null;
+      }
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      
+      // Si el drag estaba activado, hacer commit del movimiento
+      if (isMovingRef.current) {
+        const currentInitial = getInitial();
+        
+        // Obtener el offset actual del ghost desde los refs (que ya incluye el offset inicial si es renderOnlyBottomHandler)
+        const currentGhostOffsetY = ghostTopOffsetRef.current;
+        const currentGhostOffsetX = ghostLeftOffsetRef.current;
+        
+        // Calcular el movimiento total: el offset del ghost es relativo al inicio del bloque
+        const deltaSlotsY = Math.round(currentGhostOffsetY / CELL_HEIGHT);
+        const deltaMinY = deltaSlotsY * 30;
+        const newStartTime = Math.max(0, currentInitial.startTime + deltaMinY);
+        
+        const deltaSlotsX = Math.round(currentGhostOffsetX / cellWidth);
+        const newDate = new Date(currentInitial.date);
+        newDate.setDate(newDate.getDate() + deltaSlotsX);
+        const newDateString = newDate.toISOString().slice(0, 10);
+        
+        // Limpiar estado
+        setShowGhost(false);
+        setIsMoving(false);
+        isMovingRef.current = false;
+        dragTouchStartRef.current = null;
+        ghostTopOffsetRef.current = 0;
+        ghostLeftOffsetRef.current = 0;
+        
+        // Solo mover si hay cambio significativo
+        if (newStartTime !== currentInitial.startTime || newDateString !== currentInitial.date) {
+          commitMove(newStartTime, newDateString);
+        }
+      } else {
+        // Si no estaba en drag, limpiar refs
+        dragTouchStartRef.current = null;
+        hasMovedRef.current = false;
+      }
+    },
+    onPanResponderTerminationRequest: () => {
+      // Permitir terminar si no hay drag activado (para scroll)
+      return !isMovingRef.current;
+    },
+    onPanResponderTerminate: () => {
+      // Limpiar todos los timers
+      if (dragActivationTimer.current) {
+        clearTimeout(dragActivationTimer.current);
+        dragActivationTimer.current = null;
+      }
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      
+      if (isMovingRef.current) {
+        setShowGhost(false);
+        setIsMoving(false);
+        isMovingRef.current = false;
+        ghostTopOffsetRef.current = 0;
+        ghostLeftOffsetRef.current = 0;
+      }
+      dragTouchStartRef.current = null;
+      hasMovedRef.current = false;
+    },
+  })).current;
+  
+  // Función para iniciar el timer de activación de drag
+  const startDragActivation = useCallback((touchX: number, touchY: number) => {
+    // Limpiar cualquier timer anterior
+    if (dragActivationTimer.current) {
+      clearTimeout(dragActivationTimer.current);
+    }
+    
+    const currentInitial = getInitial();
+    
+    // Calcular offset Y relativo si estamos en renderOnlyBottomHandler
+    let relativeY = 0;
+    if (renderOnlyBottomHandler && currentCellStartTime !== undefined) {
+      const timeDiffMinutes = currentInitial.startTime - currentCellStartTime;
+      relativeY = (timeDiffMinutes / 30) * CELL_HEIGHT;
+    }
+    
+    dragTouchStartRef.current = {
+      x: touchX,
+      y: touchY,
+      time: Date.now(),
+      relativeY: relativeY
+    };
+    hasMovedRef.current = false;
+    
+    // Timer de 500ms para activar drag (si no hay movimiento)
+    dragActivationTimer.current = setTimeout(() => {
+      // Si no hubo movimiento durante 500ms, activar drag
+      if (dragTouchStartRef.current && !hasMovedRef.current && !isResizingRef.current && !isMovingRef.current) {
+        isMovingRef.current = true;
+        setIsMoving(true);
+        setShowGhost(true);
+        
+        // Ajustar offset inicial si estamos en renderOnlyBottomHandler
+        const initialOffset = dragTouchStartRef.current.relativeY || 0;
+        ghostTopOffset.setValue(initialOffset);
+        ghostLeftOffset.setValue(0);
+        ghostTopOffsetRef.current = initialOffset;
+        ghostLeftOffsetRef.current = 0;
+        ghostHeight.setValue((currentInitial.duration / 30) * CELL_HEIGHT - 2);
+        
+        // Iniciar timer de 2000ms total (1500ms más) para panel
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+        }
+        longPressTimer.current = setTimeout(() => {
+          // Si después de 2 segundos totales aún estamos en drag, mostrar panel
+          if (isMovingRef.current && dragTouchStartRef.current) {
+            isMovingRef.current = false;
+            setIsMoving(false);
+            setShowGhost(false);
+            showContextMenuHandler();
+          }
+        }, 1500); // 1500ms más para completar 2000ms total (500ms ya pasaron)
+      }
+      dragActivationTimer.current = null;
+    }, 500);
+  }, [showContextMenuHandler, renderOnlyBottomHandler, currentCellStartTime]);
+  
+  // Función para cancelar el timer de activación si hay movimiento
+  const cancelDragActivation = useCallback(() => {
+    if (dragActivationTimer.current) {
+      hasMovedRef.current = true;
+      clearTimeout(dragActivationTimer.current);
+      dragActivationTimer.current = null;
+      dragTouchStartRef.current = null;
+    }
+  }, []);
+  
   const topResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => {
       console.log('🔝 DEBUG - Top Resize onStartShouldSetPanResponder', {
@@ -279,8 +486,29 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       });
       return true;
     },
-    onPanResponderGrant: () => {
-      // Actualizar initial con los valores actuales de ev al comenzar el resize
+    onPanResponderGrant: (evt) => {
+      // Guardar información del touch inicial para detectar si es solo long press o resize
+      const touch = evt.nativeEvent.touches[0];
+      if (touch) {
+        topHandlerTouchStartRef.current = {
+          x: touch.pageX,
+          y: touch.pageY,
+          time: Date.now()
+        };
+        
+        // Iniciar timer para long press (si no hay movimiento después de 2 segundos)
+        longPressTimer.current = setTimeout(() => {
+          // Si aún estamos aquí y no se ha movido significativamente, es long press
+          // Cancelar el resize y mostrar menú
+          if (topHandlerTouchStartRef.current && isResizing) {
+            setShowGhost(false);
+            setIsResizing(false);
+            showContextMenuHandler();
+          }
+        }, 2000);
+      }
+      
+      // Iniciar resize inmediatamente (como funcionaba antes)
       const currentInitial = getInitial();
       
       console.log('🔝 DEBUG - Top Resize onPanResponderGrant', {
@@ -293,10 +521,20 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       
       setShowGhost(true);
       setIsResizing(true);
+      isResizingRef.current = true; // Actualizar ref también
       ghostTopOffset.setValue(0);
       ghostHeight.setValue((currentInitial.duration / 30) * CELL_HEIGHT - 2);
     },
     onPanResponderMove: (_, gesture) => {
+      // Si hay movimiento significativo, cancelar timer de long press (es resize, no long press)
+      if (longPressTimer.current && (Math.abs(gesture.dx) > 5 || Math.abs(gesture.dy) > 5)) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+        topHandlerTouchStartRef.current = null;
+      }
+      
+      // Procesar movimiento del resize
+      
       const currentInitial = getInitial();
       const deltaSlots = Math.round(gesture.dy / CELL_HEIGHT); // snap 30min
       const deltaMin = deltaSlots * 30;
@@ -340,6 +578,34 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       }
     },
     onPanResponderRelease: (_, gesture) => {
+      console.log('🔝 DEBUG - Top Resize onPanResponderRelease CALLED', {
+        eventId: ev.id,
+        eventTitle: ev.title,
+        isResizing: isResizing,
+        isResizingRef: isResizingRef.current,
+        gestureDy: gesture.dy,
+        timestamp: Date.now()
+      });
+      
+      // Limpiar timer y refs PRIMERO
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      topHandlerTouchStartRef.current = null;
+      
+      // Si no estábamos resizing, no hacer commit (puede ser solo un tap)
+      if (!isResizingRef.current && !isResizing) {
+        console.log('🔝 DEBUG - Top Resize Release: No estaba resizing, saliendo');
+        return;
+      }
+      
+      // Limpiar estado visual PRIMERO
+      setShowGhost(false);
+      setIsResizing(false);
+      isResizingRef.current = false;
+      
+      // Calcular y commit el resize
       const currentInitial = getInitial();
       const deltaSlots = Math.round(gesture.dy / CELL_HEIGHT);
       const deltaMin = deltaSlots * 30;
@@ -379,18 +645,19 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const finalStart = newStart;
       const finalDuration = newDuration;
       
-      console.log('🔝 DEBUG - Top Resize onPanResponderRelease', {
+      console.log('🔝 DEBUG - Top Resize onPanResponderRelease - COMMITTING', {
         eventId: ev.id,
         eventTitle: ev.title,
         finalStart,
         finalDuration,
         originalStart: currentInitial.startTime,
         originalDuration: currentInitial.duration,
+        deltaSlots,
+        deltaMin,
         timestamp: Date.now()
       });
       
-      setShowGhost(false);
-      setIsResizing(false);
+      // Hacer commit del resize
       commitResize(finalStart, finalDuration);
     },
     onPanResponderTerminationRequest: () => {
@@ -407,6 +674,14 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         eventTitle: ev.title,
         timestamp: Date.now()
       });
+      
+      // Limpiar timer y refs
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      topHandlerTouchStartRef.current = null;
+      
       setShowGhost(false);
       setIsResizing(false);
     },
@@ -421,8 +696,29 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       });
       return true;
     },
-    onPanResponderGrant: () => {
-      // Actualizar initial con los valores actuales de ev al comenzar el resize
+    onPanResponderGrant: (evt) => {
+      // Guardar información del touch inicial para detectar si es solo long press o resize
+      const touch = evt.nativeEvent.touches[0];
+      if (touch) {
+        bottomHandlerTouchStartRef.current = {
+          x: touch.pageX,
+          y: touch.pageY,
+          time: Date.now()
+        };
+        
+        // Iniciar timer para long press (si no hay movimiento después de 2 segundos)
+        longPressTimer.current = setTimeout(() => {
+          // Si aún estamos aquí y no se ha movido significativamente, es long press
+          // Cancelar el resize y mostrar menú
+          if (bottomHandlerTouchStartRef.current && isResizing) {
+            setShowGhost(false);
+            setIsResizing(false);
+            showContextMenuHandler();
+          }
+        }, 2000);
+      }
+      
+      // Iniciar resize inmediatamente (como funcionaba antes)
       const currentInitial = getInitial();
       
       console.log('🔵 DEBUG - Bottom Resize Grant:', {
@@ -437,26 +733,14 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       
       setShowGhost(true);
       setIsResizing(true);
+      isResizingRef.current = true; // Actualizar ref también
       
-      // 🔧 FIX: Cuando renderOnlyBottomHandler, el componente está en la última celda
-      // El ghost debe mostrarse desde el inicio del bloque hasta el final extendido
-      // Calcular offset negativo para posicionar el ghost desde el inicio
+      // 🔧 FIX: Cuando renderOnlyBottomHandler, calcular offset correcto
       if (renderOnlyBottomHandler && currentCellStartTime !== undefined) {
-        // El ghost debe empezar desde ev.startTime (inicio del bloque)
-        // El componente está en la celda actual con startTime = currentCellStartTime
-        // Calcular la diferencia en minutos y convertir a píxeles
         const timeDiffMinutes = currentInitial.startTime - currentCellStartTime;
         const timeDiffSlots = timeDiffMinutes / 30;
         const offsetY = timeDiffSlots * CELL_HEIGHT;
         ghostTopOffset.setValue(offsetY);
-        console.log('🔵 DEBUG - Bottom Handler Ghost Offset:', {
-          eventId: ev.id,
-          currentCellStartTime,
-          eventStartTime: currentInitial.startTime,
-          timeDiffMinutes,
-          timeDiffSlots,
-          offsetY
-        });
       } else {
         ghostTopOffset.setValue(0);
       }
@@ -464,6 +748,15 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       ghostHeight.setValue((currentInitial.duration / 30) * CELL_HEIGHT - 2);
     },
     onPanResponderMove: (_, gesture) => {
+      // Si hay movimiento significativo, cancelar timer de long press (es resize, no long press)
+      if (longPressTimer.current && (Math.abs(gesture.dx) > 5 || Math.abs(gesture.dy) > 5)) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+        bottomHandlerTouchStartRef.current = null;
+      }
+      
+      // Procesar movimiento del resize
+      
       const currentInitial = getInitial();
       
       // 🔧 FIX: Si el handler está en la última celda (renderOnlyBottomHandler), 
@@ -511,6 +804,34 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       }
     },
     onPanResponderRelease: (_, gesture) => {
+      console.log('🔽 DEBUG - Bottom Resize onPanResponderRelease CALLED', {
+        eventId: ev.id,
+        eventTitle: ev.title,
+        isResizing: isResizing,
+        isResizingRef: isResizingRef.current,
+        gestureDy: gesture.dy,
+        timestamp: Date.now()
+      });
+      
+      // Limpiar timer y refs PRIMERO
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      bottomHandlerTouchStartRef.current = null;
+      
+      // Si no estábamos resizing, no hacer commit (puede ser solo un tap)
+      if (!isResizingRef.current && !isResizing) {
+        console.log('🔽 DEBUG - Bottom Resize Release: No estaba resizing, saliendo');
+        return;
+      }
+      
+      // Limpiar estado visual PRIMERO
+      setShowGhost(false);
+      setIsResizing(false);
+      isResizingRef.current = false;
+      
+      // Calcular y commit el resize
       const currentInitial = getInitial();
       
       // 🔧 FIX: Mismo cálculo que en Move
@@ -518,7 +839,7 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const deltaMin = deltaSlots * 30;
       const newDuration = currentInitial.duration + deltaMin;
       
-      console.log('🔽 DEBUG - Bottom Resize onPanResponderRelease', {
+      console.log('🔽 DEBUG - Bottom Resize onPanResponderRelease - COMMITTING', {
         eventId: ev.id,
         eventTitle: ev.title,
         renderOnlyBottomHandler,
@@ -529,7 +850,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         currentDuration: currentInitial.duration,
         newDuration,
         currentStartTime: currentInitial.startTime,
-        willCommit: true,
         timestamp: Date.now()
       });
       
@@ -551,8 +871,7 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         originalStartTime: currentInitial.startTime
       });
       
-      setShowGhost(false);
-      setIsResizing(false);
+      // Hacer commit del resize
       commitResize(currentInitial.startTime, adjustedDuration);
     },
     onPanResponderTerminationRequest: () => {
@@ -569,392 +888,23 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         eventTitle: ev.title,
         timestamp: Date.now()
       });
-      setShowGhost(false);
-      setIsResizing(false);
-    },
-  })).current;
-
-  // 🔧 FIX: Función para iniciar el timer de detección de drag
-  const startDragDetectionTimer = useCallback(() => {
-    const hasTimer = dragActivationTimerRef.current !== null;
-    const hasDragActivated = dragActivatedRef.current;
-    
-    console.log('🔵 DEBUG - startDragDetectionTimer CALLED', {
-      eventId: ev.id,
-      eventTitle: ev.title,
-      allowDrag: allowDragRef.current,
-      dragActivated: dragActivatedRef.current,
-      hasTimer,
-      isMoving,
-      isResizing,
-      isScrollDetected: isScrollDetectedRef.current,
-      menuVisible: menuVisibleRef.current,
-      showGhost,
-      timestamp: Date.now()
-    });
-    
-    if (!dragActivatedRef.current && !dragActivationTimerRef.current) {
-      // Reset flags
-      allowDragRef.current = false;
-      isScrollDetectedRef.current = false;
       
-      console.log('🔵 DEBUG - Starting 500ms drag activation timer', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        timestamp: Date.now()
-      });
-      
-      // Iniciar timer para activar drag después de 500ms SIN movimiento
-      dragActivationTimerRef.current = setTimeout(() => {
-        const timerStillValid = dragActivationTimerRef.current !== null;
-        const scrollDetected = isScrollDetectedRef.current;
-        const fingerStillDown = isFingerDownRef.current;
-        
-        console.log('🔵 DEBUG - Drag activation timer FIRED', {
-          eventId: ev.id,
-          eventTitle: ev.title,
-          timerStillValid,
-          scrollDetected,
-          fingerStillDown,
-          willActivate: timerStillValid && !scrollDetected && fingerStillDown,
-          timestamp: Date.now()
-        });
-        
-        // Solo activar si aún no se ha cancelado (no hubo movimiento)
-        // Y VERIFICAR QUE EL DEDO SIGA EN EL BLOQUE
-        if (dragActivationTimerRef.current !== null && !isScrollDetectedRef.current && isFingerDownRef.current) {
-          console.log('✅ DEBUG - DRAG ACTIVATED - Setting moving state', {
-            eventId: ev.id,
-            eventTitle: ev.title,
-            timestamp: Date.now()
-          });
-          
-          dragActivatedRef.current = true;
-          allowDragRef.current = true;
-          setShowGhost(true);
-          setIsMoving(true);
-          ghostTopOffset.setValue(0);
-          ghostLeftOffset.setValue(0);
-          const currentInitial = getInitial();
-          ghostHeight.setValue((currentInitial.duration / 30) * CELL_HEIGHT - 2);
-          
-          // 🔧 FIX: Cancelar long press timer cuando se activa el drag
-          // Si el usuario activó el drag, quiere mover el bloque, no mostrar el menú
-          if (longPressTimer.current) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
-          }
-        } else {
-          console.log('❌ DEBUG - Drag activation CANCELLED', {
-            eventId: ev.id,
-            eventTitle: ev.title,
-            reason: !timerStillValid ? 'timer cleared' : scrollDetected ? 'scroll detected' : !fingerStillDown ? 'finger not down' : 'unknown',
-            timestamp: Date.now()
-          });
-        }
-        dragActivationTimerRef.current = null;
-      }, 500); // 500ms de hold SIN movimiento antes de activar drag
-      
-      // Timer para long press (1.5 segundos) para el menú contextual
-      longPressTimer.current = setTimeout(() => {
-        console.log('📌 DEBUG - Long press timer FIRED', {
-          eventId: ev.id,
-          eventTitle: ev.title,
-          timestamp: Date.now()
-        });
-        
-        // Calcular posición del menú (arriba del evento)
-        const eventHeight = (ev.duration / 30) * CELL_HEIGHT - 2;
-        const menuHeight = 100; // Altura aproximada del menú
-        const menuY = -menuHeight - 10; // 10px de separación
-        
-        setMenuPosition({ x: 0, y: menuY });
-        setShowContextMenu(true);
-        menuVisibleRef.current = true;
-      }, 1500);
-    } else {
-      console.log('⚠️ DEBUG - startDragDetectionTimer SKIPPED', {
-        eventId: ev.id,
-        eventTTitle: ev.title,
-        reason: dragActivatedRef.current ? 'drag already activated' : 'timer already exists',
-        timestamp: Date.now()
-      });
-    }
-  }, [ev.duration, ev.id, ev.title]);
-
-  // PanResponder para mover el bloque completo
-  const moveResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => {
-      const shouldCapture = dragActivatedRef.current;
-      console.log('🔄 DEBUG - Move onStartShouldSetPanResponder', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        dragActivated: dragActivatedRef.current,
-        shouldCapture,
-        timestamp: Date.now()
-      });
-      // 🔧 FIX: Capturar solo si el drag ya está activado
-      // Esto permite que el ScrollView maneje el gesto inicialmente
-      return shouldCapture;
-    },
-    onStartShouldSetPanResponderCapture: () => {
-      console.log('🔄 DEBUG - Move onStartShouldSetPanResponderCapture', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        dragActivated: dragActivatedRef.current,
-        timestamp: Date.now()
-      });
-      // 🔧 FIX: NO capturar en capture phase - esto permite que el ScrollView capture el gesto para scroll
-      // El timer se inicia desde onTouchStart en el View
-      return false;
-    },
-    onMoveShouldSetPanResponder: (_, gesture) => {
-      // 🔧 FIX: Solo capturar si el drag ya está activado
-      // Si el drag NO está activado, NO capturar (permite que ScrollView haga scroll)
-      const dx = Math.abs(gesture.dx || 0);
-      const dy = Math.abs(gesture.dy || 0);
-      const SCROLL_THRESHOLD = 10; // Si hay movimiento >= 10px, es probablemente scroll
-      
-      console.log('🔄 DEBUG - Move onMoveShouldSetPanResponder', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        dragActivated: dragActivatedRef.current,
-        dx,
-        dy,
-        scrollThreshold: SCROLL_THRESHOLD,
-        isScroll: dx >= SCROLL_THRESHOLD || dy >= SCROLL_THRESHOLD,
-        timestamp: Date.now()
-      });
-      
-      // Si el drag ya está activado, siempre capturar para mover el bloque
-      if (dragActivatedRef.current) {
-        return true;
-      }
-      
-      // 🔧 FIX: Si hay movimiento significativo y el drag NO está activado, cancelar timer y NO capturar
-      // Esto permite que el ScrollView capture el gesto y haga scroll
-      if (dx >= SCROLL_THRESHOLD || dy >= SCROLL_THRESHOLD) {
-        console.log('📜 DEBUG - SCROLL DETECTED - Cancelling drag timer', {
-          eventId: ev.id,
-          eventTitle: ev.title,
-          dx,
-          dy,
-          timestamp: Date.now()
-        });
-        
-        // Cancelar el timer de activación de drag ya que hay movimiento (es scroll)
-        if (dragActivationTimerRef.current) {
-          clearTimeout(dragActivationTimerRef.current);
-          dragActivationTimerRef.current = null;
-          console.log('🛑 DEBUG - Drag timer cancelled due to scroll', {
-            eventId: ev.id,
-            eventTitle: ev.title,
-            timestamp: Date.now()
-          });
-        }
-        isScrollDetectedRef.current = true;
-        // También cancelar long press si hay movimiento
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
-        }
-        return false; // NO capturar - dejar que ScrollView maneje el scroll
-      }
-      
-      // Si no hay movimiento significativo y aún no se activó el drag, no capturar aún
-      // El timer de 500ms activará el drag si no hay movimiento
-      return false;
-    },
-    onPanResponderGrant: () => {
-      console.log('✅ DEBUG - onPanResponderGrant (PanResponder captured gesture)', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        allowDrag: allowDragRef.current,
-        dragActivated: dragActivatedRef.current,
-        isMoving,
-        isResizing,
-        showGhost,
-        timestamp: Date.now()
-      });
-      // 🔧 FIX: Este grant solo se llama si el PanResponder capturó el gesto
-      // Esto solo debería pasar si dragActivatedRef.current es true
-      // El timer ya se inició en onStartShouldSetPanResponderCapture
-    },
-    onPanResponderMove: (_, gesture) => {
-      // 🔧 FIX: Este método solo se llama si el PanResponder capturó el gesto
-      // Si estamos aquí, significa que dragActivatedRef.current es true
-      // Mover el bloque solo si el drag está activado
-      const willMove = allowDragRef.current && dragActivatedRef.current;
-      
-      console.log('🔄 DEBUG - onPanResponderMove (dragging block)', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        allowDrag: allowDragRef.current,
-        dragActivated: dragActivatedRef.current,
-        isMoving,
-        showGhost,
-        dx: gesture.dx,
-        dy: gesture.dy,
-        willMove,
-        timestamp: Date.now()
-      });
-      
-      if (allowDragRef.current && dragActivatedRef.current) {
-        const deltaY = gesture.dy;
-        const deltaX = gesture.dx;
-        const deltaSlotsY = Math.round(deltaY / CELL_HEIGHT);
-        const deltaSlotsX = Math.round(deltaX / cellWidth);
-        ghostTopOffset.setValue(deltaSlotsY * CELL_HEIGHT);
-        ghostLeftOffset.setValue(deltaSlotsX * cellWidth);
-      }
-    },
-    onPanResponderRelease: (_, gesture) => {
-      console.log('👋 DEBUG - onPanResponderRelease (PanResponder released)', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        allowDrag: allowDragRef.current,
-        dragActivated: dragActivatedRef.current,
-        isMoving,
-        isScrollDetected: isScrollDetectedRef.current,
-        menuVisible: menuVisibleRef.current,
-        showContextMenu,
-        showGhost,
-        finalDx: gesture.dx,
-        finalDy: gesture.dy,
-        timestamp: Date.now()
-      });
-      
-      // Limpiar todos los timers
+      // Limpiar timer y refs
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
       }
-      if (dragActivationTimerRef.current) {
-        clearTimeout(dragActivationTimerRef.current);
-        dragActivationTimerRef.current = null;
-      }
+      bottomHandlerTouchStartRef.current = null;
       
-      // Si se mostró el menú de long press, NO tratar esto como tap corto
-      if (menuVisibleRef.current || showContextMenu) {
-        console.log('📌 DEBUG - Release ignored - menu visible', {
-          eventId: ev.id,
-          eventTitle: ev.title,
-          timestamp: Date.now()
-        });
-        setIsMoving(false);
+      // Limpiar estado visual si estábamos resizing
+      if (isResizing || isResizingRef.current) {
         setShowGhost(false);
-        allowDragRef.current = false;
-        dragActivatedRef.current = false;
-        isScrollDetectedRef.current = false;
-        return;
+        setIsResizing(false);
+        isResizingRef.current = false;
       }
-      
-      // 🔧 FIX: Si se detectó scroll, NO tratar el release como tap
-      if (isScrollDetectedRef.current) {
-        console.log('📜 DEBUG - Release ignored - scroll detected', {
-          eventId: ev.id,
-          eventTitle: ev.title,
-          timestamp: Date.now()
-        });
-        setIsMoving(false);
-        setShowGhost(false);
-        allowDragRef.current = false;
-        dragActivatedRef.current = false;
-        isScrollDetectedRef.current = false;
-        return; // Salir sin hacer nada - el scroll ya está manejado por el ScrollView
-      }
-      
-      // Si está en drag mode, procesar el movimiento
-      if (allowDragRef.current && dragActivatedRef.current) {
-        const currentInitial = getInitial();
-        const deltaY = gesture.dy;
-        const deltaX = gesture.dx;
-        const deltaSlotsY = Math.round(deltaY / CELL_HEIGHT);
-        const deltaMinY = deltaSlotsY * 30;
-        const newStartTime = Math.max(0, currentInitial.startTime + deltaMinY);
-        
-        const deltaSlotsX = Math.round(deltaX / cellWidth);
-        const newDate = new Date(currentInitial.date);
-        newDate.setDate(newDate.getDate() + deltaSlotsX);
-        const newDateString = newDate.toISOString().slice(0, 10);
-        
-        console.log('✅ DEBUG - Move commit', {
-          eventId: ev.id,
-          eventTitle: ev.title,
-          oldStartTime: currentInitial.startTime,
-          newStartTime,
-          oldDate: currentInitial.date,
-          newDate: newDateString,
-          deltaY,
-          deltaX,
-          timestamp: Date.now()
-        });
-        
-        setShowGhost(false);
-        setIsMoving(false);
-        allowDragRef.current = false;
-        dragActivatedRef.current = false;
-        
-        // Solo mover si hay cambio significativo
-        if (newStartTime !== currentInitial.startTime || newDateString !== currentInitial.date) {
-          commitMove(newStartTime, newDateString);
-        }
-      } else {
-        console.log('⚠️ DEBUG - Release - drag not activated, cleaning state', {
-          eventId: ev.id,
-          eventTitle: ev.title,
-          timestamp: Date.now()
-        });
-        // Si no se activó el drag, limpiar flags
-        setIsMoving(false);
-        setShowGhost(false);
-        allowDragRef.current = false;
-        dragActivatedRef.current = false;
-        isScrollDetectedRef.current = false;
-      }
-    },
-    onPanResponderTerminationRequest: () => {
-      const shouldTerminate = isScrollDetectedRef.current || !dragActivatedRef.current;
-      console.log('🔄 DEBUG - Move onPanResponderTerminationRequest', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        isScrollDetected: isScrollDetectedRef.current,
-        dragActivated: dragActivatedRef.current,
-        shouldTerminate,
-        timestamp: Date.now()
-      });
-      // 🔧 FIX: Permitir terminar si detectamos scroll o si el drag no está activado
-      // Esto permite que el ScrollView capture el gesto para hacer scroll
-      if (isScrollDetectedRef.current || !dragActivatedRef.current) {
-        return true; // Permitir que otro responder (ScrollView) tome el control
-      }
-      // No terminar si el drag está activado
-      return false;
-    },
-    onPanResponderTerminate: () => {
-      console.log('🔄 DEBUG - Move onPanResponderTerminate', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        timestamp: Date.now()
-      });
-      
-      // Limpiar todos los timers
-      if (longPressTimer.current) {
-        clearTimeout(longPressTimer.current);
-        longPressTimer.current = null;
-      }
-      if (dragActivationTimerRef.current) {
-        clearTimeout(dragActivationTimerRef.current);
-        dragActivationTimerRef.current = null;
-      }
-      
-      setShowGhost(false);
-      setIsMoving(false);
-      allowDragRef.current = false;
-      dragActivatedRef.current = false;
-      isScrollDetectedRef.current = false;
     },
   })).current;
+
 
   return (
     <View style={{ flex: 1 }}>
@@ -1025,9 +975,51 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
               left: 0, 
               right: 0, 
               height: 12,
-              zIndex: 15
+              zIndex: 20
             }} 
           />
+          
+          {/* Área de drag and drop también en el cuerpo (celdas intermedias y finales) */}
+          <View 
+            {...dragResponder.panHandlers}
+            onTouchStart={(e) => {
+              const touch = e.nativeEvent.touches[0];
+              if (touch && !isResizingRef.current && !isMovingRef.current) {
+                startDragActivation(touch.pageX, touch.pageY);
+              }
+            }}
+            onTouchMove={(e) => {
+              // Si hay movimiento durante el timer, cancelarlo (es scroll, no drag)
+              if (dragActivationTimer.current && !isMovingRef.current) {
+                cancelDragActivation();
+              }
+            }}
+            onTouchEnd={() => {
+              // Limpiar timers si no se activó el drag
+              if (!isMovingRef.current) {
+                if (dragActivationTimer.current) {
+                  clearTimeout(dragActivationTimer.current);
+                  dragActivationTimer.current = null;
+                }
+                dragTouchStartRef.current = null;
+                hasMovedRef.current = false;
+              }
+            }}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 15 }}
+          >
+            <Pressable 
+              android_ripple={null}
+              onPress={() => {
+                // Solo llamar onQuickPress si no hay menú visible, no está resizing y no está moviendo
+                if (!showContextMenu && !isResizing && !isMoving) {
+                  onQuickPress(ev);
+                }
+              }}
+              style={({ pressed }) => [
+                { flex: 1, opacity: 1 } // Mantener opacidad constante
+              ]}
+            />
+          </View>
         </View>
       ) : (
         <>
@@ -1094,9 +1086,9 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
               // Ajustar padding top si hay icono de agarre
               showGripIcon && { paddingTop: 16 }
             ]} numberOfLines={2}>{ev.title}</Text>
-            {/* Handles invisibles superior e inferior (hitzone ampliada) */}
+            {/* Handles invisibles superior e inferior para resize (zIndex alto para prioridad) */}
             {/* Handler superior - 12px de altura fija */}
-            <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12, zIndex: 10 }} />
+            <View {...topResponder.panHandlers} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12, zIndex: 20 }} />
             
             {/* Handler inferior - 12px de altura fija */}
             <View 
@@ -1107,151 +1099,51 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
                 left: 0, 
                 right: 0, 
                 height: 12,
-                zIndex: 10
+                zIndex: 20
               }} 
             />
             
-            {/* Área central para mover el bloque completo */}
+            {/* Área completa para quick press, drag and drop, y long press (cabeza + cuerpo) */}
             <View 
-              {...moveResponder.panHandlers}
+              {...dragResponder.panHandlers}
               onTouchStart={(e) => {
                 const touch = e.nativeEvent.touches[0];
-                const touchX = touch?.pageX || 0;
-                const touchY = touch?.pageY || 0;
-                
-                // Guardar tiempo de inicio del touch para detectar quick press
-                touchStartTimeRef.current = Date.now();
-                touchPositionRef.current = { x: touchX, y: touchY };
-                isFingerDownRef.current = true;
-                
-                const previousState = {
-                  allowDrag: allowDragRef.current,
-                  dragActivated: dragActivatedRef.current,
-                  hasDragTimer: dragActivationTimerRef.current !== null,
-                  hasLongPressTimer: longPressTimer.current !== null,
-                  isMoving,
-                  isResizing,
-                  isScrollDetected: isScrollDetectedRef.current,
-                  menuVisible: menuVisibleRef.current,
-                  showGhost
-                };
-                
-                console.log('👆 DEBUG - onTouchStart (finger down on block)', {
-                  eventId: ev.id,
-                  eventTitle: ev.title,
-                  previousState,
-                  touchX,
-                  touchY,
-                  timestamp: Date.now()
-                });
-                
-                // 🔧 FIX: Iniciar timer de detección cuando el usuario toca el bloque
-                // Esto NO interfiere con el scroll porque no capturamos el gesto
-                startDragDetectionTimer();
-                
-                console.log('👆 DEBUG - Resetting scroll state and starting timer', {
-                  eventId: ev.id,
-                  eventTitle: ev.title,
-                  timestamp: Date.now()
-                });
-              }}
-              onTouchEnd={(e) => {
-                const touchEndTime = Date.now();
-                const touchDuration = touchStartTimeRef.current ? touchEndTime - touchStartTimeRef.current : 0;
-                const QUICK_PRESS_MAX_DURATION = 300; // Máximo 300ms para considerar quick press
-                
-                isFingerDownRef.current = false;
-                
-                const currentState = {
-                  allowDrag: allowDragRef.current,
-                  dragActivated: dragActivatedRef.current,
-                  hasDragTimer: dragActivationTimerRef.current !== null,
-                  hasLongPressTimer: longPressTimer.current !== null,
-                  isMoving,
-                  isResizing,
-                  isScrollDetected: isScrollDetectedRef.current,
-                  menuVisible: menuVisibleRef.current,
-                  showContextMenu,
-                  showGhost
-                };
-                
-                console.log('👋 DEBUG - onTouchEnd (finger up from block)', {
-                  eventId: ev.id,
-                  eventTitle: ev.title,
-                  currentState,
-                  touchDuration,
-                  timestamp: Date.now()
-                });
-                
-                // 🔧 FIX: Limpiar estado si el PanResponder no capturó el gesto
-                // Esto ocurre cuando el usuario suelta rápido sin activar drag
-                // Solo limpiar si no hay drag activo (para evitar interferir con PanResponderRelease)
-                if (!dragActivatedRef.current && !isResizing) {
-                  console.log('🔵 DEBUG - PanResponder did not capture, cleaning state', {
-                    eventId: ev.id,
-                    eventTitle: ev.title,
-                    touchDuration,
-                    timestamp: Date.now()
-                  });
-                  
-                  // Cancelar todos los timers
-                  if (dragActivationTimerRef.current) {
-                    clearTimeout(dragActivationTimerRef.current);
-                    dragActivationTimerRef.current = null;
-                  }
-                  if (longPressTimer.current) {
-                    clearTimeout(longPressTimer.current);
-                    longPressTimer.current = null;
-                  }
-                  
-                  // Verificar si fue un quick press válido
-                  const isValidQuickPress = 
-                    touchDuration > 0 && 
-                    touchDuration <= QUICK_PRESS_MAX_DURATION &&
-                    !isScrollDetectedRef.current &&
-                    !menuVisibleRef.current &&
-                    !showContextMenu &&
-                    !dragActivatedRef.current;
-                  
-                  console.log('🔵 DEBUG - Quick press validation', {
-                    eventId: ev.id,
-                    eventTitle: ev.title,
-                    touchDuration,
-                    maxDuration: QUICK_PRESS_MAX_DURATION,
-                    isScrollDetected: isScrollDetectedRef.current,
-                    menuVisible: menuVisibleRef.current,
-                    showContextMenu,
-                    dragActivated: dragActivatedRef.current,
-                    isValidQuickPress,
-                    timestamp: Date.now()
-                  });
-                  
-                  // Limpiar flags y estado visual
-                  setIsMoving(false);
-                  setShowGhost(false);
-                  allowDragRef.current = false;
-                  dragActivatedRef.current = false;
-                  isScrollDetectedRef.current = false;
-                  touchStartTimeRef.current = null;
-                  touchPositionRef.current = null;
-                  
-                  // Solo llamar onQuickPress si fue un quick press válido
-                  if (isValidQuickPress) {
-                    console.log('✅ DEBUG - Quick press detected, calling onQuickPress', {
-                      eventId: ev.id,
-                      eventTitle: ev.title,
-                      timestamp: Date.now()
-                    });
-                    onQuickPress(ev);
-                  }
-                } else {
-                  touchStartTimeRef.current = null;
-                  touchPositionRef.current = null;
+                if (touch && !isResizingRef.current && !isMovingRef.current) {
+                  startDragActivation(touch.pageX, touch.pageY);
                 }
               }}
-              style={{ position: 'absolute', top: 12, left: 0, right: 0, height: Math.max(blockHeight - 24, 12) }}
-              onLayout={() => {}}
-            />
+              onTouchMove={(e) => {
+                // Si hay movimiento durante el timer, cancelarlo (es scroll, no drag)
+                if (dragActivationTimer.current && !isMovingRef.current) {
+                  cancelDragActivation();
+                }
+              }}
+              onTouchEnd={() => {
+                // Limpiar timers si no se activó el drag
+                if (!isMovingRef.current) {
+                  if (dragActivationTimer.current) {
+                    clearTimeout(dragActivationTimer.current);
+                    dragActivationTimer.current = null;
+                  }
+                  dragTouchStartRef.current = null;
+                  hasMovedRef.current = false;
+                }
+              }}
+              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 15 }}
+            >
+              <Pressable 
+                android_ripple={null}
+                onPress={() => {
+                  // Solo llamar onQuickPress si no hay menú visible, no está resizing y no está moviendo
+                  if (!showContextMenu && !isResizing && !isMoving) {
+                    onQuickPress(ev);
+                  }
+                }}
+                style={({ pressed }) => [
+                  { flex: 1, opacity: 1 } // Mantener opacidad constante
+                ]}
+              />
+            </View>
           </View>
         </>
       )}
