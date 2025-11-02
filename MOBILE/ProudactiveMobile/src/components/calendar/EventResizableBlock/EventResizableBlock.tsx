@@ -46,6 +46,7 @@ interface EventResizableBlockProps {
   onLongPress?: (handler: () => void) => void; // Nueva prop para manejar long press externo
   onDuplicate?: (event: Event) => void; // Volver a exponer duplicar hacia el padre
   renderOnlyBottomHandler?: boolean; // 🔧 FIX: Solo renderizar handler de abajo (para bloques extendidos)
+  renderMiddleCell?: boolean; // 🔧 FIX: Solo renderizar drag handler en celdas intermedias (sin resize handlers)
   currentCellStartTime?: number; // 🔧 FIX: startTime de la celda actual (para calcular ghost offset)
 }
 
@@ -60,6 +61,7 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   onLongPress,
   onDuplicate,
   renderOnlyBottomHandler = false,
+  renderMiddleCell = false,
   currentCellStartTime
 }: EventResizableBlockProps) {
 
@@ -354,8 +356,13 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         const currentGhostOffsetY = ghostTopOffsetRef.current;
         const currentGhostOffsetX = ghostLeftOffsetRef.current;
         
-        // Calcular el movimiento total: el offset del ghost es relativo al inicio del bloque
-        const deltaSlotsY = Math.round(currentGhostOffsetY / CELL_HEIGHT);
+        // El offset inicial (si existe) representa dónde tocamos dentro del bloque
+        // Necesitamos restarlo para obtener el movimiento neto relativo al inicio del bloque
+        const initialOffset = dragTouchStartRef.current?.relativeY || 0;
+        const netMovementY = currentGhostOffsetY - initialOffset;
+        
+        // Calcular el movimiento total relativo al inicio del bloque
+        const deltaSlotsY = Math.round(netMovementY / CELL_HEIGHT);
         const deltaMinY = deltaSlotsY * 30;
         const newStartTime = Math.max(0, currentInitial.startTime + deltaMinY);
         
@@ -418,9 +425,9 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
     
     const currentInitial = getInitial();
     
-    // Calcular offset Y relativo si estamos en renderOnlyBottomHandler
+    // Calcular offset Y relativo si estamos en renderOnlyBottomHandler o renderMiddleCell
     let relativeY = 0;
-    if (renderOnlyBottomHandler && currentCellStartTime !== undefined) {
+    if ((renderOnlyBottomHandler || renderMiddleCell) && currentCellStartTime !== undefined) {
       const timeDiffMinutes = currentInitial.startTime - currentCellStartTime;
       relativeY = (timeDiffMinutes / 30) * CELL_HEIGHT;
     }
@@ -465,7 +472,7 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       }
       dragActivationTimer.current = null;
     }, 500);
-  }, [showContextMenuHandler, renderOnlyBottomHandler, currentCellStartTime]);
+  }, [showContextMenuHandler, renderOnlyBottomHandler, renderMiddleCell, currentCellStartTime]);
   
   // Función para cancelar el timer de activación si hay movimiento
   const cancelDragActivation = useCallback(() => {
@@ -963,8 +970,52 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
         </Animated.View>
       )}
 
-      {/* 🔧 FIX: Si solo renderizar handler de abajo, mostrar solo el handler invisible en la celda actual */}
-      {renderOnlyBottomHandler ? (
+      {/* 🔧 FIX: Si solo renderizar drag handler en celda intermedia (sin resize handlers) */}
+      {renderMiddleCell ? (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: CELL_HEIGHT, zIndex: 10 }}>
+          {/* Área de drag and drop en celdas intermedias */}
+          <View 
+            {...dragResponder.panHandlers}
+            onTouchStart={(e) => {
+              const touch = e.nativeEvent.touches[0];
+              if (touch && !isResizingRef.current && !isMovingRef.current) {
+                startDragActivation(touch.pageX, touch.pageY);
+              }
+            }}
+            onTouchMove={(e) => {
+              // Si hay movimiento durante el timer, cancelarlo (es scroll, no drag)
+              if (dragActivationTimer.current && !isMovingRef.current) {
+                cancelDragActivation();
+              }
+            }}
+            onTouchEnd={() => {
+              // Limpiar timers si no se activó el drag
+              if (!isMovingRef.current) {
+                if (dragActivationTimer.current) {
+                  clearTimeout(dragActivationTimer.current);
+                  dragActivationTimer.current = null;
+                }
+                dragTouchStartRef.current = null;
+                hasMovedRef.current = false;
+              }
+            }}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 15 }}
+          >
+            <Pressable 
+              android_ripple={null}
+              onPress={() => {
+                // Solo llamar onQuickPress si no hay menú visible, no está resizing y no está moviendo
+                if (!showContextMenu && !isResizing && !isMoving) {
+                  onQuickPress(ev);
+                }
+              }}
+              style={({ pressed }) => [
+                { flex: 1, opacity: 1 } // Mantener opacidad constante
+              ]}
+            />
+          </View>
+        </View>
+      ) : renderOnlyBottomHandler ? (
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: CELL_HEIGHT, zIndex: 10 }}>
           {/* Handler de abajo en la última celda - 12px de altura fija */}
           <View 

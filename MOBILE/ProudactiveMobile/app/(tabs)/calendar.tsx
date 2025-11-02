@@ -3196,107 +3196,307 @@ export default function CalendarView({}: CalendarViewProps) {
                       }}
                       delayLongPress={1500}
                     >
-                      {event && (() => {
-                        // Adaptar MonthEvent a Event para EventResizableBlock
-                        // EventResizableBlock espera duration en minutos, pero para mes usamos días
-                        // Convertir días a minutos para que funcione (1 día = 1440 minutos)
+                      {(() => {
+                        // Adaptar MonthEvent a Event helper function
+                        const adaptMonthEvent = (ev: MonthEvent): Event => ({
+                          id: ev.id,
+                          title: ev.title,
+                          description: ev.description,
+                          startTime: (ev.startDay - 1) * 30, // Día 1 = 0 min, día 2 = 30 min (1 slot)
+                          duration: ev.duration * 30, // 1 día = 30 minutos (1 slot de altura)
+                          date: `${ev.year}-${String(ev.month + 1).padStart(2, '0')}-${String(ev.startDay).padStart(2, '0')}`,
+                          color: ev.color,
+                          category: ev.category,
+                        });
                         
-                        
-                        // Para vista de mes, usar duración en "slots de día" en lugar de minutos
-                        // CELL_HEIGHT es 50px, cada día en mes es 1 CELL_HEIGHT (50px)
-                        // Entonces: 1 día = 1 slot de 30 minutos = 30 minutos de duración
-                        // Pero en realidad queremos: 1 día = 1 * CELL_HEIGHT de altura
-                        // Entonces necesitamos que duration sea 30 para 1 día
-                        const adaptedEvent: Event = {
-                          id: event.id,
-                          title: event.title,
-                          description: event.description,
-                          startTime: (event.startDay - 1) * 30, // Día 1 = 0 min, día 2 = 30 min (1 slot)
-                          duration: event.duration * 30, // 1 día = 30 minutos (1 slot de altura)
-                          date: `${event.year}-${String(event.month + 1).padStart(2, '0')}-${String(event.startDay).padStart(2, '0')}`,
-                          color: event.color,
-                          category: event.category,
-                        };
-                        
-                        return (
-                          <EventResizableBlock 
-                            key={event.id} 
-                            ev={adaptedEvent} 
-                            onResizeCommit={async (ev: Event, newStartTime: number, newDuration: number) => {
-                              // Convertir minutos de vuelta a días (30 minutos = 1 día en vista de mes)
-                              const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
-                              const newDurationDays = Math.max(1, Math.round(newDuration / 30));
-                              
-                              const updated = { 
-                                ...event, 
-                                startDay: newStartDay, // Actualizar también startDay si se resize desde arriba
-                                duration: newDurationDays 
-                              };
-                              const backendData = monthEventFrontendToBackend(updated);
-                              
-                              await apiPutMonthEvent(event.id, backendData);
-                              await refreshMonthEvents();
-                            }}
-                            onQuickPress={(ev) => {
-                              setSelectedEvent(event);
-                              setEventTitle(event.title);
-                              setEventDescription(event.description || '');
-                              setEventColor(event.color);
-                              setRecurrenceConfig(createDefaultRecurrenceConfig());
-                              setModalVisible(true);
-                              loadSubtasks(event.id, event);
-                            }}
-                            cellWidth={getCellWidth()} 
-                            currentView={currentView}
-                            subtaskStatus={getSubtaskStatus(event.id)}
-                            onLongPress={undefined}
-                            onDuplicate={async (ev) => {
-                              // Duplicar month event
-                              try {
-                                const year = currentDate.getFullYear();
-                                const month = currentDate.getMonth();
-                                const slot = 1; // +1 día debajo
-                                const newStartDay = Math.min(event.startDay + event.duration + slot, monthDays.length);
+                        // 🔧 FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
+                        if (event) {
+                          const adaptedEvent = adaptMonthEvent(event);
+                          return (
+                            <EventResizableBlock 
+                              key={event.id} 
+                              ev={adaptedEvent} 
+                              onMoveCommit={async (ev: Event, newStartTime: number, newDate: string) => {
+                                // Convertir minutos de vuelta a días y actualizar fecha
+                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
+                                const dateParts = newDate.split('-');
+                                const newYear = parseInt(dateParts[0]);
+                                const newMonth = parseInt(dateParts[1]) - 1;
                                 
-                                const tempMonthEvent: MonthEvent = {
-                                  id: Date.now().toString(),
-                                  title: event.title,
-                                  description: event.description || '',
-                                  startDay: newStartDay,
-                                  duration: event.duration,
-                                  color: event.color,
-                                  category: event.category,
-                                  year,
-                                  month,
+                                // Preservar la duración original del evento (en días)
+                                const originalDuration = event.duration;
+                                
+                                // 1. Actualización optimista de la UI (inmediata)
+                                const updated = { ...event, startDay: newStartDay, year: newYear, month: newMonth, duration: originalDuration };
+                                setMonthEvents(prev => prev.map(e => e.id === event.id ? updated : e));
+                                
+                                // 2. Actualizar en API (en background)
+                                try {
+                                  const backendData = monthEventFrontendToBackend(updated);
+                                  await apiPutMonthEvent(event.id, backendData);
+                                  // Si hay cambio de mes, refrescar eventos
+                                  if (newYear !== currentDate.getFullYear() || newMonth !== currentDate.getMonth()) {
+                                    await refreshMonthEvents();
+                                  }
+                                } catch (e) {
+                                  // Revertir cambios si hay error
+                                  setMonthEvents(prev => prev.map(e => e.id === event.id ? event : e));
+                                  Alert.alert('Error', 'No se pudo mover el evento.');
+                                }
+                              }}
+                              onResizeCommit={async (ev: Event, newStartTime: number, newDuration: number) => {
+                                // Convertir minutos de vuelta a días (30 minutos = 1 día en vista de mes)
+                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
+                                const newDurationDays = Math.max(1, Math.round(newDuration / 30));
+                                
+                                // 1. Actualización optimista de la UI (inmediata)
+                                const updated = { 
+                                  ...event, 
+                                  startDay: newStartDay, // Actualizar también startDay si se resize desde arriba
+                                  duration: newDurationDays 
                                 };
+                                setMonthEvents(prev => prev.map(e => e.id === event.id ? updated : e));
                                 
-                                const backendData = monthEventFrontendToBackend(tempMonthEvent);
-                                const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
-                                if (!calendarId) throw new Error('No hay calendars disponibles');
-                                
-                                const payload = {
-                                  calendar_id: calendarId,
-                                  title: event.title,
-                                  description: event.description || '',
-                                  color: event.color,
-                                  ...backendData,
-                                };
-                                
-                                const postRes = await apiPostMonthEvent(payload);
-                                const created = await postRes.json();
-                                
-                                if (postRes.ok && created?.data?.id) {
-                                  await refreshMonthEvents();
-                                  Alert.alert('Éxito', 'Evento duplicado correctamente.');
-                                } else {
+                                // 2. Actualizar en API (en background)
+                                try {
+                                  const backendData = monthEventFrontendToBackend(updated);
+                                  await apiPutMonthEvent(event.id, backendData);
+                                } catch (e) {
+                                  // Revertir cambios si hay error
+                                  setMonthEvents(prev => prev.map(e => e.id === event.id ? event : e));
+                                  Alert.alert('Error', 'No se pudo redimensionar el evento.');
+                                }
+                              }}
+                              onQuickPress={(ev) => {
+                                setSelectedEvent(event);
+                                setEventTitle(event.title);
+                                setEventDescription(event.description || '');
+                                setEventColor(event.color);
+                                setRecurrenceConfig(createDefaultRecurrenceConfig());
+                                setModalVisible(true);
+                                loadSubtasks(event.id, event);
+                              }}
+                              cellWidth={getCellWidth()} 
+                              currentView={currentView}
+                              subtaskStatus={getSubtaskStatus(event.id)}
+                              onLongPress={undefined}
+                              onDuplicate={async (ev) => {
+                                // Duplicar month event
+                                try {
+                                  const year = currentDate.getFullYear();
+                                  const month = currentDate.getMonth();
+                                  const slot = 1; // +1 día debajo
+                                  const newStartDay = Math.min(event.startDay + event.duration + slot, monthDays.length);
+                                  
+                                  const tempMonthEvent: MonthEvent = {
+                                    id: Date.now().toString(),
+                                    title: event.title,
+                                    description: event.description || '',
+                                    startDay: newStartDay,
+                                    duration: event.duration,
+                                    color: event.color,
+                                    category: event.category,
+                                    year,
+                                    month,
+                                  };
+                                  
+                                  const backendData = monthEventFrontendToBackend(tempMonthEvent);
+                                  const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+                                  if (!calendarId) throw new Error('No hay calendars disponibles');
+                                  
+                                  const payload = {
+                                    calendar_id: calendarId,
+                                    title: event.title,
+                                    description: event.description || '',
+                                    color: event.color,
+                                    ...backendData,
+                                  };
+                                  
+                                  const postRes = await apiPostMonthEvent(payload);
+                                  const created = await postRes.json();
+                                  
+                                  if (postRes.ok && created?.data?.id) {
+                                    await refreshMonthEvents();
+                                    Alert.alert('Éxito', 'Evento duplicado correctamente.');
+                                  } else {
+                                    Alert.alert('Error', 'No se pudo duplicar el evento');
+                                  }
+                                } catch (e) {
                                   Alert.alert('Error', 'No se pudo duplicar el evento');
                                 }
-                              } catch (e) {
-                                Alert.alert('Error', 'No se pudo duplicar el evento');
-                              }
-                            }}
-                          />
-                        );
+                              }}
+                            />
+                          );
+                        }
+                        
+                        // 🔧 FIX: Buscar eventos que ocupan esta celda pero empiezan antes
+                        let occupyingEvent = null;
+                        let isFirstCell = false;
+                        let isLastCell = false;
+                        const startTime = (day - 1) * 30; // Día 1 = 0 min, día 2 = 30 min
+                        
+                        // Buscar eventos que empiezan antes pero ocupan este día
+                        for (let i = 1; i <= monthDays.length; i++) {
+                          const checkDay = day - i;
+                          if (checkDay < 1) break;
+                          
+                          const checkEvent = monthEventsByDayIndex[checkDay];
+                          if (checkEvent && checkEvent.startDay <= day && (checkEvent.startDay + checkEvent.duration) > day) {
+                            occupyingEvent = checkEvent;
+                            // Verificar si esta es la primera celda del evento
+                            isFirstCell = (checkEvent.startDay === day);
+                            // Verificar si esta es la última celda del evento
+                            const eventEndDay = checkEvent.startDay + checkEvent.duration;
+                            isLastCell = (eventEndDay > day && eventEndDay <= day + 1);
+                            break;
+                          }
+                        }
+                        
+                        // 🔧 FIX: Renderizar drag handler en celdas intermedias
+                        if (occupyingEvent && !isFirstCell && !isLastCell) {
+                          const adaptedEvent = adaptMonthEvent(occupyingEvent);
+                          return (
+                            <EventResizableBlock 
+                              key={`${occupyingEvent.id}-middle-${day}`} 
+                              ev={adaptedEvent} 
+                              onMoveCommit={async (ev: Event, newStartTime: number, newDate: string) => {
+                                // Convertir minutos de vuelta a días y actualizar fecha
+                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
+                                const dateParts = newDate.split('-');
+                                const newYear = parseInt(dateParts[0]);
+                                const newMonth = parseInt(dateParts[1]) - 1;
+                                
+                                // Preservar la duración original del evento (en días)
+                                const originalDuration = occupyingEvent.duration;
+                                
+                                // 1. Actualización optimista de la UI (inmediata)
+                                const updated = { ...occupyingEvent, startDay: newStartDay, year: newYear, month: newMonth, duration: originalDuration };
+                                setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? updated : e));
+                                
+                                // 2. Actualizar en API (en background)
+                                try {
+                                  const backendData = monthEventFrontendToBackend(updated);
+                                  await apiPutMonthEvent(occupyingEvent.id, backendData);
+                                  // Si hay cambio de mes, refrescar eventos
+                                  if (newYear !== currentDate.getFullYear() || newMonth !== currentDate.getMonth()) {
+                                    await refreshMonthEvents();
+                                  }
+                                } catch (e) {
+                                  // Revertir cambios si hay error
+                                  setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? occupyingEvent : e));
+                                  Alert.alert('Error', 'No se pudo mover el evento.');
+                                }
+                              }}
+                              onResizeCommit={async (ev: Event, newStartTime: number, newDuration: number) => {
+                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
+                                const newDurationDays = Math.max(1, Math.round(newDuration / 30));
+                                
+                                // 1. Actualización optimista de la UI (inmediata)
+                                const updated = { ...occupyingEvent, startDay: newStartDay, duration: newDurationDays };
+                                setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? updated : e));
+                                
+                                // 2. Actualizar en API (en background)
+                                try {
+                                  const backendData = monthEventFrontendToBackend(updated);
+                                  await apiPutMonthEvent(occupyingEvent.id, backendData);
+                                } catch (e) {
+                                  // Revertir cambios si hay error
+                                  setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? occupyingEvent : e));
+                                  Alert.alert('Error', 'No se pudo redimensionar el evento.');
+                                }
+                              }}
+                              onQuickPress={(ev) => {
+                                setSelectedEvent(occupyingEvent);
+                                setEventTitle(occupyingEvent.title);
+                                setEventDescription(occupyingEvent.description || '');
+                                setEventColor(occupyingEvent.color);
+                                setRecurrenceConfig(createDefaultRecurrenceConfig());
+                                setModalVisible(true);
+                                loadSubtasks(occupyingEvent.id, occupyingEvent);
+                              }}
+                              cellWidth={getCellWidth()} 
+                              currentView={currentView}
+                              subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
+                              onLongPress={undefined}
+                              renderMiddleCell={true}
+                              currentCellStartTime={startTime}
+                            />
+                          );
+                        }
+                        
+                        // 🔧 FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
+                        if (occupyingEvent && !isFirstCell && isLastCell) {
+                          const adaptedEvent = adaptMonthEvent(occupyingEvent);
+                          return (
+                            <EventResizableBlock 
+                              key={`${occupyingEvent.id}-bottom-handler`} 
+                              ev={adaptedEvent} 
+                              onMoveCommit={async (ev: Event, newStartTime: number, newDate: string) => {
+                                // Convertir minutos de vuelta a días y actualizar fecha
+                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
+                                const dateParts = newDate.split('-');
+                                const newYear = parseInt(dateParts[0]);
+                                const newMonth = parseInt(dateParts[1]) - 1;
+                                
+                                // Preservar la duración original del evento (en días)
+                                const originalDuration = occupyingEvent.duration;
+                                
+                                // 1. Actualización optimista de la UI (inmediata)
+                                const updated = { ...occupyingEvent, startDay: newStartDay, year: newYear, month: newMonth, duration: originalDuration };
+                                setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? updated : e));
+                                
+                                // 2. Actualizar en API (en background)
+                                try {
+                                  const backendData = monthEventFrontendToBackend(updated);
+                                  await apiPutMonthEvent(occupyingEvent.id, backendData);
+                                  // Si hay cambio de mes, refrescar eventos
+                                  if (newYear !== currentDate.getFullYear() || newMonth !== currentDate.getMonth()) {
+                                    await refreshMonthEvents();
+                                  }
+                                } catch (e) {
+                                  // Revertir cambios si hay error
+                                  setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? occupyingEvent : e));
+                                  Alert.alert('Error', 'No se pudo mover el evento.');
+                                }
+                              }}
+                              onResizeCommit={async (ev: Event, newStartTime: number, newDuration: number) => {
+                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
+                                const newDurationDays = Math.max(1, Math.round(newDuration / 30));
+                                
+                                // 1. Actualización optimista de la UI (inmediata)
+                                const updated = { ...occupyingEvent, startDay: newStartDay, duration: newDurationDays };
+                                setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? updated : e));
+                                
+                                // 2. Actualizar en API (en background)
+                                try {
+                                  const backendData = monthEventFrontendToBackend(updated);
+                                  await apiPutMonthEvent(occupyingEvent.id, backendData);
+                                } catch (e) {
+                                  // Revertir cambios si hay error
+                                  setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? occupyingEvent : e));
+                                  Alert.alert('Error', 'No se pudo redimensionar el evento.');
+                                }
+                              }}
+                              onQuickPress={(ev) => {
+                                setSelectedEvent(occupyingEvent);
+                                setEventTitle(occupyingEvent.title);
+                                setEventDescription(occupyingEvent.description || '');
+                                setEventColor(occupyingEvent.color);
+                                setRecurrenceConfig(createDefaultRecurrenceConfig());
+                                setModalVisible(true);
+                                loadSubtasks(occupyingEvent.id, occupyingEvent);
+                              }}
+                              cellWidth={getCellWidth()} 
+                              currentView={currentView}
+                              subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
+                              onLongPress={undefined}
+                              renderOnlyBottomHandler={true}
+                              currentCellStartTime={startTime}
+                            />
+                          );
+                        }
+                        
+                        return null;
                       })()}
                     </TouchableOpacity>
                   );
@@ -3419,20 +3619,90 @@ export default function CalendarView({}: CalendarViewProps) {
                       }}
                       delayLongPress={1500}
                     >
-                      {event && (
-                        <EventResizableBlock 
-                          key={event.id} 
-                          ev={event} 
-                          onResizeCommit={onResizeCommit}
-                          onMoveCommit={onMoveCommit} 
-                          onQuickPress={onQuickPress} 
-                          cellWidth={getCellWidth()} 
-                          currentView={currentView}
-                          subtaskStatus={getSubtaskStatus(event.id)}
-                          onLongPress={createLongPressHandler(event.id)}
-                          onDuplicate={handleDuplicateEvent}
-                        />
-                      )}
+                      {(() => {
+                        // 🔧 FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
+                        if (event) {
+                          return (
+                            <EventResizableBlock 
+                              key={event.id} 
+                              ev={event} 
+                              onResizeCommit={onResizeCommit}
+                              onMoveCommit={onMoveCommit} 
+                              onQuickPress={onQuickPress} 
+                              cellWidth={getCellWidth()} 
+                              currentView={currentView}
+                              subtaskStatus={getSubtaskStatus(event.id)}
+                              onLongPress={createLongPressHandler(event.id)}
+                              onDuplicate={handleDuplicateEvent}
+                            />
+                          );
+                        }
+                        
+                        // 🔧 FIX: Buscar eventos que ocupan esta celda pero empiezan antes
+                        let occupyingEvent = null;
+                        let isFirstCell = false;
+                        let isLastCell = false;
+                        const startTime = timeIndex * 30;
+                        
+                        for (let i = 0; i < 48; i++) {
+                          const checkTime = startTime - (i * 30);
+                          if (checkTime < 0) break;
+                          
+                          const checkKey = `${dateKey}-${checkTime}`;
+                          const checkEvent = eventsByCell[checkKey];
+                          if (checkEvent && checkEvent.startTime <= startTime && (checkEvent.startTime + checkEvent.duration) > startTime) {
+                            occupyingEvent = checkEvent;
+                            // Verificar si esta es la primera celda del evento
+                            isFirstCell = (checkEvent.startTime === startTime);
+                            // Verificar si esta es la última celda del evento
+                            const eventEndTime = checkEvent.startTime + checkEvent.duration;
+                            isLastCell = (eventEndTime > startTime && eventEndTime <= startTime + 30);
+                            break;
+                          }
+                        }
+                        
+                        // 🔧 FIX: Renderizar drag handler en celdas intermedias
+                        if (occupyingEvent && !isFirstCell && !isLastCell) {
+                          return (
+                            <EventResizableBlock 
+                              key={`${occupyingEvent.id}-middle-${startTime}`} 
+                              ev={occupyingEvent} 
+                              onResizeCommit={onResizeCommit}
+                              onMoveCommit={onMoveCommit} 
+                              onQuickPress={onQuickPress} 
+                              cellWidth={getCellWidth()} 
+                              currentView={currentView}
+                              subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
+                              onLongPress={createLongPressHandler(occupyingEvent.id)}
+                              onDuplicate={handleDuplicateEvent}
+                              renderMiddleCell={true}
+                              currentCellStartTime={startTime}
+                            />
+                          );
+                        }
+                        
+                        // 🔧 FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
+                        if (occupyingEvent && !isFirstCell && isLastCell) {
+                          return (
+                            <EventResizableBlock 
+                              key={`${occupyingEvent.id}-bottom-handler`} 
+                              ev={occupyingEvent} 
+                              onResizeCommit={onResizeCommit}
+                              onMoveCommit={onMoveCommit} 
+                              onQuickPress={onQuickPress} 
+                              cellWidth={getCellWidth()} 
+                              currentView={currentView}
+                              subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
+                              onLongPress={createLongPressHandler(occupyingEvent.id)}
+                              onDuplicate={handleDuplicateEvent}
+                              renderOnlyBottomHandler={true}
+                              currentCellStartTime={startTime}
+                            />
+                          );
+                        }
+                        
+                        return null;
+                      })()}
                     </Pressable>
                   );
                 })}
@@ -3671,6 +3941,27 @@ export default function CalendarView({}: CalendarViewProps) {
                                   isLastCell = (eventEndTime > startTime && eventEndTime <= startTime + 30);
                                   break;
                                 }
+                              }
+                              
+                              // 🔧 FIX: Renderizar drag handler en celdas intermedias
+                              if (occupyingEvent && !isFirstCell && !isLastCell) {
+                                // Renderizar EventResizableBlock solo con drag handler en celdas intermedias
+                                return (
+                                  <EventResizableBlock 
+                                    key={`${occupyingEvent.id}-middle-${startTime}`} 
+                                    ev={occupyingEvent} 
+                                    onResizeCommit={onResizeCommit}
+                                    onMoveCommit={onMoveCommit} 
+                                    onQuickPress={onQuickPress} 
+                                    cellWidth={getCellWidth()} 
+                                    currentView={currentView}
+                                    subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
+                                    onLongPress={createLongPressHandler(occupyingEvent.id)}
+                                    onDuplicate={handleDuplicateEvent}
+                                    renderMiddleCell={true}
+                                    currentCellStartTime={startTime}
+                                  />
+                                );
                               }
                               
                               // 🔧 FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
