@@ -22,6 +22,31 @@ import {
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
+
+// Importación opcional de expo-screen-orientation (requiere rebuild nativo)
+let ScreenOrientation: any = null;
+let ScreenOrientationAvailable = false;
+let warningShown = false;
+
+try {
+  ScreenOrientation = require('expo-screen-orientation');
+  // Verificar que el módulo realmente funciona
+  if (ScreenOrientation && ScreenOrientation.lockAsync && ScreenOrientation.unlockAsync) {
+    ScreenOrientationAvailable = true;
+  } else {
+    if (!warningShown) {
+      console.warn('expo-screen-orientation no está disponible. Necesitas hacer rebuild de la app nativa.');
+      warningShown = true;
+    }
+  }
+} catch (e) {
+  // Mostrar warning solo una vez
+  if (!warningShown) {
+    console.warn('expo-screen-orientation no está disponible. Necesitas hacer rebuild de la app nativa.');
+    warningShown = true;
+  }
+  ScreenOrientationAvailable = false;
+}
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from '../../src/config/api';
 import authService from '../../services/auth';
@@ -91,6 +116,9 @@ import EventModal from '../../src/components/calendar/EventModal';
 import DeleteModal from '../../src/components/calendar/DeleteModal';
 import SubtaskChangesModal from '../../src/components/calendar/SubtaskChangesModal';
 import EventResizableBlock from '../../src/components/calendar/EventResizableBlock/EventResizableBlock';
+import MonthView from '../../src/components/calendar/MonthView';
+import YearView from '../../src/components/calendar/YearView';
+import { MonthEvent, fetchMonthEvents as fetchMonthEventsHelper, fetchYearEvents as fetchYearEventsHelper, monthEventFrontendToBackend } from '../../src/components/calendar/monthEventHelpers';
 
 const { width } = Dimensions.get('window');
 
@@ -153,17 +181,7 @@ interface EventResizableBlockProps {
 
 // EventResizableBlock - MOVIDO A ../../src/components/calendar/EventResizableBlock/EventResizableBlock.tsx
 
-interface MonthEvent {
-  id: string;
-  title: string;
-  description?: string;
-  startDay: number; // día del mes (1-31)
-  duration: number; // duración en días
-  color: string;
-  category: string;
-  year: number;
-  month: number; // 0-11
-}
+// MonthEvent interface moved to monthEventHelpers.ts
 
 interface SelectedCell {
   dayIndex: number;
@@ -195,8 +213,10 @@ export default function CalendarView({}: CalendarViewProps) {
   //   });
   // }, [events]);
   const [monthEvents, setMonthEvents] = useState<MonthEvent[]>([]);
+  const [yearEvents, setYearEvents] = useState<MonthEvent[]>([]); // Eventos del año completo
   const [selectedEvent, setSelectedEvent] = useState<Event | MonthEvent | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  // Estados de YearView movidos a YearView.tsx
   const [eventTitle, setEventTitle] = useState('');
   const [eventDescription, setEventDescription] = useState('');
   const [eventColor, setEventColor] = useState('#6b53e2');
@@ -1151,89 +1171,16 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [currentDate]);
 
-  // ===== MONTH EVENTS: Transformación de datos =====
+  // ===== MONTH EVENTS: Funciones helper movidas a monthEventHelpers.ts =====
   
-  // Convertir MonthEvent backend → frontend (start_date, end_date → startDay, duration)
-  const monthEventBackendToFrontend = useCallback((backendEvent: any, year: number, month: number): MonthEvent => {
-    // Parsear fechas sin problemas de timezone usando YYYY-MM-DD directamente
-    const startParts = backendEvent.start_date.split('-');
-    const endParts = backendEvent.end_date.split('-');
-    const startDay = parseInt(startParts[2], 10);
-    const endDay = parseInt(endParts[2], 10);
-    
-    // Calcular duración en días (diferencia de días + 1 para ser inclusivo)
-    // Ejemplo: día 2 a día 2 = 1 día, día 2 a día 3 = 2 días
-    const duration = Math.max(1, endDay - startDay + 1);
-    
-    return {
-      id: backendEvent.id.toString(),
-      title: backendEvent.title,
-      description: backendEvent.description || '',
-      startDay,
-      duration,
-      color: backendEvent.color || '#6b53e2',
-      category: backendEvent.category || 'General',
-      year,
-      month, // month ya viene en formato 0-11 del backend
-    };
-  }, []);
-
-  // Convertir MonthEvent frontend → backend (startDay, duration → start_date, end_date)
-  const monthEventFrontendToBackend = useCallback((frontendEvent: MonthEvent): any => {
-    // Calcular fechas directamente sin usar Date objects para evitar problemas de timezone
-    const startDay = frontendEvent.startDay;
-    const endDay = frontendEvent.startDay + frontendEvent.duration - 1;
-    const year = frontendEvent.year;
-    const month = frontendEvent.month + 1; // Convertir de 0-11 a 1-12
-    
-    // Formatear como YYYY-MM-DD usando valores locales (sin timezone)
-    const formatDate = (day: number) => {
-      const dayStr = String(day).padStart(2, '0');
-      const monthStr = String(month).padStart(2, '0');
-      return `${year}-${monthStr}-${dayStr}`;
-    };
-    
-    return {
-      start_date: formatDate(startDay),
-      end_date: formatDate(endDay),
-    };
-  }, []);
-
-  // Cargar month events desde API
+  // Wrapper functions para mantener compatibilidad con código existente
   const fetchMonthEvents = useCallback(async (year: number, month: number) => {
-    try {
-      const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
-      const response = await apiFetchMonthEvents(year, month, calendarId);
-      
-      if (!response.ok) {
-        return [];
-      }
+    return fetchMonthEventsHelper(year, month);
+  }, []);
 
-      const body = await response.json();
-      if (!body?.success || !Array.isArray(body.data)) {
-        return [];
-      }
-
-      // Transformar todos los eventos del backend al formato frontend
-      // IMPORTANTE: El backend puede devolver eventos de meses adyacentes que se solapan
-      // Solo procesar eventos que pertenecen al mes actual
-      const monthEvents: MonthEvent[] = body.data
-        .filter((backendEvent: any) => {
-          // Filtrar por año y mes correctos
-          const eventStartParts = backendEvent.start_date.split('-');
-          const eventYear = parseInt(eventStartParts[0], 10);
-          const eventMonth = parseInt(eventStartParts[1], 10) - 1; // Backend usa 1-12, frontend usa 0-11
-          return eventYear === year && eventMonth === month;
-        })
-        .map((backendEvent: any) => 
-          monthEventBackendToFrontend(backendEvent, year, month)
-        );
-
-      return monthEvents;
-    } catch (error) {
-      return [];
-    }
-  }, [monthEventBackendToFrontend]);
+  const fetchYearEvents = useCallback(async (year: number) => {
+    return fetchYearEventsHelper(year);
+  }, []);
 
   // Refrescar month events (similar a refreshEvents pero para month)
   const refreshMonthEvents = useCallback(async () => {
@@ -1595,13 +1542,6 @@ export default function CalendarView({}: CalendarViewProps) {
 
   const weekDaysFull = useMemo(() => ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'], []);
 
-  const monthDays = useMemo(() => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    return Array.from({ length: daysInMonth }, (_, i) => i + 1);
-  }, [currentDate]);
-
   // Indexar eventos por fecha+hora para búsqueda rápida
   const eventsByCell = useMemo(() => {
     const index: { [key: string]: Event } = {};
@@ -1612,29 +1552,6 @@ export default function CalendarView({}: CalendarViewProps) {
     return index;
   }, [events]);
 
-  // Indexar eventos mensuales por año-mes-día (para búsqueda por key)
-  const monthEventsByDay = useMemo(() => {
-    const index: { [key: string]: MonthEvent } = {};
-    monthEvents.forEach(ev => {
-      const key = `${ev.year}-${ev.month}-${ev.startDay}`;
-      index[key] = ev;
-    });
-    return index;
-  }, [monthEvents]);
-
-  // Indexar eventos mensuales por día del mes (1-31) para el grid
-  const monthEventsByDayIndex = useMemo(() => {
-    const index: { [day: number]: MonthEvent } = {};
-    monthEvents.forEach(ev => {
-      // Solo indexar eventos del mes/año actual
-      const currentYear = currentDate.getFullYear();
-      const currentMonth = currentDate.getMonth();
-      if (ev.year === currentYear && ev.month === currentMonth) {
-        index[ev.startDay] = ev;
-      }
-    });
-    return index;
-  }, [monthEvents, currentDate]);
 
   const formatTime = useCallback((timeIndex: number) => {
     const totalMinutes = START_HOUR * 60 + (timeIndex * 30);
@@ -1857,6 +1774,53 @@ export default function CalendarView({}: CalendarViewProps) {
     })();
   }, [currentView, currentDate.getFullYear(), currentDate.getMonth()]);
 
+  // Cargar eventos del año completo y forzar orientación horizontal cuando se cambia a vista de año
+  useEffect(() => {
+    if (currentView !== 'year') {
+      // Restaurar orientación cuando se sale de la vista de año
+      if (ScreenOrientationAvailable && ScreenOrientation) {
+        try {
+          ScreenOrientation.unlockAsync().catch(() => {});
+        } catch (e) {
+          // Ignorar errores al desbloquear
+        }
+      }
+      return;
+    }
+    
+    // Forzar orientación horizontal si el módulo está disponible
+    if (ScreenOrientationAvailable && ScreenOrientation && ScreenOrientation.OrientationLock) {
+      try {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+      } catch (e) {
+        // Ignorar errores al bloquear orientación
+      }
+    }
+    
+    const year = currentDate.getFullYear();
+    
+    // Función async para cargar eventos del año
+    (async () => {
+      try {
+        const fetched = await fetchYearEvents(year);
+        setYearEvents(fetched);
+      } catch (error) {
+        // Error loading year events
+      }
+    })();
+
+    // Cleanup: restaurar orientación cuando el componente se desmonte o se salga de la vista
+    return () => {
+      if (ScreenOrientationAvailable && ScreenOrientation) {
+        try {
+          ScreenOrientation.unlockAsync().catch(() => {});
+        } catch (e) {
+          // Ignorar errores al desbloquear
+        }
+      }
+    };
+  }, [currentView, currentDate.getFullYear(), fetchYearEvents]);
+
   useEffect(() => {
     if (currentView !== 'week' && currentView !== 'day') {
       return;
@@ -1917,6 +1881,8 @@ export default function CalendarView({}: CalendarViewProps) {
     } else if (currentView === 'month') {
       const formatted = d.toLocaleString('es-ES', { month: 'long' });
       return `${formatted.charAt(0).toUpperCase() + formatted.slice(1)} ${d.getFullYear()}`;
+    } else if (currentView === 'year') {
+      return `${d.getFullYear()}`;
     }
     return '';
   }, [currentView, currentDate, startOfWeek, addDays]);
@@ -1990,31 +1956,6 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [currentView, currentDate, startOfWeek, addDays, eventsByCell, getRandomColor, toDateKey]);
 
-  const handleMonthCellPress = useCallback((day: number) => {
-    const key = `${currentDate.getFullYear()}-${currentDate.getMonth()}-${day}`;
-    const existingEvent = monthEventsByDay[key];
-
-    if (existingEvent) {
-      setSelectedEvent(existingEvent);
-      setEventTitle(existingEvent.title);
-      setEventDescription(existingEvent.description || '');
-      setEventColor(existingEvent.color);
-      setRecurrenceConfig(extractRecurrenceFromEvent(existingEvent));
-      setModalVisible(true);
-    } else {
-      setSelectedEvent(null);
-      setEventTitle('');
-      setEventDescription('');
-      setEventColor(getRandomColor());
-      setRecurrenceConfig(createDefaultRecurrenceConfig());
-      // Limpiar subtareas al crear evento nuevo
-      setSubtasks([]);
-      setNewSubtaskText('');
-      setShowSubtaskInput(false);
-      setModalVisible(true);
-      setSelectedMonthCell({ dayIndex: day - 1, day });
-    }
-  }, [currentDate, monthEventsByDay, getRandomColor]);
 
   const handleSaveEvent = useCallback(async () => {
     if (!eventTitle.trim()) {
@@ -2653,7 +2594,21 @@ export default function CalendarView({}: CalendarViewProps) {
       }, 100);
       return;
     }
-  }, [currentView, currentDate, addDays, addMonths, startOfWeek, loadAllEventsSubtasks, events, fetchMonthEvents]);
+
+    if (currentView === 'year') {
+      const newDate = new Date(currentDate);
+      newDate.setFullYear(newDate.getFullYear() + (direction === 'next' ? 1 : -1));
+      setCurrentDate(newDate);
+      
+      // Cargar eventos del nuevo año
+      setTimeout(async () => {
+        const year = newDate.getFullYear();
+        const fetched = await fetchYearEvents(year);
+        setYearEvents(fetched);
+      }, 100);
+      return;
+    }
+  }, [currentView, currentDate, addDays, addMonths, startOfWeek, loadAllEventsSubtasks, events, fetchMonthEvents, fetchYearEvents]);
 
   // Función para recargar colores de subtareas (extraída del botón de recarga)
   const refreshSubtasksColors = useCallback(() => {
@@ -3034,8 +2989,8 @@ export default function CalendarView({}: CalendarViewProps) {
         </View>
       </View>
 
-      {/* Header de días (si no es month). En semana sincronizamos el scroll horizontal del header */}
-      {currentView !== 'month' && (
+      {/* Header de días (si no es month ni year). En semana sincronizamos el scroll horizontal del header */}
+      {currentView !== 'month' && currentView !== 'year' && (
         <View style={styles.weekHeader}>
           <View style={styles.timeColumn} />
           {currentView === 'day' ? (
@@ -3080,440 +3035,31 @@ export default function CalendarView({}: CalendarViewProps) {
         </View>
       )}
 
-      {/* Header de mes */}
-      {currentView === 'month' && (
-        <View style={styles.monthHeader}>
-          <View style={styles.timeColumn} />
-          <View style={styles.monthTitleContainer}>
-            <Text style={styles.monthTitle}>Días del mes</Text>
-          </View>
-        </View>
-      )}
-
       {/* Contenido: month / day / week */}
       {currentView === 'month' ? (
-        <View style={styles.dayContainer}>
-          <ScrollView
-            ref={verticalScrollRef}
-            style={{ flex: 1 }}
-            contentContainerStyle={{ flexGrow: 1 }}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator
-          >
-            <View style={{ flexDirection: 'row' }}>
-              {/* Columna de días (fija) */}
-              <View style={styles.fixedTimeColumn}>
-                {monthDays.map((day, idx) => {
-                  const now = new Date();
-                  const currentDay = now.getDate();
-                  const currentMonth = now.getMonth();
-                  const currentYear = now.getFullYear();
-                  const isCurrentDay = day === currentDay && 
-                                       currentMonth === currentDate.getMonth() && 
-                                       currentYear === currentDate.getFullYear();
-                  
-                  return (
-                    <View key={`day-${idx}`} style={[styles.timeRow, { width: 60 }]}> 
-                      <View style={[
-                        styles.timeColumn,
-                        isCurrentDay && styles.currentHourColumn
-                      ]}>
-                        <Text style={[
-                          styles.timeText,
-                          isCurrentDay && styles.currentHourText
-                        ]}>{day}</Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-
-              {/* Contenido de la grilla - días del mes */}
-              <View style={{ position: 'absolute', left: 60, top: 0, width: getCellWidth(), height: monthDays.length * CELL_HEIGHT }}>
-                {monthDays.map((day, dayIndex) => {
-                  const event = monthEventsByDayIndex[day];
-                  
-                  const now = new Date();
-                  const currentDay = now.getDate();
-                  const currentMonth = now.getMonth();
-                  const currentYear = now.getFullYear();
-                  const isCurrentDay = day === currentDay && 
-                                       currentMonth === currentDate.getMonth() && 
-                                       currentYear === currentDate.getFullYear();
-                  
-                  return (
-                    <TouchableOpacity
-                      key={`cell-${dayIndex}`}
-                      style={[
-                        styles.gridCell,
-                        { 
-                          width: getCellWidth(),
-                          height: CELL_HEIGHT,
-                          top: dayIndex * CELL_HEIGHT
-                        },
-                        isCurrentDay && styles.currentHourCell
-                      ]}
-                      onPress={() => {
-                        // Verificar si hay un evento en esta celda
-                        const hasOccupyingEvent = !!event;
-                        
-                        if (!hasOccupyingEvent) {
-                          // Crear nuevo evento - limpiar estado previo
-                          setSelectedEvent(null);
-                          setEventTitle('');
-                          setEventDescription('');
-                          setEventColor(getRandomColor());
-                          setRecurrenceConfig(createDefaultRecurrenceConfig());
-                          setSubtasks([]);
-                          setNewSubtaskText('');
-                          setShowSubtaskInput(false);
-                          setSelectedMonthCell({ dayIndex: day - 1, day });
-                          setModalVisible(true);
-                        } else {
-                          // Si hubo long press en este evento, no abrir modal al soltar
-                          if (longPressActiveRef.current[event.id]) {
-                            return;
-                          }
-                          // Editar evento existente
-                          setSelectedEvent(event);
-                          setEventTitle(event.title);
-                          setEventDescription(event.description || '');
-                          setEventColor(event.color);
-                          setRecurrenceConfig(createDefaultRecurrenceConfig());
-                          setModalVisible(true);
-                          loadSubtasks(event.id, event);
-                        }
-                      }}
-                      onLongPress={() => {
-                        // LONG PRESS para eventos en vista de mes
-                        if (event) {
-                          // Usar el handler del EventResizableBlock si existe
-                          const handler = eventLongPressHandlers[event.id];
-                          if (handler) {
-                            handler();
-                          }
-                        }
-                      }}
-                      delayLongPress={1500}
-                    >
-                      {(() => {
-                        // Adaptar MonthEvent a Event helper function
-                        const adaptMonthEvent = (ev: MonthEvent): Event => ({
-                          id: ev.id,
-                          title: ev.title,
-                          description: ev.description,
-                          startTime: (ev.startDay - 1) * 30, // Día 1 = 0 min, día 2 = 30 min (1 slot)
-                          duration: ev.duration * 30, // 1 día = 30 minutos (1 slot de altura)
-                          date: `${ev.year}-${String(ev.month + 1).padStart(2, '0')}-${String(ev.startDay).padStart(2, '0')}`,
-                          color: ev.color,
-                          category: ev.category,
-                        });
-                        
-                        // 🔧 FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
-                        if (event) {
-                          const adaptedEvent = adaptMonthEvent(event);
-                          return (
-                            <EventResizableBlock 
-                              key={event.id} 
-                              ev={adaptedEvent} 
-                              onMoveCommit={async (ev: Event, newStartTime: number, newDate: string) => {
-                                // Convertir minutos de vuelta a días y actualizar fecha
-                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
-                                const dateParts = newDate.split('-');
-                                const newYear = parseInt(dateParts[0]);
-                                const newMonth = parseInt(dateParts[1]) - 1;
-                                
-                                // Preservar la duración original del evento (en días)
-                                const originalDuration = event.duration;
-                                
-                                // 1. Actualización optimista de la UI (inmediata)
-                                const updated = { ...event, startDay: newStartDay, year: newYear, month: newMonth, duration: originalDuration };
-                                setMonthEvents(prev => prev.map(e => e.id === event.id ? updated : e));
-                                
-                                // 2. Actualizar en API (en background)
-                                try {
-                                  const backendData = monthEventFrontendToBackend(updated);
-                                  await apiPutMonthEvent(event.id, backendData);
-                                  // Si hay cambio de mes, refrescar eventos
-                                  if (newYear !== currentDate.getFullYear() || newMonth !== currentDate.getMonth()) {
-                                    await refreshMonthEvents();
-                                  }
-                                } catch (e) {
-                                  // Revertir cambios si hay error
-                                  setMonthEvents(prev => prev.map(e => e.id === event.id ? event : e));
-                                  Alert.alert('Error', 'No se pudo mover el evento.');
-                                }
-                              }}
-                              onResizeCommit={async (ev: Event, newStartTime: number, newDuration: number) => {
-                                // Convertir minutos de vuelta a días (30 minutos = 1 día en vista de mes)
-                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
-                                const newDurationDays = Math.max(1, Math.round(newDuration / 30));
-                                
-                                // 1. Actualización optimista de la UI (inmediata)
-                                const updated = { 
-                                  ...event, 
-                                  startDay: newStartDay, // Actualizar también startDay si se resize desde arriba
-                                  duration: newDurationDays 
-                                };
-                                setMonthEvents(prev => prev.map(e => e.id === event.id ? updated : e));
-                                
-                                // 2. Actualizar en API (en background)
-                                try {
-                                  const backendData = monthEventFrontendToBackend(updated);
-                                  await apiPutMonthEvent(event.id, backendData);
-                                } catch (e) {
-                                  // Revertir cambios si hay error
-                                  setMonthEvents(prev => prev.map(e => e.id === event.id ? event : e));
-                                  Alert.alert('Error', 'No se pudo redimensionar el evento.');
-                                }
-                              }}
-                              onQuickPress={(ev) => {
-                                setSelectedEvent(event);
-                                setEventTitle(event.title);
-                                setEventDescription(event.description || '');
-                                setEventColor(event.color);
-                                setRecurrenceConfig(createDefaultRecurrenceConfig());
-                                setModalVisible(true);
-                                loadSubtasks(event.id, event);
-                              }}
-                              cellWidth={getCellWidth()} 
-                              currentView={currentView}
-                              subtaskStatus={getSubtaskStatus(event.id)}
-                              onLongPress={undefined}
-                              onDuplicate={async (ev) => {
-                                // Duplicar month event
-                                try {
-                                  const year = currentDate.getFullYear();
-                                  const month = currentDate.getMonth();
-                                  const slot = 1; // +1 día debajo
-                                  const newStartDay = Math.min(event.startDay + event.duration + slot, monthDays.length);
-                                  
-                                  const tempMonthEvent: MonthEvent = {
-                                    id: Date.now().toString(),
-                                    title: event.title,
-                                    description: event.description || '',
-                                    startDay: newStartDay,
-                                    duration: event.duration,
-                                    color: event.color,
-                                    category: event.category,
-                                    year,
-                                    month,
-                                  };
-                                  
-                                  const backendData = monthEventFrontendToBackend(tempMonthEvent);
-                                  const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
-                                  if (!calendarId) throw new Error('No hay calendars disponibles');
-                                  
-                                  const payload = {
-                                    calendar_id: calendarId,
-                                    title: event.title,
-                                    description: event.description || '',
-                                    color: event.color,
-                                    ...backendData,
-                                  };
-                                  
-                                  const postRes = await apiPostMonthEvent(payload);
-                                  const created = await postRes.json();
-                                  
-                                  if (postRes.ok && created?.data?.id) {
-                                    await refreshMonthEvents();
-                                    Alert.alert('Éxito', 'Evento duplicado correctamente.');
-                                  } else {
-                                    Alert.alert('Error', 'No se pudo duplicar el evento');
-                                  }
-                                } catch (e) {
-                                  Alert.alert('Error', 'No se pudo duplicar el evento');
-                                }
-                              }}
-                            />
-                          );
-                        }
-                        
-                        // 🔧 FIX: Buscar eventos que ocupan esta celda pero empiezan antes
-                        let occupyingEvent = null;
-                        let isFirstCell = false;
-                        let isLastCell = false;
-                        const startTime = (day - 1) * 30; // Día 1 = 0 min, día 2 = 30 min
-                        
-                        // Buscar eventos que empiezan antes pero ocupan este día
-                        for (let i = 1; i <= monthDays.length; i++) {
-                          const checkDay = day - i;
-                          if (checkDay < 1) break;
-                          
-                          const checkEvent = monthEventsByDayIndex[checkDay];
-                          if (checkEvent && checkEvent.startDay <= day && (checkEvent.startDay + checkEvent.duration) > day) {
-                            occupyingEvent = checkEvent;
-                            // Verificar si esta es la primera celda del evento
-                            isFirstCell = (checkEvent.startDay === day);
-                            // Verificar si esta es la última celda del evento
-                            const eventEndDay = checkEvent.startDay + checkEvent.duration;
-                            isLastCell = (eventEndDay > day && eventEndDay <= day + 1);
-                            break;
-                          }
-                        }
-                        
-                        // 🔧 FIX: Renderizar drag handler en celdas intermedias
-                        if (occupyingEvent && !isFirstCell && !isLastCell) {
-                          const adaptedEvent = adaptMonthEvent(occupyingEvent);
-                          return (
-                            <EventResizableBlock 
-                              key={`${occupyingEvent.id}-middle-${day}`} 
-                              ev={adaptedEvent} 
-                              onMoveCommit={async (ev: Event, newStartTime: number, newDate: string) => {
-                                // Convertir minutos de vuelta a días y actualizar fecha
-                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
-                                const dateParts = newDate.split('-');
-                                const newYear = parseInt(dateParts[0]);
-                                const newMonth = parseInt(dateParts[1]) - 1;
-                                
-                                // Preservar la duración original del evento (en días)
-                                const originalDuration = occupyingEvent.duration;
-                                
-                                // 1. Actualización optimista de la UI (inmediata)
-                                const updated = { ...occupyingEvent, startDay: newStartDay, year: newYear, month: newMonth, duration: originalDuration };
-                                setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? updated : e));
-                                
-                                // 2. Actualizar en API (en background)
-                                try {
-                                  const backendData = monthEventFrontendToBackend(updated);
-                                  await apiPutMonthEvent(occupyingEvent.id, backendData);
-                                  // Si hay cambio de mes, refrescar eventos
-                                  if (newYear !== currentDate.getFullYear() || newMonth !== currentDate.getMonth()) {
-                                    await refreshMonthEvents();
-                                  }
-                                } catch (e) {
-                                  // Revertir cambios si hay error
-                                  setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? occupyingEvent : e));
-                                  Alert.alert('Error', 'No se pudo mover el evento.');
-                                }
-                              }}
-                              onResizeCommit={async (ev: Event, newStartTime: number, newDuration: number) => {
-                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
-                                const newDurationDays = Math.max(1, Math.round(newDuration / 30));
-                                
-                                // 1. Actualización optimista de la UI (inmediata)
-                                const updated = { ...occupyingEvent, startDay: newStartDay, duration: newDurationDays };
-                                setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? updated : e));
-                                
-                                // 2. Actualizar en API (en background)
-                                try {
-                                  const backendData = monthEventFrontendToBackend(updated);
-                                  await apiPutMonthEvent(occupyingEvent.id, backendData);
-                                } catch (e) {
-                                  // Revertir cambios si hay error
-                                  setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? occupyingEvent : e));
-                                  Alert.alert('Error', 'No se pudo redimensionar el evento.');
-                                }
-                              }}
-                              onQuickPress={(ev) => {
-                                setSelectedEvent(occupyingEvent);
-                                setEventTitle(occupyingEvent.title);
-                                setEventDescription(occupyingEvent.description || '');
-                                setEventColor(occupyingEvent.color);
-                                setRecurrenceConfig(createDefaultRecurrenceConfig());
-                                setModalVisible(true);
-                                loadSubtasks(occupyingEvent.id, occupyingEvent);
-                              }}
-                              cellWidth={getCellWidth()} 
-                              currentView={currentView}
-                              subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
-                              onLongPress={undefined}
-                              renderMiddleCell={true}
-                              currentCellStartTime={startTime}
-                            />
-                          );
-                        }
-                        
-                        // 🔧 FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
-                        if (occupyingEvent && !isFirstCell && isLastCell) {
-                          const adaptedEvent = adaptMonthEvent(occupyingEvent);
-                          return (
-                            <EventResizableBlock 
-                              key={`${occupyingEvent.id}-bottom-handler`} 
-                              ev={adaptedEvent} 
-                              onMoveCommit={async (ev: Event, newStartTime: number, newDate: string) => {
-                                // Convertir minutos de vuelta a días y actualizar fecha
-                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
-                                const dateParts = newDate.split('-');
-                                const newYear = parseInt(dateParts[0]);
-                                const newMonth = parseInt(dateParts[1]) - 1;
-                                
-                                // Preservar la duración original del evento (en días)
-                                const originalDuration = occupyingEvent.duration;
-                                
-                                // 1. Actualización optimista de la UI (inmediata)
-                                const updated = { ...occupyingEvent, startDay: newStartDay, year: newYear, month: newMonth, duration: originalDuration };
-                                setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? updated : e));
-                                
-                                // 2. Actualizar en API (en background)
-                                try {
-                                  const backendData = monthEventFrontendToBackend(updated);
-                                  await apiPutMonthEvent(occupyingEvent.id, backendData);
-                                  // Si hay cambio de mes, refrescar eventos
-                                  if (newYear !== currentDate.getFullYear() || newMonth !== currentDate.getMonth()) {
-                                    await refreshMonthEvents();
-                                  }
-                                } catch (e) {
-                                  // Revertir cambios si hay error
-                                  setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? occupyingEvent : e));
-                                  Alert.alert('Error', 'No se pudo mover el evento.');
-                                }
-                              }}
-                              onResizeCommit={async (ev: Event, newStartTime: number, newDuration: number) => {
-                                const newStartDay = Math.max(1, Math.min(monthDays.length, Math.round(newStartTime / 30) + 1));
-                                const newDurationDays = Math.max(1, Math.round(newDuration / 30));
-                                
-                                // 1. Actualización optimista de la UI (inmediata)
-                                const updated = { ...occupyingEvent, startDay: newStartDay, duration: newDurationDays };
-                                setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? updated : e));
-                                
-                                // 2. Actualizar en API (en background)
-                                try {
-                                  const backendData = monthEventFrontendToBackend(updated);
-                                  await apiPutMonthEvent(occupyingEvent.id, backendData);
-                                } catch (e) {
-                                  // Revertir cambios si hay error
-                                  setMonthEvents(prev => prev.map(e => e.id === occupyingEvent.id ? occupyingEvent : e));
-                                  Alert.alert('Error', 'No se pudo redimensionar el evento.');
-                                }
-                              }}
-                              onQuickPress={(ev) => {
-                                setSelectedEvent(occupyingEvent);
-                                setEventTitle(occupyingEvent.title);
-                                setEventDescription(occupyingEvent.description || '');
-                                setEventColor(occupyingEvent.color);
-                                setRecurrenceConfig(createDefaultRecurrenceConfig());
-                                setModalVisible(true);
-                                loadSubtasks(occupyingEvent.id, occupyingEvent);
-                              }}
-                              cellWidth={getCellWidth()} 
-                              currentView={currentView}
-                              subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
-                              onLongPress={undefined}
-                              renderOnlyBottomHandler={true}
-                              currentCellStartTime={startTime}
-                            />
-                          );
-                        }
-                        
-                        return null;
-                      })()}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {/* Fondo del grid para mes */}
-              <View style={{ marginLeft: 60 }}>
-                <GridBackground 
-                  width={getCellWidth()} 
-                  height={monthDays.length * CELL_HEIGHT} 
-                  cellHeight={CELL_HEIGHT} 
-                />
-              </View>
-            </View>
-          </ScrollView>
-        </View>
+        <MonthView
+          currentDate={currentDate}
+          monthEvents={monthEvents}
+          setMonthEvents={setMonthEvents}
+          verticalScrollRef={verticalScrollRef}
+          getCellWidth={getCellWidth}
+          setSelectedEvent={setSelectedEvent as any}
+          setEventTitle={setEventTitle}
+          setEventDescription={setEventDescription}
+          setEventColor={setEventColor}
+          setModalVisible={setModalVisible}
+          setSelectedMonthCell={setSelectedMonthCell}
+          getRandomColor={getRandomColor}
+          createDefaultRecurrenceConfig={createDefaultRecurrenceConfig}
+          setSubtasks={setSubtasks}
+          setNewSubtaskText={setNewSubtaskText}
+          setShowSubtaskInput={setShowSubtaskInput}
+          loadSubtasks={loadSubtasks as any}
+          eventLongPressHandlers={eventLongPressHandlers}
+          longPressActiveRef={longPressActiveRef}
+          refreshMonthEvents={refreshMonthEvents}
+          getSubtaskStatus={getSubtaskStatus}
+        />
       ) : currentView === 'day' ? (
         <View style={styles.dayContainer}>
           <ScrollView
@@ -3719,6 +3265,16 @@ export default function CalendarView({}: CalendarViewProps) {
             </View>
           </ScrollView>
         </View>
+      ) : currentView === 'year' ? (
+        <YearView
+          currentDate={currentDate}
+          yearEvents={yearEvents}
+          onMonthPress={(year: number, month: number) => {
+            const newDate = new Date(year, month, 1);
+            setCurrentDate(newDate);
+            setCurrentView('month');
+          }}
+        />
       ) : (
         // Vista semanal: ScrollView vertical con columna de horas fija y contenido horizontal scrollable
         <View style={styles.weekContainer}>
@@ -4102,9 +3658,6 @@ const styles = StyleSheet.create({
   currentDate: { fontSize: 16, fontWeight: '600', color: Colors.light.text },
   weekHeader: { flexDirection: 'row', backgroundColor: Colors.light.background, borderBottomWidth: 1, borderBottomColor: '#e0e0e0', paddingVertical: 12 },
   timeColumn: { width: 60, alignItems: 'center', justifyContent: 'center' },
-  monthHeader: { flexDirection: 'row', height: 40, backgroundColor: '#f8f9fa', borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
-  monthTitleContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  monthTitle: { fontSize: 14, fontWeight: '600', color: Colors.light.text },
   monthRow: { flexDirection: 'row', height: CELL_HEIGHT },
   weekContainer: { flexDirection: 'row', flex: 1 },
   dayContainer: { flexDirection: 'row', flex: 1 },
@@ -4140,6 +3693,352 @@ const styles = StyleSheet.create({
   },
   todayHeader: { backgroundColor: '#6b53e2', borderRadius: 8, marginHorizontal: 2, paddingVertical: 1 },
   todayHeaderText: { color: 'white', fontWeight: '700' },
+  // Estilos para vista de año
+  yearContainer: { flex: 1, backgroundColor: Colors.light.background },
+  yearScrollContent: { paddingHorizontal: 20, paddingVertical: 20, paddingBottom: 40 }, // Más padding abajo para evitar que se corte
+  yearView: { flex: 1 },
+  monthsBarContainer: {
+    position: 'relative',
+    width: '100%',
+  },
+  monthsBar: { 
+    flexDirection: 'row',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    overflow: 'hidden',
+    marginBottom: 60, // Espacio para las líneas de objetivos
+    width: '100%',
+    minWidth: 1800, // 12 meses * 150px mínimo cada uno (para nombres largos)
+  },
+  monthSegment: {
+    flex: 1, // Cada mes ocupa el mismo espacio
+    minWidth: 150, // Ancho mínimo para nombres largos como "Septiembre"
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#e0e0e0',
+    minHeight: 60,
+  },
+  monthLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.light.text,
+    textAlign: 'center',
+    width: '100%',
+    overflow: 'hidden',
+  },
+  objectivesContainer: {
+    position: 'absolute',
+    top: 75, // Debajo de la barra de meses
+    left: 0,
+    right: 0,
+    height: 40,
+    width: '100%',
+  },
+  objectiveLine: {
+    position: 'absolute',
+    height: 10,
+    borderRadius: 5,
+    top: '50%',
+    marginTop: -5,
+  },
+  colorLegendDivider: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
+    marginTop: 20,
+    marginBottom: 16,
+    width: '100%',
+  },
+  colorLegendScrollContainer: {
+    maxHeight: 200, // Altura máxima para permitir scroll si hay muchas filas
+    paddingHorizontal: 10,
+  },
+  colorLegendContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingVertical: 12,
+  },
+  colorLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  colorLegendCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  colorLegendText: {
+    fontSize: 14,
+    color: Colors.light.text,
+    fontWeight: '500',
+  },
+  // Estilos para botón Planear Año
+  yearPlanButtonContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: Colors.light.background,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    zIndex: 10,
+  },
+  yearPlanButton: {
+    backgroundColor: Colors.light.tint,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  yearPlanButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: 'white',
+  },
+  // Estilos para Modal Planear Año
+  yearPlanModalContainer: {
+    flex: 1,
+    backgroundColor: Colors.light.background,
+  },
+  yearPlanModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    backgroundColor: 'white',
+  },
+  yearPlanModalBackButton: {
+    padding: 8,
+  },
+  yearPlanModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.light.text,
+    flex: 1,
+    textAlign: 'center',
+  },
+  yearPlanModalPageIndicator: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  yearPlanModalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  yearPlanInstructions: {
+    fontSize: 16,
+    color: Colors.light.text,
+    marginBottom: 20,
+    fontWeight: '600',
+  },
+  yearPlanSuggestionsContainer: {
+    marginBottom: 24,
+  },
+  yearPlanSuggestionsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.light.text,
+    marginBottom: 12,
+  },
+  yearPlanGoalChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  yearPlanGoalChipSelected: {
+    backgroundColor: Colors.light.tint + '20',
+    borderWidth: 2,
+    borderColor: Colors.light.tint,
+  },
+  yearPlanGoalChipText: {
+    fontSize: 15,
+    color: Colors.light.text,
+    marginLeft: 12,
+    flex: 1,
+  },
+  yearPlanGoalChipTextSelected: {
+    color: Colors.light.tint,
+    fontWeight: '600',
+  },
+  yearPlanCustomGoalContainer: {
+    marginBottom: 24,
+  },
+  yearPlanCustomGoalInput: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  yearPlanSelectedContainer: {
+    marginBottom: 24,
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+  },
+  yearPlanSelectedTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.light.text,
+    marginBottom: 12,
+  },
+  yearPlanSelectedGoal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  yearPlanSelectedGoalText: {
+    fontSize: 15,
+    color: Colors.light.text,
+    flex: 1,
+  },
+  yearPlanRemoveGoalButton: {
+    padding: 4,
+  },
+  yearPlanContinueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.light.tint,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  yearPlanContinueButtonDisabled: {
+    backgroundColor: '#e0e0e0',
+  },
+  yearPlanContinueButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'white',
+    marginRight: 8,
+  },
+  yearPlanContinueButtonTextDisabled: {
+    color: '#999',
+  },
+  // Estilos para página 2 (Asignación de fechas)
+  yearPlanDatesContainer: {
+    flex: 1,
+    padding: 20,
+  },
+  yearPlanDatesInstructions: {
+    fontSize: 16,
+    color: Colors.light.text,
+    marginBottom: 20,
+    fontWeight: '600',
+  },
+  yearPlanMonthsBarContainer: {
+    position: 'relative',
+    width: '100%',
+    minWidth: 1800,
+  },
+  yearPlanMonthsBar: {
+    flexDirection: 'row',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    overflow: 'hidden',
+    marginBottom: 60,
+  },
+  yearPlanMonthSegment: {
+    flex: 1,
+    minWidth: 150,
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#e0e0e0',
+    minHeight: 60,
+  },
+  yearPlanMonthLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.light.text,
+    textAlign: 'center',
+    width: '100%',
+    overflow: 'hidden',
+  },
+  yearPlanObjectivesContainer: {
+    position: 'absolute',
+    top: 75,
+    left: 0,
+    right: 0,
+    height: 40,
+    width: '100%',
+  },
+  yearPlanLegendDivider: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
+    marginTop: 20,
+    marginBottom: 16,
+    width: '100%',
+  },
+  yearPlanLegendScrollContainer: {
+    maxHeight: 200,
+    paddingHorizontal: 10,
+  },
+  yearPlanLegendContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingVertical: 12,
+  },
+  yearPlanLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  yearPlanLegendCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  yearPlanLegendText: {
+    fontSize: 14,
+    color: Colors.light.text,
+    fontWeight: '500',
+  },
+  yearPlanFinishButton: {
+    backgroundColor: Colors.light.tint,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  yearPlanFinishButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'white',
+  },
   eventContainer: { position: 'absolute', top: 2, left: 2, right: 2, bottom: 2, zIndex: 1000 },
   eventBlock: { flex: 1, borderRadius: 4, padding: 4, justifyContent: 'center', minHeight: 20, marginBottom: 2, marginHorizontal: 1, zIndex: 1000 },
   gridBackground: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 },
