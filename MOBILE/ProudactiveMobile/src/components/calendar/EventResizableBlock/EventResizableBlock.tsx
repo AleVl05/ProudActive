@@ -486,11 +486,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   
   const topResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => {
-      console.log('🔝 DEBUG - Top Resize onStartShouldSetPanResponder', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        timestamp: Date.now()
-      });
       return true;
     },
     onPanResponderGrant: (evt) => {
@@ -517,14 +512,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       
       // Iniciar resize inmediatamente (como funcionaba antes)
       const currentInitial = getInitial();
-      
-      console.log('🔝 DEBUG - Top Resize onPanResponderGrant', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        startTime: currentInitial.startTime,
-        duration: currentInitial.duration,
-        timestamp: Date.now()
-      });
       
       setShowGhost(true);
       setIsResizing(true);
@@ -566,34 +553,12 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const isValidEnd = newEndTime <= maxEndTime;
       const isValid = isValidDuration && isValidStart && isValidEnd;
       
-      console.log('🔝 DEBUG - Top Resize onPanResponderMove', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        gestureDy: gesture.dy,
-        gestureDx: gesture.dx,
-        deltaSlots,
-        deltaMin,
-        newStart,
-        newDuration,
-        isValid,
-        timestamp: Date.now()
-      });
-      
       if (isValid) {
         ghostTopOffset.setValue(deltaSlots * CELL_HEIGHT);
         ghostHeight.setValue((newDuration / 30) * CELL_HEIGHT - 2);
       }
     },
     onPanResponderRelease: (_, gesture) => {
-      console.log('🔝 DEBUG - Top Resize onPanResponderRelease CALLED', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        isResizing: isResizing,
-        isResizingRef: isResizingRef.current,
-        gestureDy: gesture.dy,
-        timestamp: Date.now()
-      });
-      
       // Limpiar timer y refs PRIMERO
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
@@ -603,7 +568,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       
       // Si no estábamos resizing, no hacer commit (puede ser solo un tap)
       if (!isResizingRef.current && !isResizing) {
-        console.log('🔝 DEBUG - Top Resize Release: No estaba resizing, saliendo');
         return;
       }
       
@@ -652,36 +616,13 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const finalStart = newStart;
       const finalDuration = newDuration;
       
-      console.log('🔝 DEBUG - Top Resize onPanResponderRelease - COMMITTING', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        finalStart,
-        finalDuration,
-        originalStart: currentInitial.startTime,
-        originalDuration: currentInitial.duration,
-        deltaSlots,
-        deltaMin,
-        timestamp: Date.now()
-      });
-      
       // Hacer commit del resize
       commitResize(finalStart, finalDuration);
     },
     onPanResponderTerminationRequest: () => {
-      console.log('🔝 DEBUG - Top Resize onPanResponderTerminationRequest', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        timestamp: Date.now()
-      });
       return false;
     },
     onPanResponderTerminate: () => {
-      console.log('🔝 DEBUG - Top Resize onPanResponderTerminate', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        timestamp: Date.now()
-      });
-      
       // Limpiar timer y refs
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
@@ -696,11 +637,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
 
   const bottomResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => {
-      console.log('🔽 DEBUG - Bottom Resize onStartShouldSetPanResponder', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        timestamp: Date.now()
-      });
       return true;
     },
     onPanResponderGrant: (evt) => {
@@ -727,16 +663,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       
       // Iniciar resize inmediatamente (como funcionaba antes)
       const currentInitial = getInitial();
-      
-      console.log('🔵 DEBUG - Bottom Resize Grant:', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        renderOnlyBottomHandler,
-        currentInitialStartTime: currentInitial.startTime,
-        currentInitialDuration: currentInitial.duration,
-        evStartTime: ev.startTime,
-        evDuration: ev.duration
-      });
       
       setShowGhost(true);
       setIsResizing(true);
@@ -775,20 +701,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       // y positivo (hacia abajo) debería aumentarla, que es el comportamiento normal
       const newDuration = currentInitial.duration + deltaMin;
       
-      console.log('🔽 DEBUG - Bottom Resize onPanResponderMove', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        renderOnlyBottomHandler,
-        gestureDy: gesture.dy,
-        gestureDx: gesture.dx,
-        deltaSlots,
-        deltaMin,
-        currentDuration: currentInitial.duration,
-        newDuration,
-        currentStartTime: currentInitial.startTime,
-        timestamp: Date.now()
-      });
-      
       // Validaciones robustas
       const minDuration = 30; // 30 minutos mínimo
       const maxDuration = 24 * 60; // 24 horas máximo
@@ -811,15 +723,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       }
     },
     onPanResponderRelease: (_, gesture) => {
-      console.log('🔽 DEBUG - Bottom Resize onPanResponderRelease CALLED', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        isResizing: isResizing,
-        isResizingRef: isResizingRef.current,
-        gestureDy: gesture.dy,
-        timestamp: Date.now()
-      });
-      
       // Limpiar timer y refs PRIMERO
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
@@ -829,7 +732,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       
       // Si no estábamos resizing, no hacer commit (puede ser solo un tap)
       if (!isResizingRef.current && !isResizing) {
-        console.log('🔽 DEBUG - Bottom Resize Release: No estaba resizing, saliendo');
         return;
       }
       
@@ -846,20 +748,6 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const deltaMin = deltaSlots * 30;
       const newDuration = currentInitial.duration + deltaMin;
       
-      console.log('🔽 DEBUG - Bottom Resize onPanResponderRelease - COMMITTING', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        renderOnlyBottomHandler,
-        gestureDy: gesture.dy,
-        gestureDx: gesture.dx,
-        deltaSlots,
-        deltaMin,
-        currentDuration: currentInitial.duration,
-        newDuration,
-        currentStartTime: currentInitial.startTime,
-        timestamp: Date.now()
-      });
-      
       // Validaciones finales
       const minDuration = 30;
       const maxDuration = 24 * 60;
@@ -870,32 +758,13 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const finalEndTime = currentInitial.startTime + finalDuration;
       const adjustedDuration = finalEndTime > maxEndTime ? maxEndTime - currentInitial.startTime : finalDuration;
       
-      console.log('🔵 DEBUG - Bottom Resize Final Commit:', {
-        eventId: ev.id,
-        finalDuration: adjustedDuration,
-        finalStartTime: currentInitial.startTime,
-        originalDuration: currentInitial.duration,
-        originalStartTime: currentInitial.startTime
-      });
-      
       // Hacer commit del resize
       commitResize(currentInitial.startTime, adjustedDuration);
     },
     onPanResponderTerminationRequest: () => {
-      console.log('🔽 DEBUG - Bottom Resize onPanResponderTerminationRequest', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        timestamp: Date.now()
-      });
       return false;
     },
     onPanResponderTerminate: () => {
-      console.log('🔽 DEBUG - Bottom Resize onPanResponderTerminate', {
-        eventId: ev.id,
-        eventTitle: ev.title,
-        timestamp: Date.now()
-      });
-      
       // Limpiar timer y refs
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);

@@ -853,6 +853,44 @@ async function getAuthHeaders(): Promise<HeadersInit> {
 
 
 
+## 📅 **VISTA DE AÑO (YEAR VIEW) - Diciembre 2025**
+
+### ✅ **LO QUE FUNCIONA:**
+- **Líneas de eventos visibles**: Eventos mensuales se muestran como líneas de colores debajo de la barra de meses
+- **Scroll vertical**: Agregado scroll vertical en el calendario para ver líneas completas sin cortarse
+- **Leyenda de colores**: Leyenda fija que muestra colores únicos y nombres de eventos (máximo 4 por fila)
+- **Modal "Planear Año"**: 
+  - Página 1: Selección de metas anuales con sugerencias y campo personalizado
+  - Página 2: Drag & drop de metas al calendario con preview visual
+  - Guardado de metas como eventos mensuales (`MonthEvent`)
+- **Navegación a mes**: Click en segmento de mes navega a vista mensual
+
+### 🔧 **CÓMO RESTAURAR LÍNEAS SI SE ROMPEN:**
+1. **`objectivesContainer`** debe tener:
+   - `position: 'absolute'`, `top: 65`, `minWidth: 1800` (igual que `monthsBar`)
+   - `zIndex: 2`, `pointerEvents: 'none'`, `backgroundColor: 'transparent'`
+2. **`monthsBarContainer`** debe tener:
+   - `position: 'relative'`, `minHeight: 200`
+3. **`monthsBar`** debe tener:
+   - `overflow: 'visible'` (no `'hidden'`)
+4. **`objectiveLine`** debe tener:
+   - `position: 'absolute'`, `height: 12`, `minWidth: 2`
+   - `left` y `width` en porcentajes basados en cálculo: `monthStartPercent + (relativeStartInMonth * monthWidthPercent)`
+5. **Scroll vertical**: `ScrollView` vertical dentro del horizontal con `maxHeight: Dimensions.get('window').height * 0.5`
+
+### ❌ **PENDIENTE:**
+- [ ] **Conversión año ↔ mes**: 
+  - Cuando se crea línea en año view → convertir a días en vista mes
+  - Cuando se crea evento en mes (días) → mostrar como línea en año view
+- [ ] **Leyenda de colores**: Corregir problema de colores que se reemplazan (mostrar títulos más recientes)
+
+### 📁 **ARCHIVOS CLAVE:**
+- `MOBILE/ProudactiveMobile/src/components/calendar/YearView.tsx` - Componente principal
+- `MOBILE/ProudactiveMobile/src/components/calendar/monthEventHelpers.ts` - Helpers para eventos mensuales
+- `MOBILE/ProudactiveMobile/src/components/calendar/MonthView.tsx` - Vista mensual
+
+---
+
 # Avances del Proyecto Proudactive
 
 ## ✅ **LO QUE FUNCIONA PERFECTAMENTE:**

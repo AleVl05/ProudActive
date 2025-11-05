@@ -3274,6 +3274,11 @@ export default function CalendarView({}: CalendarViewProps) {
             setCurrentDate(newDate);
             setCurrentView('month');
           }}
+          refreshYearEvents={async () => {
+            const year = currentDate.getFullYear();
+            const fetched = await fetchYearEvents(year);
+            setYearEvents(fetched);
+          }}
         />
       ) : (
         // Vista semanal: ScrollView vertical con columna de horas fija y contenido horizontal scrollable

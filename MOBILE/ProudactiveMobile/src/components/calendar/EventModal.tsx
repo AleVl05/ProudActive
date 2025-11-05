@@ -1,5 +1,5 @@
 // EventModal.tsx - Modal for creating and editing events
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -43,7 +43,41 @@ interface EventModalProps {
   onDeleteEvent: () => void;
 }
 
-const availableColors = ['#6b53e2', '#f44336', '#4caf50', '#ff9800', '#9c27b0'];
+// Colores principales (5 colores por defecto)
+const DEFAULT_MAIN_COLORS = ['#6b53e2', '#f44336', '#4caf50', '#ff9800', '#2196F3']; // Cambié el lila por azul
+
+// Biblioteca completa de 25 colores (incluye los 5 principales)
+const COLOR_LIBRARY = [
+  // Los 5 principales (siempre estarán disponibles)
+  '#6b53e2', // Morado
+  '#f44336', // Rojo
+  '#4caf50', // Verde
+  '#ff9800', // Amarillo/Naranja
+  '#2196F3', // Azul
+  
+  // Colores adicionales (20 más)
+  '#9c27b0', // Púrpura
+  '#673AB7', // Púrpura oscuro
+  '#3F51B5', // Índigo
+  '#00BCD4', // Cian/Turquesa
+  '#009688', // Verde esmeralda
+  '#8BC34A', // Lima
+  '#CDDC39', // Amarillo lima
+  '#FFEB3B', // Amarillo claro
+  '#FFC107', // Ámbar
+  '#FF5722', // Naranja oscuro
+  '#E91E63', // Rosa
+  '#FF4081', // Rosa vibrante
+  '#F06292', // Rosa claro
+  '#AB47BC', // Púrpura medio
+  '#7E57C2', // Púrpura índigo
+  '#5C6BC0', // Azul índigo
+  '#42A5F5', // Azul claro
+  '#26C6DA', // Cian claro
+  '#66BB6A', // Verde claro
+  '#795548', // Marrón
+  '#607D8B', // Azul grisáceo
+];
 
 export default function EventModal({
   visible,
@@ -69,6 +103,19 @@ export default function EventModal({
 }: EventModalProps) {
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
+  
+  // Estado para los 5 colores principales (personalizables)
+  const [mainColors, setMainColors] = useState<string[]>(DEFAULT_MAIN_COLORS);
+  
+  // Estado para el modal de biblioteca de colores
+  const [showColorLibrary, setShowColorLibrary] = useState(false);
+  
+  // Estado para el color seleccionado de la biblioteca que se va a reemplazar
+  const [selectedColorToReplace, setSelectedColorToReplace] = useState<string | null>(null);
+  
+  // Referencia para hacer scroll a los círculos principales
+  const colorSectionRef = useRef<View | null>(null);
+  
 
   // 🎯 UX: Hacer scroll automático cuando se abre el input de subtareas
   useEffect(() => {
@@ -76,11 +123,46 @@ export default function EventModal({
       // Esperar menos tiempo y hacer scroll más suave
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 150); // 🎯 UX: Reducido de 300ms a 150ms para menos zoom exagerado
+      }, 150);
     }
   }, [showSubtaskInput]);
 
+  // Función para seleccionar un color de la biblioteca
+  const handleColorLibrarySelect = (color: string) => {
+    // Guardar el color seleccionado inmediatamente
+    setSelectedColorToReplace(color);
+    
+    // Cerrar el modal de biblioteca
+    setShowColorLibrary(false);
+    
+    // Hacer scroll a la parte superior donde están los colores principales
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 400);
+  };
+
+  // Función para reemplazar un color principal
+  const handleMainColorPress = (color: string, index: number) => {
+    // Si hay un color seleccionado de la biblioteca, reemplazarlo
+    if (selectedColorToReplace) {
+      const newMainColors = [...mainColors];
+      newMainColors[index] = selectedColorToReplace;
+      setMainColors(newMainColors);
+      
+      // Si el color seleccionado era el que se reemplazó, actualizar también
+      if (eventColor === color) {
+        setEventColor(selectedColorToReplace);
+      }
+      
+      setSelectedColorToReplace(null);
+    } else {
+      // Comportamiento normal: seleccionar el color para el evento
+      setEventColor(color);
+    }
+  };
+
   return (
+    <>
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <KeyboardAvoidingView 
         style={{ flex: 1 }} 
@@ -120,20 +202,53 @@ export default function EventModal({
           />
           <Text style={styles.charCounter}>{eventTitle.length}/50</Text>
 
-          <View style={styles.colorSection}>
-            {availableColors.map(color => (
+          <View 
+            ref={colorSectionRef}
+            style={styles.colorSection}
+          >
+            {/* Mensaje cuando hay un color seleccionado para reemplazar */}
+            {selectedColorToReplace && (
+              <View style={styles.colorReplaceMessage}>
+                <Text style={styles.colorReplaceMessageText}>
+                  Elige por cuál sustituir
+                </Text>
+                <TouchableOpacity 
+                  style={styles.colorReplaceCancelButton}
+                  onPress={() => setSelectedColorToReplace(null)}
+                >
+                  <Ionicons name="close" size={16} color={Colors.light.text} />
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            <View style={styles.colorCirclesRow}>
+              {mainColors.map((color, index) => (
+                <TouchableOpacity 
+                  key={`main-${color}-${index}`}
+                  style={[
+                    styles.colorCircle, 
+                    { backgroundColor: color }, 
+                    eventColor === color && styles.selectedColorCircle,
+                    selectedColorToReplace && styles.colorCircleSelectable
+                  ]} 
+                  onPress={() => handleMainColorPress(color, index)}
+                >
+                  {eventColor === color && <Ionicons name="checkmark" size={16} color="white" />}
+                  {selectedColorToReplace && (
+                    <View style={styles.colorCircleReplaceIndicator}>
+                      <Ionicons name="swap-horizontal" size={14} color="white" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+              {/* Círculo con + para abrir biblioteca de colores */}
               <TouchableOpacity 
-                key={color} 
-                style={[
-                  styles.colorCircle, 
-                  { backgroundColor: color }, 
-                  eventColor === color && styles.selectedColorCircle
-                ]} 
-                onPress={() => setEventColor(color)}
+                style={styles.addColorCircle}
+                onPress={() => setShowColorLibrary(true)}
               >
-                {eventColor === color && <Ionicons name="checkmark" size={16} color="white" />}
+                <Ionicons name="add" size={24} color={Colors.light.text} />
               </TouchableOpacity>
-            ))}
+            </View>
           </View>
 
           <View style={styles.configCard}>
@@ -228,6 +343,70 @@ export default function EventModal({
         </View>
       </KeyboardAvoidingView>
     </Modal>
+    
+    {/* Pantalla de biblioteca de colores (pantalla completa) */}
+    <Modal
+      visible={showColorLibrary}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={() => setShowColorLibrary(false)}
+    >
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.colorLibraryScreen}>
+          <View style={[styles.colorLibraryHeader, { paddingTop: insets.top }]}>
+            <TouchableOpacity 
+              style={styles.colorLibraryBackButton}
+              onPress={() => setShowColorLibrary(false)}
+            >
+              <Ionicons name="arrow-back" size={24} color={Colors.light.text} />
+            </TouchableOpacity>
+            <Text style={styles.colorLibraryTitle}>Biblioteca de Colores</Text>
+            <View style={{ width: 40 }} />
+          </View>
+          
+          <Text style={styles.colorLibrarySubtitle}>
+            Toca un color para reemplazar uno de los 5 principales
+          </Text>
+          
+          <ScrollView 
+            style={styles.colorLibraryScroll}
+            contentContainerStyle={styles.colorLibraryGrid}
+            showsVerticalScrollIndicator={true}
+          >
+            {COLOR_LIBRARY.length > 0 ? COLOR_LIBRARY.map((color, index) => {
+              const isInMainColors = mainColors.includes(color);
+              
+              return (
+                <TouchableOpacity
+                  key={`lib-${color}-${index}`}
+                  style={[
+                    styles.colorLibraryItem,
+                    { backgroundColor: color },
+                    isInMainColors && styles.colorLibraryItemInUse
+                  ]}
+                  onPress={() => handleColorLibrarySelect(color)}
+                  activeOpacity={0.7}
+                >
+                  {isInMainColors && (
+                    <View style={styles.colorLibraryInUseBadge}>
+                      <Ionicons name="checkmark-circle" size={16} color="white" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            }) : (
+              <Text style={{ color: Colors.light.text, textAlign: 'center', marginTop: 20 }}>
+                No hay colores disponibles
+              </Text>
+            )}
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+    </>
   );
 }
 
@@ -244,9 +423,68 @@ const styles = {
   subtitle: { fontSize: 14, color: '#666' },
   titleInput: { fontSize: 18, fontWeight: '500', color: Colors.light.text, borderBottomWidth: 1, borderBottomColor: '#e0e0e0', paddingVertical: 12, marginBottom: 8 },
   charCounter: { fontSize: 12, color: '#666', textAlign: 'right', marginBottom: 20 },
-  colorSection: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginBottom: 30 },
-  colorCircle: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
+  colorSection: { flexDirection: 'column', alignItems: 'center', marginBottom: 30, width: '100%' },
+  colorReplaceMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f0f8ff',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginBottom: 20,
+    width: '100%',
+    borderWidth: 2,
+    borderColor: Colors.light.tint,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  colorReplaceMessageText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.light.tint,
+    flex: 1,
+    textAlign: 'center',
+  },
+  colorReplaceCancelButton: {
+    padding: 4,
+  },
+  colorCirclesRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  colorCircle: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    borderWidth: 2, 
+    borderColor: 'transparent', 
+    marginHorizontal: 6,
+    position: 'relative',
+  },
   selectedColorCircle: { borderColor: Colors.light.text },
+  colorCircleSelectable: {
+    borderColor: Colors.light.tint,
+    borderWidth: 3,
+  },
+  colorCircleReplaceIndicator: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: Colors.light.tint,
+    borderRadius: 8,
+    width: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   configCard: { backgroundColor: 'white', borderRadius: 12, padding: 16, marginBottom: 16 },
   configRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
   configLabel: { fontSize: 16, color: Colors.light.text, marginLeft: 12, flex: 1 },
@@ -295,5 +533,84 @@ const styles = {
     color: '#ff4444',
     marginLeft: 8
   },
-  bottomPadding: { height: 100 } // 🎯 UX: Espacio adicional para que el teclado no tape el contenido
+  bottomPadding: { height: 100 }, // 🎯 UX: Espacio adicional para que el teclado no tape el contenido
+  addColorCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderStyle: 'dashed',
+    backgroundColor: 'white',
+    marginHorizontal: 6,
+  },
+  // Estilos para la pantalla de biblioteca de colores
+  colorLibraryScreen: {
+    flex: 1,
+    backgroundColor: '#f0f8ff',
+  },
+  colorLibraryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#f0f8ff',
+  },
+  colorLibraryBackButton: {
+    padding: 8,
+  },
+  colorLibraryTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: Colors.light.text,
+    flex: 1,
+    textAlign: 'center',
+  },
+  colorLibrarySubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    marginTop: 8,
+  },
+  colorLibraryScroll: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  colorLibraryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingBottom: 20,
+  },
+  colorLibraryItem: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginBottom: 16,
+    marginHorizontal: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    position: 'relative',
+  },
+  colorLibraryItemInUse: {
+    borderColor: Colors.light.tint,
+    borderWidth: 3,
+  },
+  colorLibraryInUseBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: Colors.light.tint,
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 };
