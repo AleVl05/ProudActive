@@ -32,16 +32,24 @@
 
     npx eas build --platform android --profile production
 
-### Actualizar App:
+### Actualizar App (OTA Updates):
 ```bash
-npx eas update --branch production --message "Cambios v1.2"
+# Para producción (Play Store)
+npx eas update --branch production --message "Descripción de cambios"
+
+# Para preview/testing
+npx eas update --branch preview --message "Testing: Descripción"
+
+# Para development
+npx eas update --branch development --message "Dev: Descripción"
 ```
 
-  para actualizar la app:
+**📖 Ver guía completa:** `MOBILE/ProudactiveMobile/GUIA_UPDATES.md`
 
-  C:\PROYECTOS_WEB\Proudactive\MOBILE\ProudactiveMobile> npx eas update --channel staging --message "Agregar botón debug"  o para mandar a produccion:
-
-  npx eas update --branch production --message "Cambios JS"
+**⚠️ IMPORTANTE:**
+- Updates OTA solo funcionan para cambios en JS/TS/assets
+- Si cambias dependencias nativas, necesitas hacer un nuevo build
+- El `runtimeVersion` en `app.json` debe coincidir entre build y updates
 
 
   para actualizar el backend (solo desde linux WSL):

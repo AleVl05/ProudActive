@@ -22,15 +22,15 @@ export interface RecurrenceRule {
 
 // Constantes para recurrencia
 export const RECURRENCE_MODE_LABEL: Record<RecurrenceMode, string> = {
-  daily: 'Diário',
+  daily: 'Diario',
   weekly: 'Semanal',
-  monthly: 'Mensal',
+  monthly: 'Mensual',
 };
 
 export const INTERVAL_UNIT_LABEL: Record<RecurrenceMode, { singular: string; plural: string }> = {
-  daily: { singular: 'dia', plural: 'dias' },
+  daily: { singular: 'día', plural: 'días' },
   weekly: { singular: 'semana', plural: 'semanas' },
-  monthly: { singular: 'mês', plural: 'meses' },
+  monthly: { singular: 'mes', plural: 'meses' },
 };
 
 export const createDefaultRecurrenceConfig = (): RecurrenceConfig => ({
@@ -60,16 +60,16 @@ export const getRecurrenceTitle = (config: RecurrenceConfig): string => {
   const mode = RECURRENCE_MODE_LABEL[config.mode];
   
   if (config.mode === 'daily') {
-    return `Repete A cada dia`;
+    return `Se repite cada día`;
   } else if (config.mode === 'weekly') {
     const firstDay = config.weekDays.length > 0 ? WEEK_DAY_LABEL_BY_CODE[config.weekDays[0]] || 'Dom' : 'Dom';
-    return `Repete A cada semana em ${firstDay}`;
+    return `Se repite cada semana en ${firstDay}`;
   } else if (config.mode === 'monthly') {
     const firstDay = config.monthDays.length > 0 ? config.monthDays[0] : 28;
-    return `Repete A cada mês em ${firstDay}°`;
+    return `Se repite cada mes el día ${firstDay}`;
   }
   
-  return `Repete ${mode}`;
+  return `Se repite ${mode}`;
 };
 
 export const extractRecurrenceFromEvent = (event: any): RecurrenceConfig => {
@@ -120,17 +120,22 @@ export const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any):
         const originalSecond = originalStart.getUTCSeconds();
         const originalMillisecond = originalStart.getUTCMilliseconds();
         
-        // Encontrar el próximo día de la semana especificado
+        // Encontrar el próximo día de la semana especificado (o mantener el actual si ya es válido)
         const weekDayCodes = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
         const targetDays = rule.byWeekDays.map((day: string) => weekDayCodes.indexOf(day)).filter((d: number) => d !== -1);
         
-        // Buscar el próximo día válido
-        for (let i = 0; i < 7; i++) {
-          if (targetDays.includes(adjustedDate.getDay())) {
-            break;
+        // Verificar si el día actual ya es uno de los días objetivo
+        const currentDay = adjustedDate.getDay();
+        if (!targetDays.includes(currentDay)) {
+          // Si el día actual no es válido, buscar el próximo día válido
+          for (let i = 0; i < 7; i++) {
+            adjustedDate.setDate(adjustedDate.getDate() + 1);
+            if (targetDays.includes(adjustedDate.getDay())) {
+              break;
+            }
           }
-          adjustedDate.setDate(adjustedDate.getDate() + 1);
         }
+        // Si el día actual ya es válido, mantener la fecha original
         
         // Restaurar la hora original
         adjustedDate.setUTCHours(originalHour, originalMinute, originalSecond, originalMillisecond);
@@ -148,14 +153,19 @@ export const adjustStartDateToRecurrenceRule = (originalStart: Date, rule: any):
         const targetDays = rule.byMonthDays.sort((a: number, b: number) => a - b);
         const currentDay = adjustedDate.getDate();
         
-        let nextDay = targetDays.find((day: number) => day >= currentDay);
-        if (nextDay) {
-          adjustedDate.setDate(nextDay);
-        } else {
-          // Ir al próximo mes con el primer día especificado
-          adjustedDate.setMonth(adjustedDate.getMonth() + 1);
-          adjustedDate.setDate(targetDays[0]);
+        // Verificar si el día actual ya es uno de los días objetivo
+        if (!targetDays.includes(currentDay)) {
+          // Si el día actual no es válido, buscar el próximo día válido en este mes
+          let nextDay = targetDays.find((day: number) => day > currentDay);
+          if (nextDay) {
+            adjustedDate.setDate(nextDay);
+          } else {
+            // Ir al próximo mes con el primer día especificado
+            adjustedDate.setMonth(adjustedDate.getMonth() + 1);
+            adjustedDate.setDate(targetDays[0]);
+          }
         }
+        // Si el día actual ya es válido, mantener la fecha original
         
         // Restaurar la hora original
         adjustedDate.setUTCHours(originalHour, originalMinute, originalSecond, originalMillisecond);

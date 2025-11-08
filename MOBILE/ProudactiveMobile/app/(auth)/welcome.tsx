@@ -12,7 +12,7 @@ export default function WelcomeScreen() {
         {/* Logo o Imagen */}
         <View style={styles.logoContainer}>
           <Text style={styles.logoText}>📅</Text>
-          <Text style={styles.appName}>Proudactive</Text>
+          <Text style={styles.appName}>Proudly</Text>
           <Text style={styles.tagline}>Tu productividad en un solo lugar</Text>
         </View>
 

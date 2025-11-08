@@ -45,6 +45,7 @@ interface EventResizableBlockProps {
   subtaskStatus?: { hasSubtasks: boolean; allCompleted: boolean };
   onLongPress?: (handler: () => void) => void; // Nueva prop para manejar long press externo
   onDuplicate?: (event: Event) => void; // Volver a exponer duplicar hacia el padre
+  onDelete?: (event: Event) => void; // Prop para eliminar evento desde long press
   renderOnlyBottomHandler?: boolean; // 🔧 FIX: Solo renderizar handler de abajo (para bloques extendidos)
   renderMiddleCell?: boolean; // 🔧 FIX: Solo renderizar drag handler en celdas intermedias (sin resize handlers)
   currentCellStartTime?: number; // 🔧 FIX: startTime de la celda actual (para calcular ghost offset)
@@ -54,7 +55,8 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   ev, 
   onResizeCommit, 
   onMoveCommit,
-  onQuickPress, 
+  onQuickPress,
+  onDelete,
   cellWidth, 
   currentView = 'week',
   subtaskStatus = { hasSubtasks: false, allCompleted: false },
@@ -82,13 +84,28 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   const isMovingRef = useRef(false); // Ref para rastrear estado de drag de forma síncrona
   const dragTouchStartRef = useRef<{ x: number; y: number; time: number; relativeY?: number } | null>(null);
   const hasMovedRef = useRef(false); // Para detectar si hubo movimiento durante el timer
+  
+  // ✨ Efecto de brillo para bloques dorados
+  const shineLine1 = useRef(new Animated.Value(-100)).current;
+  const shineLine2 = useRef(new Animated.Value(-100)).current;
+  const shineLine3 = useRef(new Animated.Value(-100)).current;
+  const shineAnimationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   // Usar useRef para almacenar los valores iniciales y actualizarlos cuando ev cambia
   const initialRef = useRef({ startTime: ev.startTime, duration: ev.duration, date: ev.date });
   
   // Actualizar initialRef cuando ev cambia
   useEffect(() => {
+    const oldDuration = initialRef.current.duration;
     initialRef.current = { startTime: ev.startTime, duration: ev.duration, date: ev.date };
-  }, [ev.startTime, ev.duration, ev.date]);
+    if (oldDuration !== ev.duration) {
+      console.log('🔧 initialRef actualizado: Duración cambió', {
+        eventId: ev.id,
+        oldDuration,
+        newDuration: ev.duration
+      });
+    }
+  }, [ev.startTime, ev.duration, ev.date, ev.id]);
   
   // Usar una función que siempre lea el valor actual
   const getInitial = useCallback(() => initialRef.current, []);
@@ -253,9 +270,9 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
   
   // 🎯 Color del icono de agarre según el color del bloque
   const gripIconColor = useMemo(() => {
-    // Para eventos dorados (completados), usar negro
+    // Para eventos dorados (completados), usar blanco para que coincida con el texto
     if (colorState.solidColor === '#DAA520') {
-      return 'rgba(0, 0, 0, 0.6)';
+      return 'rgba(255, 255, 255, 0.8)';
     }
     // Para otros colores, usar blanco semitransparente
     return 'rgba(255, 255, 255, 0.7)';
@@ -282,7 +299,83 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       elevation: 3,
     };
   }, [subtaskStatus]);
-
+  
+  // ✨ Efecto de brillo animado para bloques dorados
+  const isGoldBlock = colorState.solidColor === '#DAA520';
+  
+  useEffect(() => {
+    if (!isGoldBlock) {
+      // Limpiar animación si no es un bloque dorado
+      if (shineAnimationTimer.current) {
+        clearTimeout(shineAnimationTimer.current);
+        shineAnimationTimer.current = null;
+      }
+      return;
+    }
+    
+    // Función para ejecutar la animación de brillo
+    const runShineAnimation = () => {
+      // Calcular el ancho máximo del bloque (usando cellWidth o un valor por defecto)
+      const maxWidth = cellWidth > 0 ? cellWidth + 50 : 400; // Agregar margen para asegurar que pase completamente
+      
+      // Resetear posiciones iniciales (empezar desde fuera, a la izquierda)
+      shineLine1.setValue(-20);
+      shineLine2.setValue(-20);
+      shineLine3.setValue(-20);
+      
+      // Animar las 3 líneas con pequeñas diferencias de tiempo
+      Animated.parallel([
+        Animated.timing(shineLine1, {
+          toValue: maxWidth, // Mover hasta el final del bloque
+          duration: 600, // Duración rápida para efecto de swipe
+          useNativeDriver: true,
+        }),
+        Animated.timing(shineLine2, {
+          toValue: maxWidth,
+          duration: 600,
+          delay: 50, // Pequeño delay para separar las líneas
+          useNativeDriver: true,
+        }),
+        Animated.timing(shineLine3, {
+          toValue: maxWidth,
+          duration: 600,
+          delay: 100,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // Resetear después de la animación
+        shineLine1.setValue(-20);
+        shineLine2.setValue(-20);
+        shineLine3.setValue(-20);
+      });
+    };
+    
+    // Ejecutar la primera animación después de un delay aleatorio inicial
+    const initialDelay = Math.random() * 2000 + 1000; // 1-3 segundos
+    shineAnimationTimer.current = setTimeout(() => {
+      runShineAnimation();
+      
+      // Programar siguientes animaciones con intervalos aleatorios
+      const scheduleNext = () => {
+        const randomDelay = Math.random() * 8000 + 2000; // 2-10 segundos
+        shineAnimationTimer.current = setTimeout(() => {
+          runShineAnimation();
+          scheduleNext();
+        }, randomDelay);
+      };
+      
+      scheduleNext();
+    }, initialDelay);
+    
+    // Cleanup
+    return () => {
+      if (shineAnimationTimer.current) {
+        clearTimeout(shineAnimationTimer.current);
+        shineAnimationTimer.current = null;
+      }
+    };
+  }, [isGoldBlock, shineLine1, shineLine2, shineLine3, cellWidth]);
+  
   // Refs para detectar movimiento en handlers de resize (para distinguir entre resize y long press)
   const topHandlerTouchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const bottomHandlerTouchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -748,6 +841,15 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const deltaMin = deltaSlots * 30;
       const newDuration = currentInitial.duration + deltaMin;
       
+      console.log('🔧 bottomResponder Release: Resize hacia abajo', {
+        eventId: ev.id,
+        currentInitialDuration: currentInitial.duration,
+        deltaSlots,
+        deltaMin,
+        newDuration,
+        evDuration: ev.duration
+      });
+      
       // Validaciones finales
       const minDuration = 30;
       const maxDuration = 24 * 60;
@@ -757,6 +859,13 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       const finalDuration = Math.min(Math.max(newDuration, minDuration), maxDuration);
       const finalEndTime = currentInitial.startTime + finalDuration;
       const adjustedDuration = finalEndTime > maxEndTime ? maxEndTime - currentInitial.startTime : finalDuration;
+      
+      console.log('🔧 bottomResponder Release: Commit resize', {
+        eventId: ev.id,
+        startTime: currentInitial.startTime,
+        adjustedDuration,
+        finalDuration
+      });
       
       // Hacer commit del resize
       commitResize(currentInitial.startTime, adjustedDuration);
@@ -995,12 +1104,50 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
                 </View>
               </View>
             )}
+            {/* ✨ Líneas de brillo animadas para bloques dorados */}
+            {isGoldBlock && (
+              <>
+                <Animated.View
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    width: 8,
+                    backgroundColor: 'rgba(255, 215, 0, 0.4)', // Dorado más claro con transparencia
+                    transform: [{ translateX: shineLine1 }],
+                    zIndex: 1,
+                  }}
+                />
+                <Animated.View
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    width: 8,
+                    backgroundColor: 'rgba(255, 215, 0, 0.35)', // Dorado más claro con transparencia
+                    transform: [{ translateX: shineLine2 }],
+                    zIndex: 1,
+                  }}
+                />
+                <Animated.View
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    width: 8,
+                    backgroundColor: 'rgba(255, 215, 0, 0.3)', // Dorado más claro con transparencia
+                    transform: [{ translateX: shineLine3 }],
+                    zIndex: 1,
+                  }}
+                />
+              </>
+            )}
             <Text style={[
               styles.eventText,
               currentView === 'day' && styles.eventTextDay,
               currentView === 'week' && styles.eventTextWeek,
-              // 🆕 Texto negro para eventos dorados completados
-              colorState.solidColor === '#DAA520' && { color: '#000', fontWeight: '600' },
+              // ✨ Texto blanco para eventos dorados completados
+              colorState.solidColor === '#DAA520' && { color: '#fff', fontWeight: '600', zIndex: 2 },
               // 🆕 Texto blanco para eventos gris oscuro (con subtareas incompletas)
               colorState.solidColor === '#4a4a4a' && { color: '#fff' },
               // Ajustar padding top si hay icono de agarre
@@ -1081,7 +1228,9 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
           menuVisibleRef.current = false;
         }}
         onDelete={() => {
-          console.log('🗑️ Eliminar Evento:', ev.title);
+          if (typeof onDelete === 'function') {
+            onDelete(ev);
+          }
           setShowContextMenu(false);
           menuVisibleRef.current = false;
         }}
@@ -1100,6 +1249,7 @@ const styles = {
     borderRadius: 4,
     padding: 8,
     justifyContent: 'center' as const,
+    overflow: 'hidden' as const, // ✨ Para ocultar líneas de brillo fuera del bloque
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,

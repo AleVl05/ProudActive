@@ -55,6 +55,7 @@ interface MonthViewProps {
   longPressActiveRef: React.MutableRefObject<Record<string, boolean>>;
   refreshMonthEvents: () => Promise<void>;
   getSubtaskStatus: (eventId: string) => { hasSubtasks: boolean; allCompleted: boolean };
+  onDelete?: (event: MonthEvent) => void; // Prop para eliminar evento desde long press
 }
 
 export default function MonthView({
@@ -79,6 +80,7 @@ export default function MonthView({
   longPressActiveRef,
   refreshMonthEvents,
   getSubtaskStatus,
+  onDelete,
 }: MonthViewProps) {
   // Calcular días del mes
   const monthDays = useMemo(() => {
@@ -287,6 +289,7 @@ export default function MonthView({
                           currentView="month"
                           subtaskStatus={getSubtaskStatus(event.id)}
                           onLongPress={undefined}
+                          onDelete={onDelete ? () => onDelete(event) : undefined}
                           onDuplicate={async (ev) => {
                             // Duplicar month event
                             try {
@@ -426,6 +429,7 @@ export default function MonthView({
                           currentView="month"
                           subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
                           onLongPress={undefined}
+                          onDelete={onDelete ? () => onDelete(occupyingEvent) : undefined}
                           renderMiddleCell={true}
                           currentCellStartTime={startTime}
                           scrollViewRef={verticalScrollRef}
@@ -499,6 +503,7 @@ export default function MonthView({
                           currentView="month"
                           subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
                           onLongPress={undefined}
+                          onDelete={onDelete ? () => onDelete(occupyingEvent) : undefined}
                           renderOnlyBottomHandler={true}
                           currentCellStartTime={startTime}
                           scrollViewRef={verticalScrollRef}

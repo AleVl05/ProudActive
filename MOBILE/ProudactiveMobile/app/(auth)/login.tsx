@@ -31,25 +31,34 @@ export default function LoginScreen() {
       const result = await authService.login(email, password);
 
       if (result.success) {
-        // Login exitoso, navegar a la app
-        router.replace('/(tabs)');
-      } else if (result.requires_verification) {
-        // Email no verificado
-        Alert.alert(
-          'Email no verificado',
-          'Por favor verifica tu email primero',
-          [
-            {
-              text: 'Verificar ahora',
-              onPress: () => router.push({
-                pathname: '/(auth)/verify',
-                params: { email }
-              }),
-            },
-          ]
-        );
+        // Redirigir directamente al calendario donde empieza el tutorial
+        router.replace('/(tabs)/calendar');
       } else {
-        Alert.alert('Error', result.message || 'Credenciales inválidas');
+        // Si requiere verificación, redirigir a la pantalla de verificación
+        if (result.requires_verification) {
+          Alert.alert(
+            'Email no verificado',
+            'Por favor verifica tu email antes de iniciar sesión',
+            [
+              {
+                text: 'Verificar ahora',
+                onPress: () => router.push({
+                  pathname: '/(auth)/verify',
+                  params: { email }
+                }),
+              },
+              {
+                text: 'Cancelar',
+                style: 'cancel',
+              },
+            ]
+          );
+        } else {
+          const errorMessage = result.errors
+            ? Object.values(result.errors).flat().join('\n')
+            : result.message || 'Error al iniciar sesión';
+          Alert.alert('Error', errorMessage);
+        }
       }
     } catch (error) {
       Alert.alert('Error', 'Ocurrió un error. Intenta de nuevo');
@@ -65,8 +74,8 @@ export default function LoginScreen() {
     >
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Text style={styles.title}>Bienvenido de vuelta</Text>
-          <Text style={styles.subtitle}>Inicia sesión para continuar</Text>
+          <Text style={styles.title}>Iniciar sesión</Text>
+          <Text style={styles.subtitle}>Bienvenido de nuevo</Text>
         </View>
 
         <View style={styles.form}>
@@ -75,11 +84,13 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="tu@email.com"
+              placeholderTextColor="#999999"
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              autoFocus
             />
           </View>
 
@@ -87,7 +98,8 @@ export default function LoginScreen() {
             <Text style={styles.label}>Contraseña</Text>
             <TextInput
               style={styles.input}
-              placeholder="••••••••"
+              placeholder="Tu contraseña"
+              placeholderTextColor="#999999"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -103,7 +115,7 @@ export default function LoginScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.button}
+            style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={loading}
           >
@@ -133,75 +145,89 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    padding: 32,
     justifyContent: 'center',
   },
   header: {
-    marginBottom: 40,
+    marginBottom: 48,
+    alignItems: 'flex-start',
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
+    fontSize: 36,
+    fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 8,
+    marginBottom: 12,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 16,
-    color: '#666666',
+    color: '#6b7280',
+    lineHeight: 24,
   },
   form: {
     width: '100%',
   },
   inputContainer: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 8,
+    color: '#374151',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
+    backgroundColor: '#f9fafb',
+    borderRadius: 10,
     padding: 16,
     fontSize: 16,
     color: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
   forgotPassword: {
     alignSelf: 'flex-end',
-    marginBottom: 24,
+    marginBottom: 32,
+    marginTop: -8,
   },
   forgotPasswordText: {
     color: '#667eea',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   button: {
     backgroundColor: '#667eea',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 10,
+    padding: 18,
     alignItems: 'center',
     marginBottom: 24,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   buttonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 8,
   },
   footerText: {
-    color: '#666666',
+    color: '#6b7280',
     fontSize: 14,
   },
   footerLink: {
     color: '#667eea',
     fontSize: 14,
     fontWeight: '600',
+    marginLeft: 4,
   },
 });
 

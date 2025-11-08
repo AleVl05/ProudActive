@@ -1,10 +1,10 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { Colors } from '@/constants/theme';
 
-export default function AcademyScreen() {
+export default function GymScreen() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Academia</Text>
+      <Text style={styles.title}>Gimnasio</Text>
       <Text style={styles.subtitle}>Próximamente...</Text>
     </View>
   );

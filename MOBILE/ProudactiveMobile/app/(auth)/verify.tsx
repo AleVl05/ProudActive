@@ -46,7 +46,7 @@ export default function VerifyScreen() {
           [
             {
               text: 'Continuar',
-              onPress: () => router.replace('/(tabs)'),
+              onPress: () => router.replace('/(tabs)/calendar'),
             },
           ]
         );

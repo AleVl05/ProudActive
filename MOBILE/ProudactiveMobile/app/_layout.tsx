@@ -22,22 +22,41 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    // No hacer nada si aún no se ha verificado la autenticación inicial
     if (isAuthenticated === null) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inProtectedGroup = segments[0] === '(tabs)';
 
-    // 🔧 FIX: Solo redirigir si no está autenticado
-    // No redirigir automáticamente si ya está autenticado (las pantallas lo harán manualmente)
-    if (!isAuthenticated && !inAuthGroup) {
-      // No autenticado, redirigir a welcome
+    // Si está navegando a una ruta protegida, verificar autenticación
+    // Esto es importante después de un login exitoso
+    if (inProtectedGroup) {
+      checkAuth().then((authenticated) => {
+        if (!authenticated) {
+          router.replace('/(auth)/welcome');
+        }
+        // Si está autenticado, dejar que navegue libremente entre tabs
+      });
+      return;
+    }
+
+    // Si está navegando a rutas de auth y está autenticado, redirigir al calendario
+    // (solo cuando viene de login/register/verify, no cuando navega normalmente)
+    if (inAuthGroup && isAuthenticated === true) {
+      router.replace('/(tabs)/calendar');
+      return;
+    }
+
+    // Si no está autenticado y no está en el grupo de auth, redirigir a welcome
+    if (isAuthenticated === false && !inAuthGroup) {
       router.replace('/(auth)/welcome');
     }
-    // Eliminamos el else if que causaba la redirección automática al login
-  }, [isAuthenticated, segments]);
+  }, [segments, isAuthenticated]);
 
-  const checkAuth = async () => {
+  const checkAuth = async (): Promise<boolean> => {
     const authenticated = await authService.isAuthenticated();
     setIsAuthenticated(authenticated);
+    return authenticated;
   };
 
   if (isAuthenticated === null) {

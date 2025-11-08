@@ -13,6 +13,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../../constants/theme';
+import AlarmSetting from './AlarmSetting';
+import DatePickerSetting from './DatePickerSetting';
+import TutorialOverlay from '../tutorial/TutorialOverlay';
+import { ExtendedTutorialStep } from '../tutorial/tutorialSteps';
 
 interface Subtask {
   id: string;
@@ -41,6 +45,20 @@ interface EventModalProps {
   onDeleteSubtask: (id: string) => void;
   selectedEvent: any;
   onDeleteEvent: () => void;
+  selectedCell?: any;
+  eventDateKey?: string;
+  onAlarmChange?: (enabled: boolean, option?: string) => void;
+  alarmEnabled?: boolean;
+  alarmOption?: string;
+  onDateChange?: (dateKey: string, startTime: number) => void;
+  // Props del tutorial
+  tutorialVisible?: boolean;
+  tutorialStep?: number;
+  tutorialSteps?: ExtendedTutorialStep[];
+  onTutorialNext?: () => void;
+  onTutorialSkip?: () => void;
+  onTutorialComplete?: () => void;
+  beaverImage?: any;
 }
 
 // Colores principales (5 colores por defecto)
@@ -100,6 +118,19 @@ export default function EventModal({
   onDeleteSubtask,
   selectedEvent,
   onDeleteEvent,
+  selectedCell,
+  eventDateKey,
+  onAlarmChange,
+  alarmEnabled,
+  alarmOption,
+  onDateChange,
+  tutorialVisible = false,
+  tutorialStep = 0,
+  tutorialSteps = [],
+  onTutorialNext,
+  onTutorialSkip,
+  onTutorialComplete,
+  beaverImage,
 }: EventModalProps) {
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -161,6 +192,40 @@ export default function EventModal({
     }
   };
 
+  // Verificar si el paso actual del tutorial debe mostrarse en el modal
+  const currentTutorialStep = tutorialSteps && tutorialSteps.length > tutorialStep ? tutorialSteps[tutorialStep] : null;
+  const shouldShowTutorialInModal = tutorialVisible && 
+    visible && 
+    currentTutorialStep && 
+    currentTutorialStep.showInModal === true &&
+    beaverImage &&
+    onTutorialNext &&
+    onTutorialSkip &&
+    onTutorialComplete;
+  
+  // Hacer scroll automático si el paso lo requiere
+  useEffect(() => {
+    if (shouldShowTutorialInModal && currentTutorialStep?.needScroll && scrollViewRef.current) {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 300);
+    }
+  }, [shouldShowTutorialInModal, currentTutorialStep?.needScroll]);
+  
+  // console.log('🐾 EventModal Tutorial Debug:', {
+  //   tutorialVisible: !!tutorialVisible,
+  //   visible: !!visible,
+  //   tutorialStep,
+  //   currentTutorialStep: currentTutorialStep?.id,
+  //   showInModal: currentTutorialStep?.showInModal,
+  //   shouldShowTutorialInModal: !!shouldShowTutorialInModal,
+  //   needScroll: currentTutorialStep?.needScroll,
+  //   hasBeaverImage: !!beaverImage,
+  //   hasOnTutorialNext: !!onTutorialNext,
+  //   hasOnTutorialSkip: !!onTutorialSkip,
+  //   hasOnTutorialComplete: !!onTutorialComplete,
+  // });
+
   return (
     <>
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -194,7 +259,7 @@ export default function EventModal({
 
           <TextInput 
             style={styles.titleInput} 
-            placeholder="Nova tarefa" 
+            placeholder="Nueva tarea" 
             value={eventTitle} 
             onChangeText={setEventTitle} 
             maxLength={50} 
@@ -252,6 +317,15 @@ export default function EventModal({
           </View>
 
           <View style={styles.configCard}>
+            <DatePickerSetting
+              selectedEvent={selectedEvent}
+              selectedCell={selectedCell}
+              eventDateKey={eventDateKey}
+              onDateChange={onDateChange}
+            />
+          </View>
+
+          <View style={styles.configCard}>
             <TouchableOpacity
               style={styles.configRow}
               onPress={onOpenRecurrenceModal}
@@ -263,23 +337,35 @@ export default function EventModal({
             </TouchableOpacity>
           </View>
 
+          <View style={styles.configCard}>
+            <AlarmSetting
+              selectedEvent={selectedEvent}
+              selectedCell={selectedCell}
+              eventTitle={eventTitle}
+              eventDateKey={eventDateKey}
+              alarmEnabled={alarmEnabled}
+              alarmOption={alarmOption as any}
+              onAlarmChange={onAlarmChange}
+            />
+          </View>
+
           <View style={styles.subtasksSection}>
             <TouchableOpacity 
               style={styles.subtasksCard}
               onPress={() => setShowSubtaskInput(!showSubtaskInput)}
             >
               <Ionicons name="add" size={20} color={Colors.light.tint} />
-              <Text style={styles.subtasksLabel}>Subtarefas</Text>
+              <Text style={styles.subtasksLabel}>Subtareas</Text>
             </TouchableOpacity>
 
-            <Text style={styles.subtasksDescription}>As subtarefas podem ser definidas como sua rotina ou lista de verificação diária</Text>
+            <Text style={styles.subtasksDescription}>Las subtareas pueden ser definidas como tu rutina o lista de verificación diaria</Text>
 
             {/* Input para nueva subtarea */}
             {showSubtaskInput && (
               <View style={styles.subtaskInputContainer}>
                 <TextInput
                   style={styles.subtaskInput}
-                  placeholder="Nova subtarefa..."
+                  placeholder="Nueva subtarea..."
                   value={newSubtaskText}
                   onChangeText={setNewSubtaskText}
                   onSubmitEditing={onAddSubtask}
@@ -341,6 +427,19 @@ export default function EventModal({
           <View style={styles.bottomPadding} />
         </ScrollView>
         </View>
+
+        {/* Tutorial Overlay dentro del modal */}
+        {shouldShowTutorialInModal && (
+          <TutorialOverlay
+            visible={tutorialVisible}
+            currentStep={tutorialStep}
+            steps={tutorialSteps}
+            onNext={onTutorialNext || (() => {})}
+            onSkip={onTutorialSkip || (() => {})}
+            onComplete={onTutorialComplete || (() => {})}
+            beaverImage={beaverImage}
+          />
+        )}
       </KeyboardAvoidingView>
     </Modal>
     

@@ -73,6 +73,16 @@ async function apiDeleteEvent(eventId: string) {
   return res;
 }
 
+async function apiDeleteAllEvents(password: string) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/events`, {
+    method: 'DELETE',
+    headers,
+    body: JSON.stringify({ password }),
+  });
+  return res;
+}
+
 async function apiFetchEvents(startIso: string, endIso: string) {
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({ start: startIso, end: endIso });
@@ -259,6 +269,7 @@ export {
   apiGetCalendars,
   apiPostEvent,
   apiDeleteEvent,
+  apiDeleteAllEvents,
   apiFetchEvents,
   apiFetchMonthEvents,
   apiPostMonthEvent,

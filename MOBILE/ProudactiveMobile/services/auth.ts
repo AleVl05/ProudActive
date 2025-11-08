@@ -317,6 +317,47 @@ class AuthService {
       return null;
     }
   }
+
+  // Actualizar perfil
+  async updateProfile(data: {
+    name?: string;
+    email?: string;
+    avatar_url?: string;
+  }): Promise<AuthResponse> {
+    try {
+      const token = await this.getToken();
+      
+      if (!token) {
+        return {
+          success: false,
+          message: 'No estás autenticado',
+        };
+      }
+
+      const response = await fetch(`${API_BASE}/auth/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        await this.saveUser(result.data.user);
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Error actualizando perfil:', error);
+      return {
+        success: false,
+        message: 'Error de conexión',
+      };
+    }
+  }
 }
 
 export default new AuthService();

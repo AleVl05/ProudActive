@@ -25,6 +25,8 @@ import {
   getRecurrenceTitle,
   RECURRENCE_MODE_LABEL,
 } from '../../utils/recurrenceUtils';
+import TutorialOverlay from '../tutorial/TutorialOverlay';
+import { ExtendedTutorialStep } from '../tutorial/tutorialSteps';
 
 // Types
 export type RecurrenceMode = 'daily' | 'weekly' | 'monthly';
@@ -45,12 +47,51 @@ export interface RecurrenceModalProps {
   onCancel: () => void;
   calendarMonth: Date;
   onCalendarMonthChange: (date: Date) => void;
+  // Props del tutorial
+  tutorialVisible?: boolean;
+  tutorialStep?: number;
+  tutorialSteps?: ExtendedTutorialStep[];
+  onTutorialNext?: () => void;
+  onTutorialSkip?: () => void;
+  onTutorialComplete?: () => void;
+  beaverImage?: any;
 }
 
-export default function RecurrenceModal({ config, onSave, onCancel, calendarMonth, onCalendarMonthChange }: RecurrenceModalProps) {
+export default function RecurrenceModal({ 
+  config, 
+  onSave, 
+  onCancel, 
+  calendarMonth, 
+  onCalendarMonthChange,
+  tutorialVisible = false,
+  tutorialStep = 0,
+  tutorialSteps = [],
+  onTutorialNext,
+  onTutorialSkip,
+  onTutorialComplete,
+  beaverImage,
+}: RecurrenceModalProps) {
   const insets = useSafeAreaInsets();
   const [localConfig, setLocalConfig] = useState<RecurrenceConfig>(() => cloneRecurrenceConfig(config));
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  
+  // Verificar si el paso actual del tutorial debe mostrarse en el modal de recurrencia
+  const currentTutorialStep = tutorialSteps && tutorialSteps.length > tutorialStep ? tutorialSteps[tutorialStep] : null;
+  const shouldShowTutorialInRecurrenceModal = tutorialVisible && 
+    currentTutorialStep && 
+    currentTutorialStep.showInRecurrenceModal === true &&
+    beaverImage &&
+    onTutorialNext &&
+    onTutorialSkip &&
+    onTutorialComplete;
+  
+  // console.log('🔄 RecurrenceModal Tutorial Debug:', {
+  //   tutorialVisible,
+  //   tutorialStep,
+  //   currentTutorialStep: currentTutorialStep?.id,
+  //   showInRecurrenceModal: currentTutorialStep?.showInRecurrenceModal,
+  //   shouldShowTutorialInRecurrenceModal,
+  // });
 
   // Actualizar configuración local cuando cambie la prop
   useEffect(() => {
@@ -58,8 +99,47 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
   }, [config]);
 
   const updateConfig = useCallback((updates: Partial<RecurrenceConfig>) => {
-    setLocalConfig(prev => ({ ...prev, ...updates }));
+    setLocalConfig(prev => {
+      const newConfig = { ...prev, ...updates };
+      // Notificar cambios al padre para detección del tutorial
+      // Esto se hace a través de onSave, pero necesitamos que se detecte en tiempo real
+      return newConfig;
+    });
   }, []);
+  
+  // Detectar cambios en localConfig para avanzar el tutorial
+  useEffect(() => {
+    if (!tutorialVisible || !currentTutorialStep) return;
+    
+    const objective = currentTutorialStep.objective;
+    
+    // Detectar cuando se activa la recurrencia
+    if (objective === 'enable-recurrence' && localConfig.enabled) {
+      console.log('✅ RecurrenceModal: Objetivo cumplido: enable-recurrence');
+      setTimeout(() => onTutorialNext?.(), 500);
+      return;
+    }
+    
+    // Detectar cuando se selecciona modo semanal
+    if (objective === 'select-weekly-mode' && localConfig.enabled && localConfig.mode === 'weekly') {
+      console.log('✅ RecurrenceModal: Objetivo cumplido: select-weekly-mode');
+      setTimeout(() => onTutorialNext?.(), 500);
+      return;
+    }
+    
+    // Detectar cuando se seleccionan los días correctos
+    if (objective === 'select-recurrence-days') {
+      const requiredDays = ['MO', 'TU', 'TH', 'FR']; // Lunes, Martes, Jueves, Viernes
+      if (localConfig.enabled && 
+          localConfig.mode === 'weekly' && 
+          localConfig.weekDays.length >= 4 &&
+          requiredDays.every(day => localConfig.weekDays.includes(day))) {
+        console.log('✅ RecurrenceModal: Objetivo cumplido: select-recurrence-days');
+        setTimeout(() => onTutorialNext?.(), 500);
+        return;
+      }
+    }
+  }, [localConfig, tutorialVisible, currentTutorialStep, onTutorialNext]);
 
   const handleSave = useCallback(() => {
     onSave(localConfig);
@@ -110,7 +190,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
   const formatEndDate = useCallback((dateStr: string | null) => {
     if (!dateStr) return '';
     const date = new Date(dateStr + 'T00:00:00');
-    return date.toLocaleDateString('pt-BR');
+    return date.toLocaleDateString('es-ES');
   }, []);
 
   const renderTabContent = () => {
@@ -121,7 +201,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
             <View style={recurrenceStyles.intervalSection}>
               <Text style={recurrenceStyles.sectionTitle}>Intervalo</Text>
               <View style={recurrenceStyles.intervalRow}>
-                <Text style={recurrenceStyles.intervalLabel}>A cada</Text>
+                <Text style={recurrenceStyles.intervalLabel}>Cada</Text>
                 <View style={recurrenceStyles.stepperContainer}>
                   <TouchableOpacity
                     style={recurrenceStyles.stepperButton}
@@ -140,7 +220,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
                   </TouchableOpacity>
                 </View>
                 <Text style={recurrenceStyles.intervalLabel}>
-                  {localConfig.interval === 1 ? 'dia' : 'dias'}
+                  {localConfig.interval === 1 ? 'día' : 'días'}
                 </Text>
               </View>
             </View>
@@ -175,7 +255,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
             <View style={recurrenceStyles.intervalSection}>
               <Text style={recurrenceStyles.sectionTitle}>Intervalo</Text>
               <View style={recurrenceStyles.intervalRow}>
-                <Text style={recurrenceStyles.intervalLabel}>A cada</Text>
+                <Text style={recurrenceStyles.intervalLabel}>Cada</Text>
                 <View style={recurrenceStyles.stepperContainer}>
                   <TouchableOpacity
                     style={recurrenceStyles.stepperButton}
@@ -229,7 +309,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
             <View style={recurrenceStyles.intervalSection}>
               <Text style={recurrenceStyles.sectionTitle}>Intervalo</Text>
               <View style={recurrenceStyles.intervalRow}>
-                <Text style={recurrenceStyles.intervalLabel}>A cada</Text>
+                <Text style={recurrenceStyles.intervalLabel}>Cada</Text>
                 <View style={recurrenceStyles.stepperContainer}>
                   <TouchableOpacity
                     style={recurrenceStyles.stepperButton}
@@ -248,7 +328,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
                   </TouchableOpacity>
                 </View>
                 <Text style={recurrenceStyles.intervalLabel}>
-                  {localConfig.interval === 1 ? 'mês' : 'meses'}
+                  {localConfig.interval === 1 ? 'mes' : 'meses'}
                 </Text>
               </View>
             </View>
@@ -277,7 +357,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
           <View style={recurrenceStyles.mainSwitchRow}>
             <Ionicons name="refresh-outline" size={20} color={Colors.light.tint} />
             <Text style={recurrenceStyles.mainSwitchLabel}>Repetir</Text>
-            <Text style={recurrenceStyles.mainSwitchSubtitle}>Defina um ciclo para seu plano</Text>
+            <Text style={recurrenceStyles.mainSwitchSubtitle}>Define un ciclo para tu plan</Text>
             <Switch
               value={localConfig.enabled}
               onValueChange={(enabled) => updateConfig({ enabled })}
@@ -318,7 +398,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
             {/* Sección de fecha de término */}
             <View style={recurrenceStyles.endDateSection}>
               <View style={recurrenceStyles.endDateRow}>
-                <Text style={recurrenceStyles.endDateLabel}>Data de término</Text>
+                <Text style={recurrenceStyles.endDateLabel}>Fecha de término</Text>
                 <Switch
                   value={localConfig.hasEndDate}
                   onValueChange={(hasEndDate) => updateConfig({ hasEndDate, endDate: hasEndDate ? new Date().toISOString().split('T')[0] : null })}
@@ -333,7 +413,7 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
                   onPress={() => setShowEndDatePicker(true)}
                 >
                   <Text style={recurrenceStyles.endDateButtonText}>
-                    {formatEndDate(localConfig.endDate) || 'Selecionar data'}
+                    {formatEndDate(localConfig.endDate) || 'Seleccionar fecha'}
                   </Text>
                   <Ionicons name="chevron-forward" size={16} color="#ccc" />
                 </TouchableOpacity>
@@ -345,10 +425,23 @@ export default function RecurrenceModal({ config, onSave, onCancel, calendarMont
         {/* Botón de guardar */}
         <View style={recurrenceStyles.saveSection}>
           <TouchableOpacity style={recurrenceStyles.saveButton} onPress={handleSave}>
-            <Text style={recurrenceStyles.saveButtonText}>Salvar</Text>
+            <Text style={recurrenceStyles.saveButtonText}>Guardar</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Tutorial Overlay dentro del modal de recurrencia */}
+      {shouldShowTutorialInRecurrenceModal && (
+        <TutorialOverlay
+          visible={tutorialVisible}
+          currentStep={tutorialStep}
+          steps={tutorialSteps}
+          onNext={onTutorialNext || (() => {})}
+          onSkip={onTutorialSkip || (() => {})}
+          onComplete={onTutorialComplete || (() => {})}
+          beaverImage={beaverImage}
+        />
+      )}
 
       {/* Date Picker para fecha de término */}
       {showEndDatePicker && (

@@ -1,11 +1,11 @@
 // Constantes de fecha y calendario
 export const WEEK_DAY_ITEMS = [
   { code: 'SU', short: 'D', label: 'Dom' },
-  { code: 'MO', short: 'S', label: 'Seg' },
-  { code: 'TU', short: 'T', label: 'Ter' },
-  { code: 'WE', short: 'Q', label: 'Qua' },
-  { code: 'TH', short: 'Q', label: 'Qui' },
-  { code: 'FR', short: 'S', label: 'Sex' },
+  { code: 'MO', short: 'L', label: 'Lun' },
+  { code: 'TU', short: 'M', label: 'Mar' },
+  { code: 'WE', short: 'X', label: 'Mié' },
+  { code: 'TH', short: 'J', label: 'Jue' },
+  { code: 'FR', short: 'V', label: 'Vie' },
   { code: 'SA', short: 'S', label: 'Sáb' },
 ];
 
@@ -22,7 +22,7 @@ export const WEEK_DAY_SHORT_BY_CODE = WEEK_DAY_ITEMS.reduce<Record<string, strin
 }, {});
 
 export const MONTH_DAY_ITEMS = Array.from({ length: 31 }, (_, i) => i + 1);
-export const MONTH_WEEKDAY_HEADERS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+export const MONTH_WEEKDAY_HEADERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 
 // Constantes de tiempo
 export const CELL_HEIGHT = 50; // 30 minutos = 50px

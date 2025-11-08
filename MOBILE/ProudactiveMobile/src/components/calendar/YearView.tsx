@@ -13,9 +13,10 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { MonthEvent, monthEventFrontendToBackend } from './monthEventHelpers';
-import { apiPostMonthEvent, apiGetCalendars } from '../../../services/calendarApi';
+import { apiPostMonthEvent, apiGetCalendars, apiDeleteMonthEvent } from '../../../services/calendarApi';
 import { Alert } from 'react-native';
 
 const GOAL_SUGGESTIONS = [
@@ -44,10 +45,13 @@ export default function YearView({
   onMonthPress,
   refreshYearEvents,
 }: YearViewProps) {
+  const insets = useSafeAreaInsets();
   const [yearPlanModalVisible, setYearPlanModalVisible] = useState(false);
   const [yearPlanPage, setYearPlanPage] = useState(1);
   const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
+  const [deleteConfirmModalVisible, setDeleteConfirmModalVisible] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [placedGoals, setPlacedGoals] = useState<Array<{
     id: string;
     goal: string;
@@ -65,6 +69,54 @@ export default function YearView({
   const dragAnimatedY = useRef(new Animated.Value(0)).current;
 
   const currentYear = currentDate.getFullYear();
+
+  // Función para eliminar todos los eventos mensuales del año
+  const handleDeleteAllYearEvents = async () => {
+    try {
+      setIsDeleting(true);
+      
+      // Obtener todos los eventos del año actual
+      const eventsToDelete = yearEvents.filter(event => event.year === currentYear);
+      
+      if (eventsToDelete.length === 0) {
+        Alert.alert('Información', 'No hay eventos para eliminar en este año.');
+        setDeleteConfirmModalVisible(false);
+        setIsDeleting(false);
+        return;
+      }
+
+      // Eliminar cada evento
+      const deletePromises = eventsToDelete.map(event => {
+        // El ID del evento puede ser numérico o string
+        const eventId = typeof event.id === 'string' ? event.id : String(event.id);
+        return apiDeleteMonthEvent(eventId);
+      });
+
+      // Esperar a que todas las eliminaciones se completen
+      const results = await Promise.allSettled(deletePromises);
+      
+      // Verificar si hubo algún error
+      const errors = results.filter(result => result.status === 'rejected');
+      if (errors.length > 0) {
+        console.error('Error eliminando algunos eventos:', errors);
+        Alert.alert('Error', 'Hubo un problema al eliminar algunos eventos. Por favor, intenta de nuevo.');
+      } else {
+        Alert.alert('Éxito', `Se eliminaron ${eventsToDelete.length} evento(s) del año ${currentYear}.`);
+      }
+
+      // Refrescar los eventos del año
+      if (refreshYearEvents) {
+        await refreshYearEvents();
+      }
+
+      setDeleteConfirmModalVisible(false);
+    } catch (error) {
+      console.error('Error eliminando eventos del año:', error);
+      Alert.alert('Error', 'Hubo un problema al eliminar los eventos. Por favor, intenta de nuevo.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // DEBUG: Log cuando se cargan los eventos del año (comentado para reducir logs)
   // React.useEffect(() => {
@@ -599,7 +651,7 @@ export default function YearView({
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.yearScrollContent}
+        contentContainerStyle={[styles.yearScrollContent, { paddingLeft: Math.max(insets.left, 20), paddingRight: Math.max(insets.right, 20) }]}
         nestedScrollEnabled={true}
       >
         <View style={styles.yearView}>
@@ -613,30 +665,35 @@ export default function YearView({
             {/* Contenedor de la barra continua y líneas */}
             <View style={styles.monthsBarContainer}>
             {/* Barra continua de meses */}
-            <View style={styles.monthsBar}>
-              {[
-                'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-              ].map((monthName, monthIndex) => (
-                <TouchableOpacity
-                  key={monthIndex}
-                  style={styles.monthSegment}
-                  onPress={() => {
-                    onMonthPress(currentYear, monthIndex);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.monthLabel}>{monthName}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            
-            {/* Líneas de objetivos debajo de toda la barra */}
-            <View style={styles.objectivesContainer}>
+            <View style={styles.monthsBarWithTrash}>
+              {/* Contenedor para meses y líneas (solo los 12 meses) */}
+              <View style={styles.monthsBarWrapper}>
+                {/* Barra de meses (solo 12 meses) */}
+                <View style={styles.monthsBar}>
+                  {[
+                    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+                  ].map((monthName, monthIndex) => (
+                    <TouchableOpacity
+                      key={monthIndex}
+                      style={styles.monthSegment}
+                      onPress={() => {
+                        onMonthPress(currentYear, monthIndex);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.monthLabel}>{monthName}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                
+                {/* Líneas de objetivos debajo de toda la barra (solo sobre los 12 meses) */}
+                <View style={styles.objectivesContainer}>
               {yearEvents.map((event, eventIndex) => {
                 if (event.year !== currentYear) return null;
                 
-                // Cada mes ocupa exactamente 1/12 del ancho total de la barra
+                // Cada mes ocupa exactamente 1/12 del ancho total de la barra (sin contar el basurero)
+                // El basurero es adicional, así que las líneas solo deben cubrir los 12 meses
                 const monthWidthPercent = 100 / 12; // ≈ 8.333%
                 
                 // Posición del inicio del mes en la barra (0 = Enero, 8.333 = Febrero, etc.)
@@ -653,7 +710,14 @@ export default function YearView({
                 // Posición absoluta desde el inicio de la barra completa
                 // mesStartPercent + (posición relativa dentro del mes * ancho del mes)
                 const startPercent = monthStartPercent + (relativeStartInMonth * monthWidthPercent);
-                const widthPercent = relativeDurationInMonth * monthWidthPercent;
+                let widthPercent = relativeDurationInMonth * monthWidthPercent;
+                
+                // Asegurar que las líneas no se extiendan más allá de diciembre (100% de los 12 meses)
+                // Si la línea se extiende más allá de diciembre, cortarla en el 100%
+                const lineEndPercent = startPercent + widthPercent;
+                if (lineEndPercent > 100) {
+                  widthPercent = 100 - startPercent;
+                }
                 
                 // DEBUG: Log para verificar cálculo de líneas (comentado para reducir logs)
                 // console.log('📅 YEAR VIEW - Rendering line:', {
@@ -684,6 +748,18 @@ export default function YearView({
                   />
                 );
               })}
+                </View>
+              </View>
+              {/* Basurero separado después de diciembre */}
+              <TouchableOpacity
+                style={styles.trashSegment}
+                onPress={() => {
+                  setDeleteConfirmModalVisible(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={24} color="#dc3545" />
+              </TouchableOpacity>
             </View>
           </View>
           </ScrollView>
@@ -694,7 +770,7 @@ export default function YearView({
       <View style={styles.colorLegendDivider} />
       
       {/* Contenedor de leyenda y botón Planear Año */}
-      <View style={styles.legendAndButtonContainer}>
+      <View style={[styles.legendAndButtonContainer, { paddingLeft: Math.max(insets.left, 10), paddingRight: Math.max(insets.right, 10) }]}>
         {/* Leyenda de colores con scroll vertical (4 tareas por fila) */}
         <ScrollView
           style={styles.colorLegendScrollContainer}
@@ -1173,6 +1249,53 @@ export default function YearView({
           )}
         </View>
       </Modal>
+
+      {/* Modal de confirmación para eliminar todos los eventos del año */}
+      <Modal
+        visible={deleteConfirmModalVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          if (!isDeleting) {
+            setDeleteConfirmModalVisible(false);
+          }
+        }}
+      >
+        <View style={styles.deleteModalOverlay}>
+          <View style={styles.deleteModalContent}>
+            <View style={styles.deleteModalIconContainer}>
+              <Ionicons name="warning" size={48} color="#dc3545" />
+            </View>
+            <Text style={styles.deleteModalTitle}>Eliminar todos los eventos del año</Text>
+            <Text style={styles.deleteModalMessage}>
+              ¿Estás seguro de que deseas eliminar todos los eventos mensuales del año {currentYear}?
+              Esta acción no se puede deshacer.
+            </Text>
+            <View style={styles.deleteModalButtons}>
+              <TouchableOpacity
+                style={[styles.deleteModalButton, styles.deleteModalButtonCancel]}
+                onPress={() => {
+                  if (!isDeleting) {
+                    setDeleteConfirmModalVisible(false);
+                  }
+                }}
+                disabled={isDeleting}
+              >
+                <Text style={styles.deleteModalButtonCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.deleteModalButton, styles.deleteModalButtonConfirm, { marginLeft: 12 }]}
+                onPress={handleDeleteAllYearEvents}
+                disabled={isDeleting}
+              >
+                <Text style={styles.deleteModalButtonConfirmText}>
+                  {isDeleting ? 'Eliminando...' : 'Eliminar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1193,6 +1316,16 @@ const styles = StyleSheet.create({
     width: '100%',
     minHeight: 200, // Altura mínima aumentada para dar más espacio a las líneas
   },
+  monthsBarWithTrash: {
+    flexDirection: 'row',
+    width: '100%',
+    minWidth: 1800,
+    alignItems: 'stretch',
+  },
+  monthsBarWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
   monthsBar: { 
     flexDirection: 'row',
     backgroundColor: '#f8f9fa',
@@ -1202,7 +1335,6 @@ const styles = StyleSheet.create({
     overflow: 'visible', // Cambiar a 'visible' para que las líneas se vean
     marginBottom: 0, // Eliminar marginBottom ya que las líneas estarán justo debajo
     width: '100%',
-    minWidth: 1800,
   },
   monthSegment: {
     flex: 1,
@@ -1223,13 +1355,26 @@ const styles = StyleSheet.create({
     width: '100%',
     overflow: 'hidden',
   },
+  trashSegment: {
+    width: 150,
+    marginLeft: 8,
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 60,
+    backgroundColor: '#fff5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    alignSelf: 'stretch',
+  },
   objectivesContainer: {
     position: 'absolute',
     top: 65, // Justo debajo de la barra (60px de altura aproximada + 5px de padding)
     left: 0,
     height: 40,
     width: '100%',
-    minWidth: 1800, // Mismo ancho mínimo que monthsBar para alineación correcta
     zIndex: 2,
     pointerEvents: 'none', // Permitir que los toques pasen a través
     backgroundColor: 'transparent', // Asegurar que el fondo sea transparente
@@ -1247,13 +1392,14 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#e0e0e0',
     marginTop: 0,
-    marginBottom: 16,
+    marginBottom: 0,
     width: '100%',
   },
   legendAndButtonContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: 10,
+    paddingTop: 1, // Solo 1px para que la línea se vea
     paddingBottom: 10,
   },
   colorLegendScrollContainer: {
@@ -1265,7 +1411,7 @@ const styles = StyleSheet.create({
   },
   colorLegendScrollContent: {
     paddingHorizontal: 8,
-    paddingTop: 4,
+    paddingTop: 0,
     paddingBottom: 4,
   },
   colorLegendContainer: {
@@ -1679,6 +1825,67 @@ const styles = StyleSheet.create({
   yearPlanFinishButtonText: {
     fontSize: 16,
     fontWeight: '700',
+    color: 'white',
+  },
+  // Estilos para modal de confirmación de eliminación
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  deleteModalContent: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+  },
+  deleteModalIconContainer: {
+    marginBottom: 16,
+  },
+  deleteModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.light.text,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  deleteModalMessage: {
+    fontSize: 16,
+    color: Colors.light.text,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  deleteModalButtons: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  deleteModalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteModalButtonCancel: {
+    backgroundColor: '#f0f0f0',
+  },
+  deleteModalButtonConfirm: {
+    backgroundColor: '#dc3545',
+  },
+  deleteModalButtonCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.light.text,
+  },
+  deleteModalButtonConfirmText: {
+    fontSize: 16,
+    fontWeight: '600',
     color: 'white',
   },
 });

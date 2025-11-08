@@ -394,6 +394,7 @@ class AuthController extends Controller
 
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:150',
+            'email' => 'sometimes|email|unique:users,email,' . $user->id,
             'timezone' => 'sometimes|string|max:64',
             'locale' => 'sometimes|string|max:10',
             'avatar_url' => 'sometimes|nullable|string|max:512',
@@ -407,7 +408,7 @@ class AuthController extends Controller
             ], 422);
         }
 
-        $user->update($request->only(['name', 'timezone', 'locale', 'avatar_url']));
+        $user->update($request->only(['name', 'email', 'timezone', 'locale', 'avatar_url']));
 
         return response()->json([
             'success' => true,
@@ -461,20 +462,55 @@ class AuthController extends Controller
     private function sendVerificationEmail(string $email, string $code, string $name): void
     {
         try {
-            Log::info('📧 Enviando email de verificación:', [
+            // Log detallado de configuración antes de enviar
+            Log::info('📧 [EMAIL DEBUG] Iniciando envío de email de verificación', [
                 'email' => $email,
                 'code' => $code,
-                'name' => $name
+                'name' => $name,
+                'timestamp' => now()->toDateTimeString(),
             ]);
-            
-            Mail::raw("Hola {$name},\n\nTu código de verificación es: {$code}\n\nEste código expira en 10 minutos.\n\nSi no solicitaste este código, ignora este mensaje.\n\n- Equipo Proudactive", function ($message) use ($email) {
+
+            // Log de configuración SMTP cargada
+            Log::info('📧 [EMAIL DEBUG] Configuración SMTP cargada:', [
+                'default_mailer' => config('mail.default'),
+                'smtp_host' => config('mail.mailers.smtp.host'),
+                'smtp_port' => config('mail.mailers.smtp.port'),
+                'smtp_encryption' => config('mail.mailers.smtp.encryption'),
+                'smtp_username' => config('mail.mailers.smtp.username'),
+                'smtp_password_set' => !empty(config('mail.mailers.smtp.password')),
+                'from_address' => config('mail.from.address'),
+                'from_name' => config('mail.from.name'),
+                'queue_connection' => config('queue.default'),
+            ]);
+
+            // Forzar uso de mailer SMTP explícitamente con vista HTML
+            Mail::mailer('smtp')->send('emails.verification', [
+                'name' => $name,
+                'code' => $code
+            ], function ($message) use ($email) {
                 $message->to($email)
-                        ->subject('Verifica tu cuenta - Proudactive');
+                        ->subject('Verifica tu cuenta - Proudly');
             });
             
-            Log::info('✅ Email de verificación enviado exitosamente');
+            Log::info('✅ [EMAIL DEBUG] Email de verificación enviado exitosamente', [
+                'email' => $email,
+                'timestamp' => now()->toDateTimeString(),
+            ]);
         } catch (\Exception $e) {
-            Log::error('❌ Error enviando email de verificación: ' . $e->getMessage());
+            Log::error('❌ [EMAIL DEBUG] Error enviando email de verificación', [
+                'email' => $email,
+                'error_message' => $e->getMessage(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'error_trace' => $e->getTraceAsString(),
+                'smtp_config' => [
+                    'host' => config('mail.mailers.smtp.host'),
+                    'port' => config('mail.mailers.smtp.port'),
+                    'encryption' => config('mail.mailers.smtp.encryption'),
+                    'username' => config('mail.mailers.smtp.username'),
+                ],
+                'timestamp' => now()->toDateTimeString(),
+            ]);
         }
     }
 
@@ -484,12 +520,55 @@ class AuthController extends Controller
     private function sendPasswordResetEmail(string $email, string $code, string $name): void
     {
         try {
-            Mail::raw("Hola {$name},\n\nTu código de recuperación de contraseña es: {$code}\n\nEste código expira en 15 minutos.\n\nSi no solicitaste este código, ignora este mensaje.\n\n- Equipo Proudactive", function ($message) use ($email) {
+            // Log detallado de configuración antes de enviar
+            Log::info('📧 [EMAIL DEBUG] Iniciando envío de email de recuperación', [
+                'email' => $email,
+                'code' => $code,
+                'name' => $name,
+                'timestamp' => now()->toDateTimeString(),
+            ]);
+
+            // Log de configuración SMTP cargada
+            Log::info('📧 [EMAIL DEBUG] Configuración SMTP cargada:', [
+                'default_mailer' => config('mail.default'),
+                'smtp_host' => config('mail.mailers.smtp.host'),
+                'smtp_port' => config('mail.mailers.smtp.port'),
+                'smtp_encryption' => config('mail.mailers.smtp.encryption'),
+                'smtp_username' => config('mail.mailers.smtp.username'),
+                'smtp_password_set' => !empty(config('mail.mailers.smtp.password')),
+                'from_address' => config('mail.from.address'),
+                'from_name' => config('mail.from.name'),
+                'queue_connection' => config('queue.default'),
+            ]);
+
+            // Forzar uso de mailer SMTP explícitamente con vista HTML
+            Mail::mailer('smtp')->send('emails.password-reset', [
+                'name' => $name,
+                'code' => $code
+            ], function ($message) use ($email) {
                 $message->to($email)
-                        ->subject('Recuperar contraseña - Proudactive');
+                        ->subject('Recuperar contraseña - Proudly');
             });
+
+            Log::info('✅ [EMAIL DEBUG] Email de recuperación enviado exitosamente', [
+                'email' => $email,
+                'timestamp' => now()->toDateTimeString(),
+            ]);
         } catch (\Exception $e) {
-            Log::error('Error enviando email de recuperación: ' . $e->getMessage());
+            Log::error('❌ [EMAIL DEBUG] Error enviando email de recuperación', [
+                'email' => $email,
+                'error_message' => $e->getMessage(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'error_trace' => $e->getTraceAsString(),
+                'smtp_config' => [
+                    'host' => config('mail.mailers.smtp.host'),
+                    'port' => config('mail.mailers.smtp.port'),
+                    'encryption' => config('mail.mailers.smtp.encryption'),
+                    'username' => config('mail.mailers.smtp.username'),
+                ],
+                'timestamp' => now()->toDateTimeString(),
+            ]);
         }
     }
 }

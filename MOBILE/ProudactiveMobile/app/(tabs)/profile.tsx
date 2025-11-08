@@ -1,18 +1,29 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Modal, ScrollView, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Modal, ScrollView, Image, Switch, Platform, Linking } from 'react-native';
 import { Colors } from '@/constants/theme';
-import * as Updates from 'expo-updates';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
-// import NotificationTester from '@/components/NotificationTester'; // Deshabilitado - Notifee removido
+import { Ionicons } from '@expo/vector-icons';
 import authService, { User } from '../../services/auth';
+import tutorialService from '../../src/utils/tutorialService';
+import { PermissionsAndroid } from 'react-native';
+import { apiDeleteAllEvents } from '../../services/calendarApi';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [showHourConfig, setShowHourConfig] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showEditEmail, setShowEditEmail] = useState(false);
   const [startHour, setStartHour] = useState('6');
   const [endHour, setEndHour] = useState('24');
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showDeleteAllEventsModal, setShowDeleteAllEventsModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeletingEvents, setIsDeletingEvents] = useState(false);
   
   // Estadísticas del usuario (simuladas por ahora)
   const [userStats, setUserStats] = useState({
@@ -20,16 +31,34 @@ export default function ProfileScreen() {
     totalTasks: 23,
     completedTasks: 18,
     streak: 5,
-    lastLogin: 'Hoy'
+    consecutiveAccesses: 7
   });
 
   useEffect(() => {
     loadUserData();
+    checkNotificationPermissions();
   }, []);
 
   const loadUserData = async () => {
     const userData = await authService.getUser();
     setUser(userData);
+    if (userData) {
+      setEditName(userData.name || '');
+      setEditEmail(userData.email || '');
+    }
+  };
+
+  const checkNotificationPermissions = async () => {
+    if (Platform.OS === 'android') {
+      if (Platform.Version >= 33) {
+        const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+        setNotificationsEnabled(granted);
+      } else {
+        setNotificationsEnabled(true);
+      }
+    } else {
+      setNotificationsEnabled(true);
+    }
   };
 
   const handleLogout = async () => {
@@ -50,39 +79,171 @@ export default function ProfileScreen() {
     );
   };
 
-  const handleCheckForUpdates = async () => {
+  const handleEditProfile = async () => {
+    if (!editName.trim()) {
+      Alert.alert('Error', 'El nombre no puede estar vacío');
+      return;
+    }
+
+    setIsLoading(true);
     try {
-      Alert.alert('Buscando actualizaciones...', 'Verificando si hay nuevas versiones disponibles.');
-      
-      const update = await Updates.checkForUpdateAsync();
-      
-      if (update.isAvailable) {
+      const result = await authService.updateProfile({
+        name: editName.trim(),
+      });
+
+      if (result.success) {
+        await loadUserData();
+        setShowEditProfile(false);
+        Alert.alert('Éxito', 'Perfil actualizado correctamente');
+      } else {
+        Alert.alert('Error', result.message || 'No se pudo actualizar el perfil');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Error al actualizar el perfil');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    if (!editEmail.trim() || !editEmail.includes('@')) {
+      Alert.alert('Error', 'Ingresa un email válido');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await authService.updateProfile({
+        email: editEmail.trim(),
+      });
+
+      if (result.success) {
+        await loadUserData();
+        setShowEditEmail(false);
+        Alert.alert('Éxito', 'Email actualizado correctamente');
+      } else {
+        Alert.alert('Error', result.message || 'No se pudo actualizar el email');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Error al actualizar el email');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleNotificationsToggle = async (value: boolean) => {
+    if (Platform.OS === 'android') {
+      if (Platform.Version >= 33) {
+        if (value) {
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+          );
+          
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            Alert.alert(
+              'Permiso necesario',
+              'Se necesita permiso de notificaciones para usar alarmas. ¿Deseas abrir la configuración?',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Abrir configuración',
+                  onPress: () => {
+                    Linking.openSettings();
+                  },
+                },
+              ]
+            );
+            return;
+          }
+        }
+      }
+    }
+    
+    setNotificationsEnabled(value);
+  };
+
+  const handleDeleteAllEventsPress = () => {
+    // Primera confirmación: ¿Estás seguro?
+    Alert.alert(
+      '⚠️ ELIMINAR TODOS LOS EVENTOS',
+      'Esta acción eliminará PERMANENTEMENTE todos los eventos de tu cuenta. Esta acción NO se puede deshacer.\n\n¿Estás completamente seguro?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sí, estoy seguro',
+          style: 'destructive',
+          onPress: () => {
+            // Segunda confirmación: Modal para ingresar contraseña
+            setShowDeleteAllEventsModal(true);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteAllEventsConfirm = async () => {
+    if (!deletePassword.trim()) {
+      Alert.alert('Error', 'Por favor ingresa tu contraseña');
+      return;
+    }
+
+    setIsDeletingEvents(true);
+    try {
+      const response = await apiDeleteAllEvents(deletePassword);
+      const result = await response.json();
+
+      if (result.success) {
         Alert.alert(
-          'Actualización disponible',
-          'Se encontró una nueva versión. ¿Deseas descargarla e instalarla ahora?',
+          '✅ Eventos eliminados',
+          result.message || 'Todos los eventos han sido eliminados exitosamente.',
           [
-            { text: 'Cancelar', style: 'cancel' },
-            { 
-              text: 'Actualizar', 
-              onPress: async () => {
-                try {
-                  await Updates.fetchUpdateAsync();
-                  await Updates.reloadAsync();
-                } catch (error) {
-                  Alert.alert('Error', 'No se pudo instalar la actualización. Inténtalo de nuevo.');
-                }
-              }
-            }
+            {
+              text: 'OK',
+              onPress: () => {
+                setShowDeleteAllEventsModal(false);
+                setDeletePassword('');
+                // Recargar la pantalla o navegar si es necesario
+              },
+            },
           ]
         );
       } else {
-        Alert.alert('Sin actualizaciones', 'Tu aplicación está actualizada con la última versión.');
+        Alert.alert('Error', result.message || 'No se pudieron eliminar los eventos. Verifica tu contraseña.');
       }
     } catch (error) {
-      console.error('Error checking for updates:', error);
-      Alert.alert('Error', 'No se pudo verificar las actualizaciones. Verifica tu conexión a internet.');
+      console.error('Error eliminando eventos:', error);
+      Alert.alert('Error', 'Ocurrió un error al eliminar los eventos. Por favor intenta de nuevo.');
+    } finally {
+      setIsDeletingEvents(false);
     }
   };
+
+  // Si no hay usuario autenticado, mostrar pantalla de login
+  if (!user) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.loginContainer}>
+        <View style={styles.loginContent}>
+          <Text style={styles.loginEmoji}>👤</Text>
+          <Text style={styles.loginTitle}>Inicia sesión</Text>
+          <Text style={styles.loginSubtitle}>Para acceder a tu perfil, necesitas iniciar sesión</Text>
+          
+          <TouchableOpacity 
+            style={styles.loginButton}
+            onPress={() => router.push('/(auth)/login')}
+          >
+            <Text style={styles.loginButtonText}>🚀 Iniciar Sesión</Text>
+          </TouchableOpacity>
+          
+          <View style={styles.loginFooter}>
+            <Text style={styles.loginFooterText}>¿Ya tienes una cuenta? </Text>
+            <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
+              <Text style={styles.loginFooterLink}>Entrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView style={styles.container}>
@@ -102,7 +263,10 @@ export default function ProfileScreen() {
         <Text style={styles.userName}>{user?.name || 'Usuario'}</Text>
         <Text style={styles.userEmail}>{user?.email || 'usuario@ejemplo.com'}</Text>
         
-        <TouchableOpacity style={styles.editProfileButton}>
+        <TouchableOpacity 
+          style={styles.editProfileButton}
+          onPress={() => setShowEditProfile(true)}
+        >
           <Text style={styles.editProfileText}>✏️ Editar perfil</Text>
         </TouchableOpacity>
       </View>
@@ -138,25 +302,24 @@ export default function ProfileScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>👤 Información Personal</Text>
         
-        <TouchableOpacity style={styles.infoRow}>
+        <TouchableOpacity 
+          style={styles.infoRow}
+          onPress={() => setShowEditEmail(true)}
+        >
           <Text style={styles.infoLabel}>📧 Email</Text>
           <Text style={styles.infoValue}>{user?.email || 'usuario@ejemplo.com'}</Text>
+          <Ionicons name="chevron-forward" size={16} color="#ccc" />
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.infoRow}>
-          <Text style={styles.infoLabel}>🌍 Zona horaria</Text>
-          <Text style={styles.infoValue}>{user?.timezone || 'UTC'}</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.infoRow}>
+        <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>🌐 Idioma</Text>
           <Text style={styles.infoValue}>{user?.locale || 'es'}</Text>
-        </TouchableOpacity>
+        </View>
         
-        <TouchableOpacity style={styles.infoRow}>
-          <Text style={styles.infoLabel}>📅 Último acceso</Text>
-          <Text style={styles.infoValue}>{userStats.lastLogin}</Text>
-        </TouchableOpacity>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>📅 Accesos consecutivos</Text>
+          <Text style={styles.infoValue}>{userStats.consecutiveAccesses} días</Text>
+        </View>
       </View>
 
       {/* Configuraciones */}
@@ -172,33 +335,56 @@ export default function ProfileScreen() {
         
         {showSettings && (
           <View style={styles.settingsContent}>
-            <TouchableOpacity style={styles.settingItem} onPress={handleCheckForUpdates}>
-              <Text style={styles.settingText}>🔍 Buscar actualizaciones</Text>
-            </TouchableOpacity>
-            
             <TouchableOpacity style={styles.settingItem} onPress={() => setShowHourConfig(true)}>
               <Text style={styles.settingText}>⏰ Configurar horas del calendario</Text>
+              <Ionicons name="chevron-forward" size={16} color="#ccc" />
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.settingItem}>
+            <TouchableOpacity 
+              style={styles.settingItem}
+              onPress={async () => {
+                Alert.alert(
+                  'Reiniciar Tutorial',
+                  '¿Deseas ver el tutorial de nuevo? Esto te ayudará a recordar las funciones principales de la aplicación.',
+                  [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                      text: 'Reiniciar',
+                      onPress: async () => {
+                        await tutorialService.resetTutorial();
+                        Alert.alert('Tutorial reiniciado', 'El tutorial se mostrará la próxima vez que entres al calendario.');
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Text style={styles.settingText}>🎓 Ver tutorial de nuevo</Text>
+              <Ionicons name="chevron-forward" size={16} color="#ccc" />
+            </TouchableOpacity>
+            
+            <View style={styles.settingItem}>
               <Text style={styles.settingText}>🔔 Notificaciones</Text>
-            </TouchableOpacity>
+              <Switch
+                value={notificationsEnabled}
+                onValueChange={handleNotificationsToggle}
+                trackColor={{ false: '#767577', true: Colors.light.tint }}
+                thumbColor={notificationsEnabled ? '#fff' : '#f4f3f4'}
+              />
+            </View>
             
-            <TouchableOpacity style={styles.settingItem}>
-              <Text style={styles.settingText}>🎨 Tema</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.settingItem}>
-              <Text style={styles.settingText}>🔒 Privacidad</Text>
+            <TouchableOpacity 
+              style={[styles.settingItem, styles.dangerSettingItem]}
+              onPress={handleDeleteAllEventsPress}
+            >
+              <Text style={[styles.settingText, styles.dangerText]}>
+                🗑️ Eliminar todos los eventos
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color="#ff3b30" />
             </TouchableOpacity>
           </View>
         )}
       </View>
-
-      {/* Probador de Notificaciones (deshabilitado - Notifee removido) */}
-      {/* <View style={styles.section}>
-        <NotificationTester />
-      </View> */}
       
       {/* Cerrar Sesión */}
       <TouchableOpacity style={[styles.button, styles.logoutButton]} onPress={handleLogout}>
@@ -208,6 +394,102 @@ export default function ProfileScreen() {
       <Text style={styles.infoText}>
         Versión actual: 1.0.0
       </Text>
+      
+      {/* Modal de editar perfil */}
+      <Modal
+        visible={showEditProfile}
+        animationType="slide"
+        transparent={true}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Editar Perfil</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Nombre:</Text>
+              <TextInput
+                style={styles.input}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Nombre completo"
+                autoCapitalize="words"
+              />
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setShowEditProfile(false);
+                  setEditName(user?.name || '');
+                }}
+                disabled={isLoading}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleEditProfile}
+                disabled={isLoading}
+              >
+                <Text style={styles.saveButtonText}>
+                  {isLoading ? 'Guardando...' : 'Guardar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de cambiar email */}
+      <Modal
+        visible={showEditEmail}
+        animationType="slide"
+        transparent={true}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Cambiar Email</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Nuevo email:</Text>
+              <TextInput
+                style={styles.input}
+                value={editEmail}
+                onChangeText={setEditEmail}
+                placeholder="email@ejemplo.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setShowEditEmail(false);
+                  setEditEmail(user?.email || '');
+                }}
+                disabled={isLoading}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleChangeEmail}
+                disabled={isLoading}
+              >
+                <Text style={styles.saveButtonText}>
+                  {isLoading ? 'Guardando...' : 'Guardar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       
       {/* Modal de configuración de horas */}
       <Modal
@@ -269,6 +551,66 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal de confirmación para eliminar todos los eventos */}
+      <Modal
+        visible={showDeleteAllEventsModal}
+        animationType="slide"
+        transparent={true}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={[styles.modalTitle, styles.dangerTitle]}>
+              ⚠️ ELIMINAR TODOS LOS EVENTOS
+            </Text>
+            
+            <Text style={styles.warningText}>
+              Esta acción eliminará PERMANENTEMENTE todos los eventos de tu cuenta.
+              {'\n\n'}
+              Esta acción NO se puede deshacer.
+              {'\n\n'}
+              Para confirmar, ingresa tu contraseña:
+            </Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Contraseña:</Text>
+              <TextInput
+                style={styles.input}
+                value={deletePassword}
+                onChangeText={setDeletePassword}
+                placeholder="Ingresa tu contraseña"
+                secureTextEntry={true}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isDeletingEvents}
+              />
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setShowDeleteAllEventsModal(false);
+                  setDeletePassword('');
+                }}
+                disabled={isDeletingEvents}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.dangerButton]}
+                onPress={handleDeleteAllEventsConfirm}
+                disabled={isDeletingEvents || !deletePassword.trim()}
+              >
+                <Text style={styles.dangerButtonText}>
+                  {isDeletingEvents ? 'Eliminando...' : 'Eliminar todo'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -294,6 +636,7 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     marginBottom: 16,
+    position: 'relative',
   },
   avatar: {
     width: 80,
@@ -312,6 +655,19 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: Colors.light.tint,
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   userName: {
     fontSize: 24,
@@ -403,11 +759,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.light.text,
     fontWeight: '500',
+    flex: 1,
   },
   infoValue: {
     fontSize: 16,
     color: Colors.light.text,
     opacity: 0.7,
+    marginRight: 8,
   },
   // Configuraciones
   settingsButton: {
@@ -427,6 +785,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   settingItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
@@ -435,6 +796,7 @@ const styles = StyleSheet.create({
   settingText: {
     fontSize: 16,
     color: Colors.light.text,
+    flex: 1,
   },
   // Botones
   button: {
@@ -536,5 +898,89 @@ const styles = StyleSheet.create({
   },
   logoutButtonText: {
     color: '#ffffff',
+  },
+  dangerSettingItem: {
+    borderTopWidth: 1,
+    borderTopColor: '#ffebee',
+    marginTop: 8,
+    paddingTop: 16,
+  },
+  dangerText: {
+    color: '#ff3b30',
+    fontWeight: '600',
+  },
+  dangerTitle: {
+    color: '#ff3b30',
+  },
+  dangerButton: {
+    backgroundColor: '#ff3b30',
+  },
+  dangerButtonText: {
+    color: '#ffffff',
+    fontWeight: '600',
+  },
+  warningText: {
+    fontSize: 14,
+    color: '#ff3b30',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  loginContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  loginContent: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  loginEmoji: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  loginTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: Colors.light.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  loginSubtitle: {
+    fontSize: 16,
+    color: Colors.light.text,
+    textAlign: 'center',
+    marginBottom: 32,
+    opacity: 0.7,
+  },
+  loginButton: {
+    backgroundColor: Colors.light.tint,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 24,
+  },
+  loginButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  loginFooter: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loginFooterText: {
+    color: Colors.light.text,
+    fontSize: 14,
+    opacity: 0.7,
+  },
+  loginFooterLink: {
+    color: Colors.light.tint,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

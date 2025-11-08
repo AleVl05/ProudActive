@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class EventController extends Controller
@@ -337,5 +338,88 @@ class EventController extends Controller
             'success' => true,
             'data' => $categories
         ]);
+    }
+
+    /**
+     * Eliminar TODOS los eventos del usuario (ACCIÓN ULTRA SENSIBLE)
+     * Requiere validación de contraseña
+     */
+    public function deleteAllEvents(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'password' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La contraseña es requerida',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = $request->user();
+
+        // Validar contraseña
+        if (!Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Contraseña incorrecta'
+            ], 401);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            // Obtener IDs de eventos antes de eliminar
+            $eventIds = Event::where('user_id', $user->id)
+                ->whereNull('deleted_at')
+                ->pluck('id')
+                ->toArray();
+
+            $eventsCount = count($eventIds);
+
+            // Eliminar todas las excepciones de recurrencia relacionadas primero
+            if (!empty($eventIds)) {
+                DB::table('recurrence_exceptions')
+                    ->whereIn('event_id', $eventIds)
+                    ->delete();
+            }
+
+            // Eliminar todos los eventos del usuario (soft delete)
+            Event::where('user_id', $user->id)
+                ->whereNull('deleted_at')
+                ->delete();
+
+            DB::commit();
+
+            Log::warning('⚠️ TODOS LOS EVENTOS ELIMINADOS', [
+                'user_id' => $user->id,
+                'user_email' => $user->email,
+                'events_deleted' => $eventsCount,
+                'timestamp' => now()->toDateTimeString()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Se eliminaron {$eventsCount} evento(s) de tu cuenta",
+                'data' => [
+                    'events_deleted' => $eventsCount
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error eliminando todos los eventos', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al eliminar los eventos',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }

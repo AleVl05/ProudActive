@@ -47,6 +47,7 @@ Route::prefix('v1')->group(function () {
         // Eventos - CRUD completo
         Route::get('events', [EventController::class, 'index']);
         Route::post('events', [EventController::class, 'store']);
+        Route::delete('events', [EventController::class, 'deleteAllEvents']); // Eliminar TODOS los eventos (debe ir ANTES de events/{id})
         Route::get('events/{id}', [EventController::class, 'show']);
         Route::match(['put', 'patch'], 'events/{id}', [EventController::class, 'update']);
         Route::delete('events/{id}', [EventController::class, 'destroy']);

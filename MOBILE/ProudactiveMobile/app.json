@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "ProudactiveMobile",
+    "name": "Proudly",
     "slug": "ProudactiveMobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -54,9 +54,7 @@
       "fallbackToCacheTimeout": 0,
       "url": "https://u.expo.dev/4c0b96d9-d5a0-4b7c-a94e-ad4a6dfafa06"
     },
-    "runtimeVersion": {
-      "policy": "sdkVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "extra": {
       "router": {},
       "eas": {

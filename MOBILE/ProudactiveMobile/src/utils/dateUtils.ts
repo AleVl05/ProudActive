@@ -16,11 +16,11 @@ export const dateKeyToDate = (dateKey: string) => {
 
 export const formatDateKey = (dateKey: string) => {
   const d = dateKeyToDate(dateKey);
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
 
 export const formatDisplayMonthYear = (date: Date) => {
-  const formatter = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
+  const formatter = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' });
   const formatted = formatter.format(date);
   return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 };
