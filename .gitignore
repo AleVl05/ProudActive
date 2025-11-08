@@ -8,8 +8,15 @@ package-lock.json
 MOBILE/ProudactiveMobile/.expo/
 MOBILE/ProudactiveMobile/node_modules/
 MOBILE/ProudactiveMobile/ios/
-MOBILE/ProudactiveMobile/android/
 MOBILE/ProudactiveMobile/.vscode/
+
+# Android: Permitir código fuente pero ignorar archivos generados
+MOBILE/ProudactiveMobile/android/app/build/
+MOBILE/ProudactiveMobile/android/.gradle/
+MOBILE/ProudactiveMobile/android/build/
+MOBILE/ProudactiveMobile/android/app/*.keystore
+MOBILE/ProudactiveMobile/android/local.properties
+MOBILE/ProudactiveMobile/android/.idea/
 
 # Web (Vite)
 WEB/node_modules/

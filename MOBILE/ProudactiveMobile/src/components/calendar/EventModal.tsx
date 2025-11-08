@@ -241,7 +241,7 @@ export default function EventModal({
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.createButton} onPress={onSave}>
-              <Text style={styles.createButtonText}>{selectedEvent ? 'Editar' : 'Crear'}</Text>
+              <Text style={styles.createButtonText}>{selectedEvent ? 'Guardar' : 'Crear'}</Text>
             </TouchableOpacity>
           </View>
 

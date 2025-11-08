@@ -40,4 +40,11 @@ app-example
 
 # generated native folders
 /ios
-/android
+
+# Android: Permitir código fuente pero ignorar archivos generados
+/android/app/build/
+/android/.gradle/
+/android/build/
+/android/app/*.keystore
+/android/local.properties
+/android/.idea/

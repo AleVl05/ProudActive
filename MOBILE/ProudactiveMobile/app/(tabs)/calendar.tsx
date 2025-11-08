@@ -1448,7 +1448,38 @@ export default function CalendarView({}: CalendarViewProps) {
       // Implementar eliminación directa
       handleDeleteSingleEvent(selectedEvent.id);
     }
-  }, [selectedEvent]);
+  }, [selectedEvent, handleDeleteSingleEvent]);
+
+  // Función wrapper para eliminar desde long press (shortcut del botón de eliminar del modal)
+  const handleDeleteEventFromLongPress = useCallback((event: Event | MonthEvent) => {
+    // Configurar el evento seleccionado para que el modal de confirmación tenga acceso a él
+    setSelectedEvent(event);
+    
+    // Ejecutar la misma lógica que handleDeleteEvent pero con el evento pasado como parámetro
+    // Verificar si es un evento con campos de recurrencia
+    const hasRecurrenceFields = 'is_recurring' in event;
+    
+    // Verificar si el evento tiene recurrencia O si pertenece a una serie (series_id)
+    const hasRecurrence = hasRecurrenceFields && event.is_recurring;
+    const belongsToSeries = hasRecurrenceFields && event.series_id;
+    
+    // Detectar si es una instancia generada de una serie (formato "ID_fecha")
+    const isGeneratedInstance = typeof event.id === 'string' && event.id.includes('_');
+    
+    // Detectar si es un evento que viene de una serie (tiene is_recurring pero no es el original)
+    const isFromSeries = hasRecurrenceFields && event.is_recurring && !isGeneratedInstance;
+    
+    if (hasRecurrence || belongsToSeries || isGeneratedInstance || isFromSeries) {
+      // Evento con recurrencia O que pertenece a una serie - mostrar modal de confirmación
+      // Usar setTimeout para asegurar que selectedEvent se actualice antes de mostrar el modal
+      setTimeout(() => {
+        setDeleteModalVisible(true);
+      }, 0);
+    } else {
+      // Evento único independiente - eliminar directamente
+      handleDeleteSingleEvent(event.id);
+    }
+  }, [handleDeleteSingleEvent]);
 
   // Función para analizar qué eventos eliminar basado en la estructura de series
   const analyzeEventsToDelete = useCallback((event: Event | MonthEvent, deleteType: 'single' | 'series', allEvents: Event[]): number[] => {
@@ -3910,6 +3941,7 @@ export default function CalendarView({}: CalendarViewProps) {
           longPressActiveRef={longPressActiveRef}
           refreshMonthEvents={refreshMonthEvents}
           getSubtaskStatus={getSubtaskStatus}
+          onDelete={handleDeleteEventFromLongPress}
         />
       ) : currentView === 'day' ? (
         <View style={styles.dayContainer}>
@@ -4039,6 +4071,7 @@ export default function CalendarView({}: CalendarViewProps) {
                               subtaskStatus={getSubtaskStatus(event.id)}
                               onLongPress={createLongPressHandler(event.id)}
                               onDuplicate={handleDuplicateEvent}
+                              onDelete={handleDeleteEventFromLongPress}
                             />
                           );
                         }
@@ -4080,6 +4113,7 @@ export default function CalendarView({}: CalendarViewProps) {
                               subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
                               onLongPress={createLongPressHandler(occupyingEvent.id)}
                               onDuplicate={handleDuplicateEvent}
+                              onDelete={handleDeleteEventFromLongPress}
                               renderMiddleCell={true}
                               currentCellStartTime={startTime}
                             />
@@ -4100,6 +4134,7 @@ export default function CalendarView({}: CalendarViewProps) {
                               subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
                               onLongPress={createLongPressHandler(occupyingEvent.id)}
                               onDuplicate={handleDuplicateEvent}
+                              onDelete={handleDeleteEventFromLongPress}
                               renderOnlyBottomHandler={true}
                               currentCellStartTime={startTime}
                             />
@@ -4152,13 +4187,30 @@ export default function CalendarView({}: CalendarViewProps) {
             <View style={{ flexDirection: 'row' }}>
               {/* Columna de horas (fija) */}
               <View style={styles.fixedTimeColumn}>
-                {timeSlots.map((time, idx) => (
-                  <View key={`h-${idx}`} style={[styles.timeRow, { width: 60 }]}> 
-                    <View style={styles.timeColumn}>
-                      <Text style={styles.timeText}>{time}</Text>
+                {timeSlots.map((time, idx) => {
+                  // Detectar si es la hora actual
+                  const now = new Date();
+                  const currentHour = now.getHours();
+                  const currentMinute = now.getMinutes();
+                  const currentTimeInMinutes = currentHour * 60 + currentMinute;
+                  const slotStartTime = START_HOUR * 60 + (idx * 30);
+                  const slotEndTime = slotStartTime + 30;
+                  const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
+                  
+                  return (
+                    <View key={`h-${idx}`} style={[styles.timeRow, { width: 60 }]}> 
+                      <View style={[
+                        styles.timeColumn,
+                        isCurrentHour && styles.currentHourColumn
+                      ]}>
+                        <Text style={[
+                          styles.timeText,
+                          isCurrentHour && styles.currentHourText
+                        ]}>{time}</Text>
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
 
               {/* Fondo del grid */}
@@ -4167,30 +4219,6 @@ export default function CalendarView({}: CalendarViewProps) {
                 height={timeSlots.length * CELL_HEIGHT} 
                 cellHeight={CELL_HEIGHT} 
               />
-              
-              {/* Línea horizontal de la hora actual */}
-              {(() => {
-                const now = new Date();
-                const currentHour = now.getHours();
-                const currentMinute = now.getMinutes();
-                const currentTimeInMinutes = currentHour * 60 + currentMinute;
-                const slotStartTime = START_HOUR * 60;
-                const currentSlotIndex = Math.floor((currentTimeInMinutes - slotStartTime) / 30);
-                
-                if (currentSlotIndex >= 0 && currentSlotIndex < timeSlots.length) {
-                  const lineTop = currentSlotIndex * CELL_HEIGHT + ((currentTimeInMinutes - slotStartTime) % 30) * (CELL_HEIGHT / 30);
-                  return (
-                    <View style={[
-                      styles.currentHourLine,
-                      {
-                        top: lineTop,
-                        width: getCellWidth() * 7
-                      }
-                    ]} />
-                  );
-                }
-                return null;
-              })()}
               
               {/* Contenido de días horizontal (scrollable) */}
               <ScrollView
@@ -4234,13 +4262,11 @@ export default function CalendarView({}: CalendarViewProps) {
                             style={[
                               styles.cell, 
                               { width: getCellWidth() },
-                              isToday && styles.todayCell
+                              isToday && styles.todayCell,
+                              isToday && styles.currentHourCell,
+                              isCurrentHour && styles.currentHourCell
                             ]}
                           >
-                            {/* Línea vertical del día actual */}
-                            {isToday && (
-                              <View style={styles.todayLine} />
-                            )}
                             <Pressable
                               android_ripple={null} // Deshabilitar ripple para evitar estado blanco
                               style={({ pressed }) => [
@@ -4334,6 +4360,7 @@ export default function CalendarView({}: CalendarViewProps) {
                                     subtaskStatus={getSubtaskStatus(event.id)}
                                     onLongPress={createLongPressHandler(event.id)}
                                     onDuplicate={handleDuplicateEvent}
+                                    onDelete={handleDeleteEventFromLongPress}
                                   />
                                 );
                               }
@@ -4378,6 +4405,7 @@ export default function CalendarView({}: CalendarViewProps) {
                                     subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
                                     onLongPress={createLongPressHandler(occupyingEvent.id)}
                                     onDuplicate={handleDuplicateEvent}
+                                    onDelete={handleDeleteEventFromLongPress}
                                     renderMiddleCell={true}
                                     currentCellStartTime={startTime}
                                   />
@@ -4413,6 +4441,7 @@ export default function CalendarView({}: CalendarViewProps) {
                                     subtaskStatus={getSubtaskStatus(occupyingEvent.id)}
                                     onLongPress={createLongPressHandler(occupyingEvent.id)}
                                     onDuplicate={handleDuplicateEvent}
+                                    onDelete={handleDeleteEventFromLongPress}
                                     renderOnlyBottomHandler={true}
                                     currentCellStartTime={startTime}
                                   />
@@ -4959,8 +4988,8 @@ const styles = StyleSheet.create({
   eventTextWeek: { fontSize: 14, fontWeight: '500', paddingLeft: 4, paddingRight: 2 }, // Texto ligeramente más grande para vista de semana con padding reducido
   
   // Estilos para resaltar la hora actual
-  currentHourRow: { backgroundColor: '#f0e8ff' },
-  currentHourColumn: { backgroundColor: '#f0e8ff' },
+  currentHourRow: { backgroundColor: 'rgba(107, 83, 226, 0.1)' },
+  currentHourColumn: { backgroundColor: 'rgba(107, 83, 226, 0.1)' },
   currentHourText: { color: '#6b53e2', fontWeight: '700' },
   fullscreenModal: { flex: 1, backgroundColor: '#f0f8ff' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#f0f8ff' },

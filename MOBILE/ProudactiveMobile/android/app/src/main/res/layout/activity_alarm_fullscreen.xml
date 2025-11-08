@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="#FFFFFF"
+  android:padding="24dp">
+
+  <TextView
+    android:id="@+id/alarmTitle"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:textSize="26sp"
+    android:textStyle="bold"
+    android:layout_centerHorizontal="true"
+    android:layout_marginTop="48dp"/>
+
+  <TextView
+    android:id="@+id/alarmBody"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:textSize="18sp"
+    android:layout_below="@id/alarmTitle"
+    android:layout_marginTop="12dp"
+    android:layout_centerHorizontal="true"/>
+
+  <!-- swipe container: área donde el usuario arrastra el botón para STOP -->
+  <FrameLayout
+    android:id="@+id/swipeArea"
+    android:layout_width="match_parent"
+    android:layout_height="80dp"
+    android:layout_alignParentBottom="true"
+    android:layout_marginBottom="48dp"
+    android:background="#EEEEEE"
+    android:layout_marginLeft="16dp"
+    android:layout_marginRight="16dp"
+    android:foregroundGravity="center_vertical">
+
+    <!-- track visual -->
+    <View
+      android:layout_width="match_parent"
+      android:layout_height="6dp"
+      android:layout_gravity="center"
+      android:layout_marginTop="36dp"
+      android:background="#CCCCCC"/>
+
+    <!-- draggable button -->
+    <Button
+      android:id="@+id/btnDragStop"
+      android:layout_width="140dp"
+      android:layout_height="56dp"
+      android:layout_gravity="left|center_vertical"
+      android:text="Slide to stop →"
+      android:layout_marginStart="8dp"
+      android:backgroundTint="#FF5252"/>
+
+  </FrameLayout>
+
+  <!-- fallback stop & snooze -->
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:layout_above="@id/swipeArea"
+    android:layout_marginBottom="16dp"
+    android:gravity="center">
+
+    <Button 
+      android:id="@+id/btnSnooze" 
+      android:layout_width="wrap_content" 
+      android:layout_height="wrap_content" 
+      android:text="Snooze 5" 
+      android:layout_marginRight="12dp"/>
+    
+    <Button 
+      android:id="@+id/btnStop" 
+      android:layout_width="wrap_content" 
+      android:layout_height="wrap_content" 
+      android:text="Stop"/>
+
+  </LinearLayout>
+
+</RelativeLayout>
+
