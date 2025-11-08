@@ -39,7 +39,7 @@ interface MonthViewProps {
   setMonthEvents: React.Dispatch<React.SetStateAction<MonthEvent[]>>;
   verticalScrollRef: React.RefObject<ScrollView | null>;
   getCellWidth: () => number;
-  setSelectedEvent: (event: MonthEvent | null) => void;
+  setSelectedEvent: (event: Event | MonthEvent | null) => void;
   setEventTitle: (title: string) => void;
   setEventDescription: (description: string) => void;
   setEventColor: (color: string) => void;
@@ -196,13 +196,15 @@ export default function MonthView({
                         return;
                       }
                       // Editar evento existente
-                      setSelectedEvent(event);
+                      // 🔧 FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
+                      const adaptedEvent = adaptMonthEvent(event);
+                      setSelectedEvent(adaptedEvent);
                       setEventTitle(event.title);
                       setEventDescription(event.description || '');
                       setEventColor(event.color);
                       createDefaultRecurrenceConfig();
                       setModalVisible(true);
-                      loadSubtasks(event.id, event);
+                      loadSubtasks(event.id, event); // Pasar el MonthEvent original para loadSubtasks
                     }
                   }}
                   onLongPress={() => {
@@ -277,13 +279,15 @@ export default function MonthView({
                             }
                           }}
                           onQuickPress={(ev) => {
-                            setSelectedEvent(event);
+                            // 🔧 FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
+                            const adaptedEvent = adaptMonthEvent(event);
+                            setSelectedEvent(adaptedEvent);
                             setEventTitle(event.title);
                             setEventDescription(event.description || '');
                             setEventColor(event.color);
                             createDefaultRecurrenceConfig();
                             setModalVisible(true);
-                            loadSubtasks(event.id, event);
+                            loadSubtasks(event.id, event); // Pasar el MonthEvent original para loadSubtasks
                           }}
                           cellWidth={getCellWidth()} 
                           currentView="month"
@@ -335,7 +339,6 @@ export default function MonthView({
                               Alert.alert('Error', 'No se pudo duplicar el evento');
                             }
                           }}
-                          scrollViewRef={verticalScrollRef}
                         />
                       );
                     }
@@ -417,13 +420,15 @@ export default function MonthView({
                             }
                           }}
                           onQuickPress={(ev) => {
-                            setSelectedEvent(occupyingEvent);
+                            // 🔧 FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
+                            const adaptedEvent = adaptMonthEvent(occupyingEvent);
+                            setSelectedEvent(adaptedEvent);
                             setEventTitle(occupyingEvent.title);
                             setEventDescription(occupyingEvent.description || '');
                             setEventColor(occupyingEvent.color);
                             createDefaultRecurrenceConfig();
                             setModalVisible(true);
-                            loadSubtasks(occupyingEvent.id, occupyingEvent);
+                            loadSubtasks(occupyingEvent.id, occupyingEvent); // Pasar el MonthEvent original para loadSubtasks
                           }}
                           cellWidth={getCellWidth()} 
                           currentView="month"
@@ -432,7 +437,6 @@ export default function MonthView({
                           onDelete={onDelete ? () => onDelete(occupyingEvent) : undefined}
                           renderMiddleCell={true}
                           currentCellStartTime={startTime}
-                          scrollViewRef={verticalScrollRef}
                         />
                       );
                     }
@@ -491,13 +495,15 @@ export default function MonthView({
                             }
                           }}
                           onQuickPress={(ev) => {
-                            setSelectedEvent(occupyingEvent);
+                            // 🔧 FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
+                            const adaptedEvent = adaptMonthEvent(occupyingEvent);
+                            setSelectedEvent(adaptedEvent);
                             setEventTitle(occupyingEvent.title);
                             setEventDescription(occupyingEvent.description || '');
                             setEventColor(occupyingEvent.color);
                             createDefaultRecurrenceConfig();
                             setModalVisible(true);
-                            loadSubtasks(occupyingEvent.id, occupyingEvent);
+                            loadSubtasks(occupyingEvent.id, occupyingEvent); // Pasar el MonthEvent original para loadSubtasks
                           }}
                           cellWidth={getCellWidth()} 
                           currentView="month"
@@ -506,7 +512,6 @@ export default function MonthView({
                           onDelete={onDelete ? () => onDelete(occupyingEvent) : undefined}
                           renderOnlyBottomHandler={true}
                           currentCellStartTime={startTime}
-                          scrollViewRef={verticalScrollRef}
                         />
                       );
                     }

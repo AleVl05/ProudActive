@@ -93,7 +93,12 @@ export default function MarketScreen() {
         const data = await response.json();
         // Laravel devuelve directamente el array
         if (Array.isArray(data)) {
-          setItems(data);
+          // Normalizar IDs a string para consistencia
+          const normalizedItems = data.map((item: any) => ({
+            ...item,
+            id: String(item.id)
+          }));
+          setItems(normalizedItems);
         }
       }
     } catch (error) {
@@ -115,7 +120,12 @@ export default function MarketScreen() {
       if (response.ok) {
         const item = await response.json();
         // Laravel devuelve directamente el objeto creado
-        setItems(prevItems => [...prevItems, item]);
+        // Normalizar ID a string para consistencia
+        const normalizedItem = {
+          ...item,
+          id: String(item.id)
+        };
+        setItems(prevItems => [...prevItems, normalizedItem]);
         setNewItemName('');
       }
     } catch (error) {
@@ -134,10 +144,11 @@ export default function MarketScreen() {
       if (response.ok) {
         const data = await response.json();
         console.log('📦 Toggle API Response data:', data);
-        if (data.success && data.item) {
+        // La API devuelve directamente el objeto item, no un objeto con success/item
+        if (data && data.id) {
           setItems(prevItems =>
             prevItems.map(item =>
-              item.id === id ? { ...item, checked: data.item.checked } : item
+              item.id === String(id) ? { ...item, checked: data.checked } : item
             )
           );
           console.log('✅ Item toggled successfully');
@@ -159,12 +170,15 @@ export default function MarketScreen() {
       if (response.ok) {
         const data = await response.json();
         console.log('📦 Delete API Response data:', data);
-        if (data.success) {
+        // La API devuelve {"message": "..."}, no tiene success, pero si response.ok es true, fue exitoso
           setItems(prevItems => prevItems.filter(item => item.id !== id));
           console.log('✅ Item deleted successfully');
-        }
       } else {
         console.error('❌ Delete API Error:', response.status, response.statusText);
+        // Si es 404, el item ya no existe, así que lo eliminamos del estado de todas formas
+        if (response.status === 404) {
+          setItems(prevItems => prevItems.filter(item => item.id !== id));
+        }
       }
     } catch (error) {
       console.error('❌ Error deleting item:', error);
@@ -194,10 +208,9 @@ export default function MarketScreen() {
               if (response.ok) {
                 const data = await response.json();
                 console.log('📦 Delete All API Response data:', data);
-                if (data.success) {
+                // La API devuelve {"message": "..."}, no tiene success, pero si response.ok es true, fue exitoso
                   setItems([]);
                   console.log('✅ All items deleted successfully');
-                }
               } else {
                 console.error('❌ Delete All API Error:', response.status, response.statusText);
               }

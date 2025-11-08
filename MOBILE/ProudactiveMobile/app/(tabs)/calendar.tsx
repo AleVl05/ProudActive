@@ -73,7 +73,9 @@ import {
   apiHideSubtaskForInstance,
   apiCreateCustomSubtask,
   apiUpdateCustomSubtask,
-  apiDeleteCustomSubtask
+  apiDeleteCustomSubtask,
+  apiGetPreferences,
+  apiRegisterDailyAccess
 } from '../../services/calendarApi';
 import {
   WEEK_DAY_ITEMS,
@@ -288,6 +290,93 @@ export default function CalendarView({}: CalendarViewProps) {
   
   // Cache de subtareas para evitar llamadas repetidas a la API
   const [subtasksCache, setSubtasksCache] = useState<{[eventId: string]: SubtaskItem[]}>({});
+  
+  // ===== PREFERENCIAS DE HORAS DEL CALENDARIO =====
+  const [userStartHour, setUserStartHour] = useState<number>(START_HOUR);
+  const [userEndHour, setUserEndHour] = useState<number>(END_HOUR);
+  
+  // Función para cargar preferencias del usuario
+  const loadUserPreferences = useCallback(async () => {
+    try {
+      console.log('🔄 Cargando preferencias del usuario...');
+      const response = await apiGetPreferences();
+      if (response.ok) {
+        const result = await response.json();
+        console.log('📋 Preferencias recibidas:', result.data);
+        if (result.success && result.data) {
+          const newStartHour = result.data.start_hour ?? START_HOUR;
+          const newEndHour = result.data.end_hour ?? END_HOUR;
+          console.log(`✅ Actualizando horas: ${newStartHour}:00 - ${newEndHour === 24 ? '00:00' : newEndHour + ':00'}`);
+          setUserStartHour(newStartHour);
+          setUserEndHour(newEndHour);
+        } else {
+          console.warn('⚠️ Preferencias sin datos, usando valores por defecto');
+          setUserStartHour(START_HOUR);
+          setUserEndHour(END_HOUR);
+        }
+      } else {
+        console.error('❌ Error en respuesta de preferencias:', response.status);
+        setUserStartHour(START_HOUR);
+        setUserEndHour(END_HOUR);
+      }
+    } catch (error) {
+      console.error('❌ Error loading user preferences:', error);
+      // Usar valores por defecto si falla
+      setUserStartHour(START_HOUR);
+      setUserEndHour(END_HOUR);
+    }
+  }, []);
+  
+  // Cargar preferencias del usuario al iniciar
+  useEffect(() => {
+    loadUserPreferences();
+  }, [loadUserPreferences]);
+  
+  // Estado para animación de días consecutivos
+  const [showConsecutiveDaysModal, setShowConsecutiveDaysModal] = useState(false);
+  const [consecutiveDaysCount, setConsecutiveDaysCount] = useState(0);
+  const consecutiveDaysScale = useRef(new Animated.Value(1)).current;
+
+  // Recargar preferencias cuando el usuario vuelve a esta pantalla (desde perfil)
+  useFocusEffect(
+    useCallback(() => {
+      loadUserPreferences();
+      // Registrar acceso diario cuando se enfoca el calendario
+      apiRegisterDailyAccess()
+        .then(async (response) => {
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success && result.data && result.data.was_increased) {
+              // Mostrar animación de celebración
+              setConsecutiveDaysCount(result.data.consecutive_days);
+              setShowConsecutiveDaysModal(true);
+              
+              // Animación de escala
+              Animated.sequence([
+                Animated.timing(consecutiveDaysScale, {
+                  toValue: 1.2,
+                  duration: 300,
+                  useNativeDriver: true,
+                }),
+                Animated.timing(consecutiveDaysScale, {
+                  toValue: 1,
+                  duration: 300,
+                  useNativeDriver: true,
+                }),
+              ]).start();
+              
+              // Cerrar automáticamente después de 3 segundos
+              setTimeout(() => {
+                setShowConsecutiveDaysModal(false);
+              }, 3000);
+            }
+          }
+        })
+        .catch((error) => {
+          console.error('Error registrando acceso diario:', error);
+        });
+    }, [loadUserPreferences])
+  );
   
   // ===== ESTADO DEL TUTORIAL =====
   const [tutorialVisible, setTutorialVisible] = useState(false);
@@ -785,15 +874,54 @@ export default function CalendarView({}: CalendarViewProps) {
       console.log('🔄 handleToggleSubtask - START', { subtaskId: id });
       
       const subtask = subtasks.find(s => s.id === id);
-      if (!subtask || !selectedEvent) {
-        console.warn('⚠️  handleToggleSubtask - No subtask or event', {
-          hasSubtask: !!subtask,
-          hasSelectedEvent: !!selectedEvent
+      if (!subtask) {
+        console.warn('⚠️  handleToggleSubtask - No subtask found', {
+          subtaskId: id
         });
         return;
       }
       
       const newCompletedState = !subtask.completed;
+      
+      // Si es una subtarea temporal (antes de crear el evento), solo actualizar localmente
+      const isTemporarySubtask = id.startsWith('temp-');
+      
+      // Si es temporal, permitir toggle local incluso sin selectedEvent
+      if (isTemporarySubtask) {
+        console.log('🔄 handleToggleSubtask - Toggling temporary subtask (local only)', {
+          subtaskId: id,
+          text: subtask.text,
+          currentState: subtask.completed,
+          newState: newCompletedState
+        });
+        
+        // Optimistic update - actualizar UI inmediatamente
+        const updatedSubtasks = subtasks.map(st => 
+          st.id === id 
+            ? { ...st, completed: newCompletedState }
+            : st
+        );
+        setSubtasks(updatedSubtasks);
+        
+        // Si hay selectedEvent, actualizar caché también
+        if (selectedEvent) {
+          setSubtasksCache(prev => ({
+            ...prev,
+            [selectedEvent.id]: updatedSubtasks
+          }));
+        }
+        
+        console.log('✅ handleToggleSubtask - Temporary subtask toggle complete (local only)');
+        return;
+      }
+      
+      // Para subtareas no temporales, necesitamos selectedEvent
+      if (!selectedEvent) {
+        console.warn('⚠️  handleToggleSubtask - No event selected for non-temporary subtask', {
+          subtaskId: id
+        });
+        return;
+      }
       
       console.log('🔄 handleToggleSubtask - Toggling', {
         subtaskId: id,
@@ -822,7 +950,7 @@ export default function CalendarView({}: CalendarViewProps) {
       console.log('✅ handleToggleSubtask - Optimistic update complete');
       
       // Solo actualizar en el servidor si no es una subtarea temporal
-      if (!id.startsWith('temp-')) {
+      if (!isTemporarySubtask) {
         // Determinar si es instancia de serie recurrente
         const isRecurringInstance = 'series_id' in selectedEvent && selectedEvent.series_id !== null && selectedEvent.series_id !== undefined;
         
@@ -1352,8 +1480,12 @@ export default function CalendarView({}: CalendarViewProps) {
       const newStartTimeRaw = event.startTime + event.duration + slot;
       const safeStart = Math.min(newStartTimeRaw, dayMinutes - event.duration);
 
-      const startLocal = dateKeyToLocalDate(event.date, safeStart);
-      const endLocal = dateKeyToLocalDate(event.date, safeStart + event.duration);
+      // 🔧 FIX: Convertir safeStart (en minutos desde userStartHour) a minutos desde START_HOUR
+      const safeStartFromStartHour = safeStart + (userStartHour - START_HOUR) * 60;
+      const safeEndFromStartHour = (safeStart + event.duration) + (userStartHour - START_HOUR) * 60;
+      
+      const startLocal = dateKeyToLocalDate(event.date, safeStartFromStartHour);
+      const endLocal = dateKeyToLocalDate(event.date, safeEndFromStartHour);
 
       const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
       if (!calendarId) throw new Error('No hay calendars disponibles');
@@ -1714,12 +1846,13 @@ export default function CalendarView({}: CalendarViewProps) {
   // Ranuras de tiempo (cada 30 minutos) para vista día/semana
   const timeSlots = useMemo(() => {
     const slots: string[] = [];
-    for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+    for (let hour = userStartHour; hour < userEndHour; hour++) {
       slots.push(`${hour.toString().padStart(2, '0')}:00`);
       slots.push(`${hour.toString().padStart(2, '0')}:30`);
     }
+    console.log(`⏰ TimeSlots recalculados: ${slots.length} slots desde ${userStartHour}:00 hasta ${userEndHour === 24 ? '00:00' : userEndHour + ':00'}`);
     return slots;
-  }, []);
+  }, [userStartHour, userEndHour]);
 
   const weekDaysFull = useMemo(() => ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'], []);
 
@@ -1735,11 +1868,11 @@ export default function CalendarView({}: CalendarViewProps) {
 
 
   const formatTime = useCallback((timeIndex: number) => {
-    const totalMinutes = START_HOUR * 60 + (timeIndex * 30);
+    const totalMinutes = userStartHour * 60 + (timeIndex * 30);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-  }, []);
+  }, [userStartHour]);
 
   const getRandomColor = useCallback(() => {
     return availableColors[Math.floor(Math.random() * availableColors.length)];
@@ -1778,8 +1911,33 @@ export default function CalendarView({}: CalendarViewProps) {
     const endDate = new Date(apiEvent.end_utc);
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
 
+    // Verificar si el evento está dentro del rango configurado
+    const eventStartHour = startDate.getUTCHours();
+    const eventStartMinute = startDate.getUTCMinutes();
+    const eventEndHour = endDate.getUTCHours();
+    const eventEndMinute = endDate.getUTCMinutes();
+    const effectiveEndHour = userEndHour === 24 ? 24 : userEndHour;
+    
+    // Calcular minutos totales para comparación más precisa
+    const eventStartTotalMinutes = eventStartHour * 60 + eventStartMinute;
+    const eventEndTotalMinutes = eventEndHour * 60 + eventEndMinute;
+    const rangeStartTotalMinutes = userStartHour * 60;
+    const rangeEndTotalMinutes = effectiveEndHour === 24 ? 24 * 60 : effectiveEndHour * 60;
+    
+    // Si el evento está completamente fuera del rango, no mostrarlo (pero no causar error)
+    // Evento está fuera si:
+    // - Termina completamente antes de start_hour
+    // - Empieza completamente después de end_hour
+    const isCompletelyBeforeRange = eventEndTotalMinutes < rangeStartTotalMinutes;
+    const isCompletelyAfterRange = eventStartTotalMinutes >= rangeEndTotalMinutes;
+    
+    if (isCompletelyBeforeRange || isCompletelyAfterRange) {
+      // Evento fuera del rango - retornar null para no mostrarlo, pero no es un error
+      return null;
+    }
+
     const totalStartMinutes = startDate.getUTCHours() * 60 + startDate.getUTCMinutes();
-    const minutesFromCalendarStart = totalStartMinutes - START_HOUR * 60;
+    const minutesFromCalendarStart = totalStartMinutes - userStartHour * 60;
     const snappedStart = Math.max(0, Math.floor(minutesFromCalendarStart / 30) * 30);
 
     const rawDuration = Math.max(30, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
@@ -1803,7 +1961,7 @@ export default function CalendarView({}: CalendarViewProps) {
       series_id: apiEvent.series_id || null,
       original_start_utc: apiEvent.original_start_utc || null,
     };
-  }, [toDateKey]);
+  }, [toDateKey, userStartHour, userEndHour]);
 
   const fetchEventsForRange = useCallback(async (rangeStart: Date, rangeEnd: Date) => {
     try {
@@ -1861,7 +2019,7 @@ export default function CalendarView({}: CalendarViewProps) {
       // Procesar series recurrentes con overrides
       for (const seriesItem of series) {
         
-        const recurrentInstances = generateRecurrentInstances(seriesItem, rangeStart, rangeEnd, overridesMap);
+        const recurrentInstances = generateRecurrentInstances(seriesItem, rangeStart, rangeEnd, overridesMap, userStartHour, userEndHour);
         allEvents.push(...recurrentInstances);
       }
 
@@ -2296,8 +2454,12 @@ export default function CalendarView({}: CalendarViewProps) {
         const eventStartTime = customStartTime !== null ? customStartTime : (selectedEvent && 'startTime' in selectedEvent ? selectedEvent.startTime : 0);
         const eventDuration = selectedEvent && 'duration' in selectedEvent ? selectedEvent.duration : 30;
         
-        const baseStartLocal = dateKeyToLocalDate(eventDate, eventStartTime);
-        const baseEndLocal = dateKeyToLocalDate(eventDate, eventStartTime + eventDuration);
+        // 🔧 FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
+        const eventStartTimeFromStartHour = eventStartTime + (userStartHour - START_HOUR) * 60;
+        const eventEndTimeFromStartHour = (eventStartTime + eventDuration) + (userStartHour - START_HOUR) * 60;
+        
+        const baseStartLocal = dateKeyToLocalDate(eventDate, eventStartTimeFromStartHour);
+        const baseEndLocal = dateKeyToLocalDate(eventDate, eventEndTimeFromStartHour);
         
         const recurrenceRule = {
           frequency: recurrenceConfig.mode.toUpperCase(),
@@ -2371,8 +2533,12 @@ export default function CalendarView({}: CalendarViewProps) {
           const eventStartTime = customStartTime !== null ? customStartTime : (selectedEvent && 'startTime' in selectedEvent ? selectedEvent.startTime : 0);
           const eventDuration = selectedEvent && 'duration' in selectedEvent ? selectedEvent.duration : 30;
           
-          const baseStartLocal = dateKeyToLocalDate(eventDate, eventStartTime);
-          const baseEndLocal = dateKeyToLocalDate(eventDate, eventStartTime + eventDuration);
+          // 🔧 FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
+          const eventStartTimeFromStartHour = eventStartTime + (userStartHour - START_HOUR) * 60;
+          const eventEndTimeFromStartHour = (eventStartTime + eventDuration) + (userStartHour - START_HOUR) * 60;
+          
+          const baseStartLocal = dateKeyToLocalDate(eventDate, eventStartTimeFromStartHour);
+          const baseEndLocal = dateKeyToLocalDate(eventDate, eventEndTimeFromStartHour);
           
           let recurrenceRule = null;
           if (recurrenceConfig.enabled) {
@@ -2461,8 +2627,12 @@ export default function CalendarView({}: CalendarViewProps) {
           const eventStartTime = customStartTime !== null ? customStartTime : (selectedEvent && 'startTime' in selectedEvent ? selectedEvent.startTime : 0);
           const eventDuration = selectedEvent && 'duration' in selectedEvent ? selectedEvent.duration : 30;
           
-          const baseStartLocal = dateKeyToLocalDate(eventDate, eventStartTime);
-          const baseEndLocal = dateKeyToLocalDate(eventDate, eventStartTime + eventDuration);
+          // 🔧 FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
+          const eventStartTimeFromStartHour = eventStartTime + (userStartHour - START_HOUR) * 60;
+          const eventEndTimeFromStartHour = (eventStartTime + eventDuration) + (userStartHour - START_HOUR) * 60;
+          
+          const baseStartLocal = dateKeyToLocalDate(eventDate, eventStartTimeFromStartHour);
+          const baseEndLocal = dateKeyToLocalDate(eventDate, eventEndTimeFromStartHour);
           
           let recurrenceRule: RecurrenceRule | null = null;
           if (recurrenceConfig.enabled) {
@@ -2575,8 +2745,12 @@ export default function CalendarView({}: CalendarViewProps) {
       // Persistencia API con reconciliación de ID
       try {
         // Calcular fechas base usando fecha/hora personalizada si existe
-        const baseStartLocal = dateKeyToLocalDate(finalDateKey, finalStartTime);
-        const baseEndLocal = dateKeyToLocalDate(finalDateKey, finalStartTime + 30);
+        // 🔧 FIX: Convertir finalStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
+        const finalStartTimeFromStartHour = finalStartTime + (userStartHour - START_HOUR) * 60;
+        const finalEndTimeFromStartHour = (finalStartTime + 30) + (userStartHour - START_HOUR) * 60;
+        
+        const baseStartLocal = dateKeyToLocalDate(finalDateKey, finalStartTimeFromStartHour);
+        const baseEndLocal = dateKeyToLocalDate(finalDateKey, finalEndTimeFromStartHour);
         
         // Ajustar start_utc si es un evento recurrente
         let finalStartLocal = baseStartLocal;
@@ -2645,16 +2819,22 @@ export default function CalendarView({}: CalendarViewProps) {
               const tempSubtasks = subtasks.filter(subtask => subtask.id.startsWith('temp-'));
               for (let i = 0; i < tempSubtasks.length; i++) {
                 const tempSubtask = tempSubtasks[i];
-                const response = await apiCreateSubtask(newEventId, tempSubtask.text, i);
+                // Crear subtarea con el estado completado preservado
+                const response = await apiCreateSubtask(newEventId, tempSubtask.text, i, tempSubtask.completed);
                 if (response.ok) {
                   const result = await response.json();
+                  // Si la subtarea estaba completada, actualizarla después de crearla
+                  if (tempSubtask.completed && !result.data.completed) {
+                    await apiUpdateSubtask(result.data.id.toString(), { completed: true });
+                  }
+                  
                   // Reemplazar la subtarea temporal con la real
                   const updatedSubtasks = subtasks.map(subtask => 
                     subtask.id === tempSubtask.id 
                       ? {
                           id: result.data.id.toString(),
                           text: result.data.text,
-                          completed: result.data.completed
+                          completed: tempSubtask.completed // Preservar el estado completado original
                         }
                       : subtask
                   );
@@ -2986,6 +3166,19 @@ export default function CalendarView({}: CalendarViewProps) {
   const onResizeCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDuration: number) => {
     const eventId = eventToUpdate.id; // ID actual, ya sea temporal o real
 
+    console.log('🔧 onResizeCommit: INICIO', {
+      eventId,
+      eventStartTime: eventToUpdate.startTime,
+      eventDuration: eventToUpdate.duration,
+      newStartTime,
+      newDuration,
+      userStartHour,
+      START_HOUR,
+      diferencia: userStartHour - START_HOUR,
+      eventTitle: eventToUpdate.title,
+      eventColor: eventToUpdate.color
+    });
+
     // 🔥 CRÍTICO: Preservar campos de subtareas del evento original
     const originalSubtasksCount = eventToUpdate.subtasks_count;
     const originalSubtasksCompletedCount = eventToUpdate.subtasks_completed_count;
@@ -3002,18 +3195,24 @@ export default function CalendarView({}: CalendarViewProps) {
     }
 
     if (resizeLockRef.current.has(eventId)) {
+      console.log('⚠️ onResizeCommit: Evento ya está en proceso de resize, ignorando');
       return;
     }
     resizeLockRef.current.add(eventId);
 
     // 1. Actualización optimista de la UI (para que se vea instantáneo)
-    // 🔥 CRÍTICO: Preservar campos de subtareas en la actualización optimista
+    // 🔥 CRÍTICO: Preservar TODOS los campos del evento original (título, color, etc.)
     setEvents(prev => {
       const oldEvent = prev.find(ev => ev.id === eventId);
       const updatedEvents = prev.map(ev => ev.id === eventId ? { 
         ...ev, 
         startTime: newStartTime, 
         duration: newDuration,
+        // 🔧 FIX: Preservar título y color explícitamente
+        title: eventToUpdate.title || ev.title,
+        color: eventToUpdate.color || ev.color,
+        description: eventToUpdate.description ?? ev.description,
+        category: eventToUpdate.category || ev.category,
         // Preservar campos de subtareas
         subtasks_count: originalSubtasksCount !== undefined ? originalSubtasksCount : ev.subtasks_count,
         subtasks_completed_count: originalSubtasksCompletedCount !== undefined ? originalSubtasksCompletedCount : ev.subtasks_completed_count
@@ -3030,8 +3229,35 @@ export default function CalendarView({}: CalendarViewProps) {
       return updatedEvents;
     });
 
-    const startLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime);
-    const endLocal = dateKeyToLocalDate(eventToUpdate.date, newStartTime + newDuration);
+    // 🔧 FIX: Convertir newStartTime (en minutos desde userStartHour) a minutos desde START_HOUR para dateKeyToLocalDate
+    // newStartTime está en minutos desde userStartHour, necesitamos convertir a minutos desde START_HOUR
+    const startTimeFromStartHour = newStartTime + (userStartHour - START_HOUR) * 60;
+    const endTimeFromStartHour = (newStartTime + newDuration) + (userStartHour - START_HOUR) * 60;
+    
+    console.log('🔧 onResizeCommit: Conversión de tiempo', {
+      eventId: eventToUpdate.id,
+      newStartTime,
+      newDuration,
+      userStartHour,
+      START_HOUR,
+      startTimeFromStartHour,
+      endTimeFromStartHour,
+      horaCalculada: `${Math.floor(startTimeFromStartHour / 60)}:${startTimeFromStartHour % 60}`,
+      horaFinalCalculada: `${Math.floor(endTimeFromStartHour / 60)}:${endTimeFromStartHour % 60}`
+    });
+    
+    const startLocal = dateKeyToLocalDate(eventToUpdate.date, startTimeFromStartHour);
+    const endLocal = dateKeyToLocalDate(eventToUpdate.date, endTimeFromStartHour);
+    
+    console.log('🔧 onResizeCommit: Fechas UTC calculadas', {
+      eventId: eventToUpdate.id,
+      startLocal: startLocal.toISOString(),
+      endLocal: endLocal.toISOString(),
+      startHour: startLocal.getUTCHours(),
+      startMinute: startLocal.getUTCMinutes(),
+      endHour: endLocal.getUTCHours(),
+      endMinute: endLocal.getUTCMinutes()
+    });
 
 
     try {
@@ -3046,17 +3272,11 @@ export default function CalendarView({}: CalendarViewProps) {
             const seriesId = parseInt(match[1], 10);
             
             // Calcular original_start_utc usando zona horaria de la serie
-            // Por ahora usar zona horaria por defecto hasta obtener la serie
-            const seriesTimezone = DEFAULT_TIMEZONE;
+            // 🔧 FIX: Convertir eventToUpdate.startTime (en minutos desde userStartHour) a minutos desde START_HOUR
+            const originalStartTimeFromStartHour = eventToUpdate.startTime + (userStartHour - START_HOUR) * 60;
             const originalDate = eventToUpdate.date; // YYYY-MM-DD
-            const originalHour = Math.floor(eventToUpdate.startTime / 60);
-            const originalMinute = eventToUpdate.startTime % 60;
-            
-            // Crear fecha en zona horaria local y convertir a UTC
-            const originalLocalDate = new Date(`${originalDate}T${originalHour.toString().padStart(2, '0')}:${originalMinute.toString().padStart(2, '0')}:00`);
-            // Ajustar por zona horaria (America/Sao_Paulo es UTC-3)
-            const timezoneOffset = -3 * 60; // UTC-3 en minutos
-            const originalStartUtc = new Date(originalLocalDate.getTime() - (timezoneOffset * 60 * 1000)).toISOString();
+            const originalStartLocal = dateKeyToLocalDate(originalDate, originalStartTimeFromStartHour);
+            const originalStartUtc = originalStartLocal.toISOString();
             
 
             // Obtener calendar_id
@@ -3065,18 +3285,26 @@ export default function CalendarView({}: CalendarViewProps) {
             if (!calendarId) throw new Error('No calendars available');
 
             // Crear payload para override
-            const overridePayload = {
+            // 🔥 CRÍTICO: No enviar color si el evento tiene subtareas (se maneja automáticamente)
+            const hasSubtasks = (originalSubtasksCount !== undefined && originalSubtasksCount > 0) || 
+                               (eventToUpdate.subtasks_count !== undefined && eventToUpdate.subtasks_count > 0);
+            
+            const overridePayload: any = {
                 calendar_id: calendarId,
                 title: eventToUpdate.title,
                 description: eventToUpdate.description,
                 start_utc: startLocal.toISOString(),
                 end_utc: endLocal.toISOString(),
-                color: eventToUpdate.color,
                 location: eventToUpdate.location || null,
                 is_recurring: false, // Override no es recurrente
                 series_id: seriesId,
                 original_start_utc: originalStartUtc
             };
+            
+            // Solo incluir color si NO hay subtareas
+            if (!hasSubtasks) {
+                overridePayload.color = eventToUpdate.color;
+            }
 
             const createRes = await apiPostEvent(overridePayload);
             const body = await createRes.json();
@@ -3185,14 +3413,22 @@ export default function CalendarView({}: CalendarViewProps) {
                 const calendarId = calJson?.data?.[0]?.id;
                 if (!calendarId) throw new Error('No calendars available');
 
-                const payload = {
+                // 🔥 CRÍTICO: No enviar color si el evento tiene subtareas (se maneja automáticamente)
+                const hasSubtasks = (originalSubtasksCount !== undefined && originalSubtasksCount > 0) || 
+                                   (eventToUpdate.subtasks_count !== undefined && eventToUpdate.subtasks_count > 0);
+                
+                const payload: any = {
                     calendar_id: calendarId,
                     title: eventToUpdate.title,
                     description: eventToUpdate.description,
                     start_utc: startLocal.toISOString(),
                     end_utc: endLocal.toISOString(),
-                    color: eventToUpdate.color,
                 };
+                
+                // Solo incluir color si NO hay subtareas
+                if (!hasSubtasks) {
+                    payload.color = eventToUpdate.color;
+                }
                 const createRes = await apiPostEvent(payload);
                 const body = await createRes.json();
 
@@ -3243,7 +3479,7 @@ export default function CalendarView({}: CalendarViewProps) {
     } finally {
         resizeLockRef.current.delete(eventId);
     }
-  }, [migrateSubtasks, loadSubtasks, subtasksCache, tutorialVisible, tutorialCompleted, tutorialStep, handleTutorialNext]);
+  }, [migrateSubtasks, loadSubtasks, subtasksCache, tutorialVisible, tutorialCompleted, tutorialStep, handleTutorialNext, userStartHour]);
 
   // Callback de commit desde bloque movible
   const onMoveCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDate: string) => {
@@ -3297,8 +3533,12 @@ export default function CalendarView({}: CalendarViewProps) {
     ));
 
     // Calcular nuevos timestamps UTC usando la duración actualizada
-    const startLocal = dateKeyToLocalDate(newDate, newStartTime);
-    const endLocal = dateKeyToLocalDate(newDate, newStartTime + currentDuration);
+    // 🔧 FIX: Convertir newStartTime (en minutos desde userStartHour) a minutos desde START_HOUR para dateKeyToLocalDate
+    const startTimeFromStartHour = newStartTime + (userStartHour - START_HOUR) * 60;
+    const endTimeFromStartHour = (newStartTime + currentDuration) + (userStartHour - START_HOUR) * 60;
+    
+    const startLocal = dateKeyToLocalDate(newDate, startTimeFromStartHour);
+    const endLocal = dateKeyToLocalDate(newDate, endTimeFromStartHour);
     
     console.log('🔧 onMoveCommit: Calculando endLocal', {
       eventId,
@@ -3317,33 +3557,37 @@ export default function CalendarView({}: CalendarViewProps) {
         const seriesId = parseInt(match[1], 10);
         
         // Calcular original_start_utc usando zona horaria correcta
+        // 🔧 FIX: Convertir eventToUpdate.startTime (en minutos desde userStartHour) a minutos desde START_HOUR
+        const originalStartTimeFromStartHour = eventToUpdate.startTime + (userStartHour - START_HOUR) * 60;
         const originalDate = eventToUpdate.date; // YYYY-MM-DD
-        const originalHour = Math.floor(eventToUpdate.startTime / 60);
-        const originalMinute = eventToUpdate.startTime % 60;
-        
-        // Crear fecha en zona horaria local y convertir a UTC
-        const originalLocalDate = new Date(`${originalDate}T${originalHour.toString().padStart(2, '0')}:${originalMinute.toString().padStart(2, '0')}:00`);
-        // Ajustar por zona horaria (America/Sao_Paulo es UTC-3)
-        const timezoneOffset = -3 * 60; // UTC-3 en minutos
-        const originalStartUtc = new Date(originalLocalDate.getTime() - (timezoneOffset * 60 * 1000)).toISOString();
+        const originalStartLocal = dateKeyToLocalDate(originalDate, originalStartTimeFromStartHour);
+        const originalStartUtc = originalStartLocal.toISOString();
         
         
         const calJson = await apiGetCalendars();
         const calendarId = calJson?.data?.[0]?.id;
         if (!calendarId) throw new Error('No calendars available');
 
-        const overridePayload = {
+        // 🔥 CRÍTICO: No enviar color si el evento tiene subtareas (se maneja automáticamente)
+        const hasSubtasks = (originalSubtasksCount !== undefined && originalSubtasksCount > 0) || 
+                           (eventToUpdate.subtasks_count !== undefined && eventToUpdate.subtasks_count > 0);
+        
+        const overridePayload: any = {
           calendar_id: calendarId,
           title: eventToUpdate.title,
           description: eventToUpdate.description,
           start_utc: startLocal.toISOString(),
           end_utc: endLocal.toISOString(),
-          color: eventToUpdate.color,
           location: eventToUpdate.location || null,
           is_recurring: false,
           series_id: seriesId,
           original_start_utc: originalStartUtc
         };
+        
+        // Solo incluir color si NO hay subtareas
+        if (!hasSubtasks) {
+          overridePayload.color = eventToUpdate.color;
+        }
 
         const createRes = await apiPostEvent(overridePayload);
         const body = await createRes.json();
@@ -3451,14 +3695,22 @@ export default function CalendarView({}: CalendarViewProps) {
           const calendarId = calJson?.data?.[0]?.id;
           if (!calendarId) throw new Error('No calendars available');
 
-          const payload = {
+          // 🔥 CRÍTICO: No enviar color si el evento tiene subtareas (se maneja automáticamente)
+          const hasSubtasks = (originalSubtasksCount !== undefined && originalSubtasksCount > 0) || 
+                             (eventToUpdate.subtasks_count !== undefined && eventToUpdate.subtasks_count > 0);
+          
+          const payload: any = {
             calendar_id: calendarId,
             title: eventToUpdate.title,
             description: eventToUpdate.description,
             start_utc: startLocal.toISOString(),
             end_utc: endLocal.toISOString(),
-            color: eventToUpdate.color,
           };
+          
+          // Solo incluir color si NO hay subtareas
+          if (!hasSubtasks) {
+            payload.color = eventToUpdate.color;
+          }
           
           const createRes = await apiPostEvent(payload);
           const body = await createRes.json();
@@ -3504,7 +3756,7 @@ export default function CalendarView({}: CalendarViewProps) {
     } finally {
       resizeLockRef.current.delete(eventId);
     }
-  }, [migrateSubtasks, loadSubtasks, subtasksCache]); // 🔥 CRÍTICO: Agregar dependencias necesarias
+  }, [migrateSubtasks, loadSubtasks, subtasksCache, userStartHour]); // 🔥 CRÍTICO: Agregar dependencias necesarias
 
   // Función para identificar el tipo de evento
   const getEventType = (event: Event): string => {
@@ -3834,6 +4086,7 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // ===== RENDERIZADO PRINCIPAL =====
   return (
+    <React.Fragment>
     <View style={[styles.container, { paddingLeft: insets.left, paddingRight: insets.right }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 10, paddingLeft: Math.max(insets.left, 16), paddingRight: Math.max(insets.right, 16) }]}> 
@@ -3961,7 +4214,7 @@ export default function CalendarView({}: CalendarViewProps) {
                   const currentHour = now.getHours();
                   const currentMinute = now.getMinutes();
                   const currentTimeInMinutes = currentHour * 60 + currentMinute;
-                  const slotStartTime = START_HOUR * 60 + (idx * 30);
+                  const slotStartTime = userStartHour * 60 + (idx * 30);
                   const slotEndTime = slotStartTime + 30;
                   const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
                   
@@ -4193,7 +4446,7 @@ export default function CalendarView({}: CalendarViewProps) {
                   const currentHour = now.getHours();
                   const currentMinute = now.getMinutes();
                   const currentTimeInMinutes = currentHour * 60 + currentMinute;
-                  const slotStartTime = START_HOUR * 60 + (idx * 30);
+                  const slotStartTime = userStartHour * 60 + (idx * 30);
                   const slotEndTime = slotStartTime + 30;
                   const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
                   
@@ -4582,8 +4835,106 @@ export default function CalendarView({}: CalendarViewProps) {
       />
 
     </View>
+    
+    {/* Modal de celebración de días consecutivos - Componente separado */}
+    <ConsecutiveDaysCelebration
+      visible={showConsecutiveDaysModal}
+      consecutiveDaysCount={consecutiveDaysCount}
+      onClose={() => setShowConsecutiveDaysModal(false)}
+      scaleAnim={consecutiveDaysScale}
+    />
+    </React.Fragment>
   );
 }
+
+// Componente separado para el modal de celebración - Similar a TutorialOverlay
+function ConsecutiveDaysCelebration({ 
+  visible, 
+  consecutiveDaysCount, 
+  onClose,
+  scaleAnim 
+}: { 
+  visible: boolean; 
+  consecutiveDaysCount: number; 
+  onClose: () => void;
+  scaleAnim: Animated.Value;
+}) {
+  if (!visible) return null;
+
+  return (
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent={true}
+    >
+      <View style={celebrationStyles.overlay}>
+        <Animated.View 
+          style={[
+            celebrationStyles.content,
+            {
+              transform: [{ scale: scaleAnim }],
+            }
+          ]}
+        >
+          <Text style={celebrationStyles.emoji}>🎉</Text>
+          <Text style={celebrationStyles.title}>¡Racha de días consecutivos!</Text>
+          <Text style={celebrationStyles.number}>
+            {consecutiveDaysCount} {consecutiveDaysCount === 1 ? 'día' : 'días'}
+          </Text>
+          <Text style={celebrationStyles.subtitle}>Sigue así, ¡estás haciendo un gran trabajo!</Text>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+// Estilos separados para el modal de celebración
+const celebrationStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  content: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    minWidth: 280,
+    maxWidth: '85%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  emoji: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: Colors.light.text,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  number: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: Colors.light.tint,
+    marginBottom: 12,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: Colors.light.text,
+    opacity: 0.7,
+    textAlign: 'center',
+  },
+});
 
 // ===== ESTILOS =====
 const styles = StyleSheet.create({

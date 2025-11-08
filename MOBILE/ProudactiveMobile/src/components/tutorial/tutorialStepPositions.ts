@@ -452,14 +452,14 @@ export const tutorialStepPositions: { [stepId: string]: StepPositionConfig } = {
   // ============================================
   'drag-and-drop': {
     beaver: {
-      bottom: 0.05,
+      bottom: 0.00,
       left: 0.1,
       width: 230,
       height: 230,
       usePercentage: true,
     },
     dialog: {
-      top: 0.5, // 40% de la altura
+      top: 0.45, // 40% de la altura
       left: 0.5, // 50% del ancho
       maxWidth: 0.80, // 95% del ancho
       usePercentage: true,
@@ -475,14 +475,14 @@ export const tutorialStepPositions: { [stepId: string]: StepPositionConfig } = {
   // ============================================
   'resize-events': {
     beaver: {
-      bottom: 0.05,
+      bottom: 0.00,
       left: 0.1,
       width: 230,
       height: 230,
       usePercentage: true,
     },
     dialog: {
-      top: 0.5, // 40% de la altura
+      top: 0.45, // 40% de la altura
       left: 0.5, // 50% del ancho
       maxWidth: 0.80, // 95% del ancho
       usePercentage: true,

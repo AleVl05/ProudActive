@@ -8,7 +8,7 @@ use App\Http\Controllers\Api\SubtaskController;
 use App\Http\Controllers\Api\SubtaskInstanceController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\MarketItemController;
-use App\Http\Controllers\RecipeController;
+use App\Http\Controllers\NoteController;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
@@ -43,11 +43,16 @@ Route::prefix('v1')->group(function () {
         Route::get('auth/profile', [AuthController::class, 'profile']);
         Route::put('auth/profile', [AuthController::class, 'updateProfile']);
         Route::put('auth/change-password', [AuthController::class, 'changePassword']);
+        Route::get('auth/preferences', [AuthController::class, 'getPreferences']);
+        Route::put('auth/preferences', [AuthController::class, 'updatePreferences']);
+        Route::post('auth/register-daily-access', [AuthController::class, 'registerDailyAccess']);
+        Route::get('auth/stats', [AuthController::class, 'getStats']);
 
         // Eventos - CRUD completo
         Route::get('events', [EventController::class, 'index']);
         Route::post('events', [EventController::class, 'store']);
         Route::delete('events', [EventController::class, 'deleteAllEvents']); // Eliminar TODOS los eventos (debe ir ANTES de events/{id})
+        Route::post('events/restore-all', [EventController::class, 'restoreAllEvents']); // Restaurar TODOS los eventos eliminados
         Route::get('events/{id}', [EventController::class, 'show']);
         Route::match(['put', 'patch'], 'events/{id}', [EventController::class, 'update']);
         Route::delete('events/{id}', [EventController::class, 'destroy']);
@@ -89,11 +94,11 @@ Route::prefix('v1')->group(function () {
         Route::post('market-items/{marketItem}/toggle', [MarketItemController::class, 'toggle']);
         Route::delete('market-items', [MarketItemController::class, 'destroyAll']);
         
-        // Recipes - CRUD completo
-        Route::get('recipes', [RecipeController::class, 'index']);
-        Route::post('recipes', [RecipeController::class, 'store']);
-        Route::get('recipes/{recipe}', [RecipeController::class, 'show']);
-        Route::match(['put', 'patch'], 'recipes/{recipe}', [RecipeController::class, 'update']);
-        Route::delete('recipes/{recipe}', [RecipeController::class, 'destroy']);
+        // Notes - CRUD completo
+        Route::get('notes', [NoteController::class, 'index']);
+        Route::post('notes', [NoteController::class, 'store']);
+        Route::get('notes/{note}', [NoteController::class, 'show']);
+        Route::match(['put', 'patch'], 'notes/{note}', [NoteController::class, 'update']);
+        Route::delete('notes/{note}', [NoteController::class, 'destroy']);
     });
 });

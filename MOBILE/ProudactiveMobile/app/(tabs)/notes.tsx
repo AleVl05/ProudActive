@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -26,44 +26,66 @@ async function getAuthHeaders(): Promise<HeadersInit> {
   };
 }
 
+interface ChecklistItem {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+interface TextBlock {
+  id: string;
+  type: 'text';
+  content: string;
+}
+
+interface ChecklistBlock {
+  id: string;
+  type: 'checklist';
+  items: ChecklistItem[];
+}
+
+type NoteBlock = TextBlock | ChecklistBlock;
+
 interface Note {
   id: string;
   title: string;
-  content: string;
+  content: string; // Mantener para compatibilidad, pero usar blocks
+  blocks?: NoteBlock[]; // Nueva estructura: bloques de texto y checklist intercalados
+  checklist?: ChecklistItem[]; // Mantener para compatibilidad
   created_at: string;
   updated_at: string;
 }
 
-// API Functions - Usando el mismo endpoint de recetas por ahora
+// API Functions
 async function apiGetNotes() {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/recipes`, { headers });
+  const res = await fetch(`${API_BASE}/notes`, { headers });
   return res;
 }
 
-async function apiCreateNote(title: string, content: string) {
+async function apiCreateNote(title: string, content: string, checklist?: any[]) {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/recipes`, {
+  const res = await fetch(`${API_BASE}/notes`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ title, content }),
+    body: JSON.stringify({ title, content, checklist }),
   });
   return res;
 }
 
-async function apiUpdateNote(id: string, title: string, content: string) {
+async function apiUpdateNote(id: string, title: string, content: string, blocks?: any[]) {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/recipes/${id}`, {
+  const res = await fetch(`${API_BASE}/notes/${id}`, {
     method: 'PUT',
     headers,
-    body: JSON.stringify({ title, content }),
+    body: JSON.stringify({ title, content, blocks }),
   });
   return res;
 }
 
 async function apiDeleteNote(id: string) {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/recipes/${id}`, {
+  const res = await fetch(`${API_BASE}/notes/${id}`, {
     method: 'DELETE',
     headers
   });
@@ -79,9 +101,13 @@ export default function NotesScreen() {
   const [noteModalVisible, setNoteModalVisible] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitle, setEditingTitle] = useState('');
-  const [isEditingContent, setIsEditingContent] = useState(false);
-  const [editingContent, setEditingContent] = useState('');
+  const [editingContent, setEditingContent] = useState(''); // Mantener para compatibilidad
+  const [editingBlocks, setEditingBlocks] = useState<NoteBlock[]>([]);
+  const [editingTextBlockId, setEditingTextBlockId] = useState<string | null>(null);
+  const [editingChecklistItemId, setEditingChecklistItemId] = useState<string | null>(null);
+  const [editingChecklistItemText, setEditingChecklistItemText] = useState('');
   const [loading, setLoading] = useState(false);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Cargar notas al montar el componente
   useEffect(() => {
@@ -148,35 +174,76 @@ export default function NotesScreen() {
   const openNoteModal = (note: Note) => {
     setSelectedNote(note);
     setEditingTitle(note.title);
-    setEditingContent(note.content);
+    setEditingContent(note.content || '');
+    
+    // Si tiene blocks, usarlos; si no, crear blocks desde content y checklist
+    if (note.blocks && note.blocks.length > 0) {
+      // Asegurar que todos los blocks tengan IDs únicos
+      const blocksWithIds = note.blocks.map((block, index) => ({
+        ...block,
+        id: block.id || `${Date.now()}_${index}`,
+      }));
+      console.log('📝 Cargando blocks:', blocksWithIds.map(b => ({ id: b.id, type: b.type })));
+      setEditingBlocks(blocksWithIds);
+    } else {
+      // Migrar de estructura antigua a nueva
+      const blocks: NoteBlock[] = [];
+      if (note.content) {
+        blocks.push({
+          id: `${Date.now()}_text`,
+          type: 'text',
+          content: note.content,
+        });
+      }
+      if (note.checklist && note.checklist.length > 0) {
+        blocks.push({
+          id: `${Date.now() + 1}_checklist`,
+          type: 'checklist',
+          items: note.checklist,
+        });
+      }
+      setEditingBlocks(blocks.length > 0 ? blocks : []);
+    }
+    
     setIsEditingTitle(false);
-    setIsEditingContent(false);
+    setEditingTextBlockId(null);
+    setEditingChecklistItemId(null);
+    setEditingChecklistItemText('');
     setNoteModalVisible(true);
   };
 
-  const closeNoteModal = () => {
+  const closeNoteModal = async () => {
+    // Guardar antes de cerrar
+    if (selectedNote) {
+      await saveNoteAuto();
+    }
     setNoteModalVisible(false);
     setSelectedNote(null);
     setIsEditingTitle(false);
-    setIsEditingContent(false);
     setEditingTitle('');
     setEditingContent('');
+    setEditingBlocks([]);
+    setEditingTextBlockId(null);
+    setEditingChecklistItemId(null);
+    setEditingChecklistItemText('');
   };
 
   const startEditingTitle = () => {
     setIsEditingTitle(true);
-    setIsEditingContent(true);
   };
 
   const saveTitleEdit = async () => {
     if (!selectedNote) return;
     
     try {
-      setLoading(true);
+      const contentBlocks = editingBlocks.filter(b => b.type === 'text') as TextBlock[];
+      const content = contentBlocks.map(b => b.content).join('\n\n');
+      
       const response = await apiUpdateNote(
         selectedNote.id,
         editingTitle.trim() || 'Nota sin título',
-        editingContent.trim()
+        content,
+        editingBlocks
       );
       
       if (response.ok) {
@@ -188,57 +255,265 @@ export default function NotesScreen() {
         );
         setSelectedNote(updatedNote);
         setIsEditingTitle(false);
-        setIsEditingContent(false);
       }
     } catch (error) {
       console.error('❌ Error updating note:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
   const cancelTitleEdit = () => {
     setEditingTitle(selectedNote?.title || '');
-    setEditingContent(selectedNote?.content || '');
     setIsEditingTitle(false);
-    setIsEditingContent(false);
   };
 
-  const startEditingContent = () => {
-    setIsEditingContent(true);
-  };
-
-  const saveContentEdit = async () => {
+  // Guardar automáticamente con debounce
+  const saveNoteAuto = async () => {
     if (!selectedNote) return;
     
-    try {
-      setLoading(true);
-      const response = await apiUpdateNote(
-        selectedNote.id,
-        editingTitle.trim() || 'Nota sin título',
-        editingContent.trim()
-      );
-      
-      if (response.ok) {
-        const updatedNote = await response.json();
-        setNotes(prevNotes => 
-          prevNotes.map(note => 
-            note.id === selectedNote.id ? updatedNote : note
-          )
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        // Generar content desde blocks para compatibilidad
+        const contentBlocks = editingBlocks.filter(b => b.type === 'text') as TextBlock[];
+        const content = contentBlocks.map(b => b.content).join('\n\n');
+        
+        console.log('💾 Guardando nota:', {
+          id: selectedNote.id,
+          blocksCount: editingBlocks.length,
+          blocks: editingBlocks,
+        });
+        
+        const response = await apiUpdateNote(
+          selectedNote.id,
+          editingTitle.trim() || 'Nota sin título',
+          content,
+          editingBlocks
         );
-        setSelectedNote(updatedNote);
-        setIsEditingContent(false);
+        
+        if (response.ok) {
+          const updatedNote = await response.json();
+          console.log('✅ Nota guardada:', {
+            id: updatedNote.id,
+            blocksCount: updatedNote.blocks?.length || 0,
+            blocks: updatedNote.blocks,
+          });
+          setNotes(prevNotes => 
+            prevNotes.map(note => 
+              note.id === selectedNote.id ? updatedNote : note
+            )
+          );
+          setSelectedNote(updatedNote);
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('❌ Error guardando nota:', errorData);
+        }
+      } catch (error) {
+        console.error('❌ Error auto-saving note:', error);
       }
-    } catch (error) {
-      console.error('❌ Error updating note content:', error);
-    } finally {
-      setLoading(false);
+    }, 500);
+  };
+
+  // Funciones para bloques de texto
+  const addTextBlock = async () => {
+    const newBlock: TextBlock = {
+      id: `text_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type: 'text',
+      content: '',
+    };
+    setEditingBlocks(prev => [...prev, newBlock]);
+    setEditingTextBlockId(newBlock.id);
+    // Guardar automáticamente
+    if (selectedNote) {
+      await saveNoteAuto();
     }
   };
 
-  const cancelContentEdit = () => {
-    setEditingContent(selectedNote?.content || '');
-    setIsEditingContent(false);
+  const updateTextBlock = async (blockId: string, content: string) => {
+    setEditingBlocks(prev =>
+      prev.map(block =>
+        block.id === blockId && block.type === 'text'
+          ? { ...block, content }
+          : block
+      )
+    );
+    await saveNoteAuto();
+  };
+
+  const deleteTextBlock = async (blockId: string) => {
+    setEditingBlocks(prev => prev.filter(block => block.id !== blockId));
+    await saveNoteAuto();
+  };
+
+  // Funciones para bloques de checklist
+  const addChecklistBlock = async () => {
+    const newBlock: ChecklistBlock = {
+      id: `checklist_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type: 'checklist',
+      items: [],
+    };
+    setEditingBlocks(prev => [...prev, newBlock]);
+    // Guardar automáticamente
+    if (selectedNote) {
+      await saveNoteAuto();
+    }
+  };
+
+  const toggleChecklistItem = async (blockId: string, itemId: string) => {
+    setEditingBlocks(prev =>
+      prev.map(block => {
+        if (block.id === blockId && block.type === 'checklist') {
+          return {
+            ...block,
+            items: block.items.map(item =>
+              item.id === itemId ? { ...item, completed: !item.completed } : item
+            ),
+          };
+        }
+        return block;
+      })
+    );
+    await saveNoteAuto();
+  };
+
+  const addChecklistItem = async (blockId: string, text: string = '') => {
+    const newItem: ChecklistItem = {
+      id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      text: text.trim(),
+      completed: false,
+    };
+    
+    setEditingBlocks(prev =>
+      prev.map(block => {
+        if (block.id === blockId && block.type === 'checklist') {
+          return {
+            ...block,
+            items: [...block.items, newItem],
+          };
+        }
+        return block;
+      })
+    );
+    
+    if (text.trim() === '') {
+      setEditingChecklistItemId(newItem.id);
+      setEditingChecklistItemText('');
+    }
+    
+    // Guardar automáticamente después de agregar item
+    if (selectedNote) {
+      await saveNoteAuto();
+    }
+  };
+
+  const deleteChecklistItem = async (blockId: string, itemId: string) => {
+    setEditingBlocks(prev =>
+      prev.map(block => {
+        if (block.id === blockId && block.type === 'checklist') {
+          return {
+            ...block,
+            items: block.items.filter(item => item.id !== itemId),
+          };
+        }
+        return block;
+      })
+    );
+    await saveNoteAuto();
+  };
+
+  const deleteChecklistBlock = async (blockId: string) => {
+    console.log('🗑️ Eliminando checklist block:', blockId);
+    console.log('📋 Blocks antes:', editingBlocks.map(b => ({ id: b.id, type: b.type })));
+    
+    setEditingBlocks(prev => {
+      const filtered = prev.filter(block => {
+        // Comparación estricta de IDs
+        const shouldKeep = String(block.id) !== String(blockId);
+        if (!shouldKeep) {
+          console.log('❌ Eliminando block:', block.id, block.type);
+        }
+        return shouldKeep;
+      });
+      console.log('📋 Blocks después:', filtered.map(b => ({ id: b.id, type: b.type })));
+      return filtered;
+    });
+    
+    await saveNoteAuto();
+  };
+
+  const startEditingChecklistItem = (item: ChecklistItem) => {
+    setEditingChecklistItemId(item.id);
+    setEditingChecklistItemText(item.text);
+  };
+
+  const saveChecklistItemEdit = async (blockId: string, itemId: string) => {
+    const text = editingChecklistItemText.trim();
+    
+    if (text === '') {
+      // Si el texto está vacío, eliminar el item
+      await deleteChecklistItem(blockId, itemId);
+      setEditingChecklistItemId(null);
+      setEditingChecklistItemText('');
+      return;
+    }
+    
+    setEditingBlocks(prev =>
+      prev.map(block => {
+        if (block.id === blockId && block.type === 'checklist') {
+          return {
+            ...block,
+            items: block.items.map(item =>
+              item.id === itemId ? { ...item, text } : item
+            ),
+          };
+        }
+        return block;
+      })
+    );
+    
+    setEditingChecklistItemId(null);
+    setEditingChecklistItemText('');
+    await saveNoteAuto();
+  };
+
+  const cancelChecklistItemEdit = () => {
+    setEditingChecklistItemId(null);
+    setEditingChecklistItemText('');
+  };
+
+  // Componente para input de checklist item
+  const ChecklistItemInput = ({ blockId, onAddItem, onDeleteBlock }: { blockId: string; onAddItem: (blockId: string, text?: string) => void; onDeleteBlock: () => void }) => {
+    const [inputText, setInputText] = useState('');
+    
+    const handleAddItem = (text?: string) => {
+      if (text?.trim()) {
+        onAddItem(blockId, text);
+        setInputText('');
+      } else if (!text) {
+        onAddItem(blockId);
+      }
+    };
+    
+    return (
+      <View style={styles.addChecklistItemContainer}>
+        <TextInput
+          style={styles.addChecklistItemInput}
+          placeholder="Agregar tarea..."
+          value={inputText}
+          onChangeText={setInputText}
+          onSubmitEditing={() => handleAddItem(inputText)}
+          placeholderTextColor="#999"
+        />
+        <TouchableOpacity
+          style={styles.addChecklistItemButton}
+          onPress={() => handleAddItem(inputText)}
+        >
+          <Ionicons name="add-circle" size={24} color={Colors.light.tint} />
+        </TouchableOpacity>
+      </View>
+    );
   };
 
   const renderNote = ({ item }: { item: Note }) => (
@@ -390,70 +665,147 @@ export default function NotesScreen() {
                 <Text style={styles.modalTitle} numberOfLines={1}>
                   {selectedNote?.title || 'Nota'}
                 </Text>
-                <TouchableOpacity 
-                  style={styles.editButton}
-                  onPress={startEditingTitle}
-                >
-                  <Ionicons name="pencil" size={16} color="white" />
-                </TouchableOpacity>
+                <View style={styles.headerActions}>
+                  <TouchableOpacity 
+                    style={styles.textBlockButton}
+                    onPress={addTextBlock}
+                  >
+                    <Text style={styles.textBlockButtonText}>T</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.checklistButton}
+                    onPress={addChecklistBlock}
+                  >
+                    <Ionicons name="checkbox-outline" size={18} color="white" />
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.editButton}
+                    onPress={startEditingTitle}
+                  >
+                    <Ionicons name="pencil" size={16} color="white" />
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
           </View>
           
-          {/* Contenido editable como bloc de notas */}
+          {/* Contenido editable como bloc de notas - bloques intercalados */}
           <View style={styles.notepadContainer}>
-            {isEditingContent ? (
-              <View style={styles.contentEditContainer}>
-                <View style={styles.contentEditHeader}>
-                  <Text style={styles.editLabel}>Editando nota</Text>
-                  <View style={styles.contentEditActions}>
-                    <TouchableOpacity 
-                      style={[styles.saveButton, loading && styles.saveButtonDisabled]}
-                      onPress={saveContentEdit}
-                      disabled={loading}
-                    >
-                      <Ionicons name="checkmark" size={16} color="white" />
-                      <Text style={styles.saveButtonText}>Guardar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.cancelButton}
-                      onPress={cancelContentEdit}
-                    >
-                      <Ionicons name="close" size={16} color="white" />
-                      <Text style={styles.cancelButtonText}>Cancelar</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                <TextInput
-                  style={styles.contentTextInput}
-                  value={editingContent}
-                  onChangeText={setEditingContent}
-                  multiline
-                  textAlignVertical="top"
-                  placeholder="Escribe tu nota aquí..."
-                  placeholderTextColor="#999"
-                  autoFocus
-                />
+            <ScrollView 
+              style={styles.contentScrollView} 
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Renderizar bloques en orden */}
+              {editingBlocks.map((block) => {
+                if (block.type === 'text') {
+                  return (
+                    <View key={block.id} style={styles.textBlockContainer}>
+                      <TextInput
+                        style={styles.textBlockInput}
+                        value={block.content}
+                        onChangeText={(text) => updateTextBlock(block.id, text)}
+                        multiline
+                        textAlignVertical="top"
+                        placeholder="Escribe tu texto aquí..."
+                        placeholderTextColor="#999"
+                        autoFocus={editingTextBlockId === block.id}
+                      />
+                      <TouchableOpacity
+                        style={styles.deleteBlockButton}
+                        onPress={() => deleteTextBlock(block.id)}
+                      >
+                        <Ionicons name="close-circle" size={20} color="#dc3545" />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                } else {
+                  // Checklist block
+                  return (
+                    <View key={block.id} style={styles.checklistBlockContainer}>
+                      {block.items.map((item) => (
+                        <View key={item.id} style={styles.checklistItem}>
+                          <TouchableOpacity
+                            style={styles.checkboxContainer}
+                            onPress={() => toggleChecklistItem(block.id, item.id)}
+                          >
+                            <Ionicons
+                              name={item.completed ? "checkbox" : "square-outline"}
+                              size={24}
+                              color={item.completed ? Colors.light.tint : Colors.light.text}
+                            />
+                          </TouchableOpacity>
+                          {editingChecklistItemId === item.id ? (
+                            <TextInput
+                              style={styles.checklistItemTextInput}
+                              value={editingChecklistItemText}
+                              onChangeText={setEditingChecklistItemText}
+                              onBlur={() => saveChecklistItemEdit(block.id, item.id)}
+                              onSubmitEditing={() => saveChecklistItemEdit(block.id, item.id)}
+                              autoFocus
+                              placeholder="Tarea..."
+                              placeholderTextColor="#999"
+                            />
+                          ) : (
+                            <TouchableOpacity
+                              style={styles.checklistItemTextContainer}
+                              onPress={() => startEditingChecklistItem(item)}
+                            >
+                              <Text
+                                style={[
+                                  styles.checklistItemText,
+                                  item.completed && styles.checklistItemTextCompleted
+                                ]}
+                              >
+                                {item.text}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity
+                            style={styles.deleteChecklistItemButton}
+                            onPress={() => deleteChecklistItem(block.id, item.id)}
+                          >
+                            <Ionicons name="close-circle" size={20} color="#dc3545" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                      
+                      {/* Botón para agregar item a esta checklist */}
+                      <View style={styles.checklistBlockFooter}>
+                        <ChecklistItemInput 
+                          blockId={block.id}
+                          onAddItem={addChecklistItem}
+                          onDeleteBlock={() => deleteChecklistBlock(block.id)}
+                        />
+                        <TouchableOpacity
+                          style={styles.deleteChecklistBlockButton}
+                          onPress={() => deleteChecklistBlock(block.id)}
+                        >
+                          <Ionicons name="trash-outline" size={20} color="#dc3545" />
+                          <Text style={styles.deleteChecklistBlockText}>Eliminar checklist</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                }
+              })}
+              
+              {/* Botones para agregar nuevos bloques */}
+              <View style={styles.addBlocksContainer}>
+                <TouchableOpacity
+                  style={styles.addBlockButton}
+                  onPress={addTextBlock}
+                >
+                  <Text style={styles.addBlockButtonText}>+ Bloque de texto</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.addBlockButton, styles.addChecklistBlockButton]}
+                  onPress={addChecklistBlock}
+                >
+                  <Text style={styles.addBlockButtonText}>+ Checklist</Text>
+                </TouchableOpacity>
               </View>
-            ) : (
-              <View style={styles.contentDisplayContainer}>
-                <View style={styles.contentHeader}>
-                  <Text style={styles.contentLabel}>Nota</Text>
-                  <TouchableOpacity 
-                    style={styles.editButton}
-                    onPress={startEditingContent}
-                  >
-                    <Ionicons name="pencil" size={16} color="white" />
-                    <Text style={styles.editButtonText}>Editar</Text>
-                  </TouchableOpacity>
-                </View>
-                <ScrollView style={styles.contentScrollView} showsVerticalScrollIndicator={true}>
-                  <Text style={styles.modalNoteContent}>
-                    {selectedNote?.content || 'No hay contenido'}
-                  </Text>
-                </ScrollView>
-              </View>
-            )}
+            </ScrollView>
           </View>
         </SafeAreaView>
       </Modal>
@@ -696,6 +1048,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     flex: 1,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  textBlockButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+    minWidth: 32,
+  },
+  textBlockButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  checklistButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 15,
+  },
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -703,7 +1083,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 15,
-    marginLeft: 8,
   },
   editButtonText: {
     color: 'white',
@@ -765,65 +1144,144 @@ const styles = StyleSheet.create({
     elevation: 5,
     overflow: 'hidden',
   },
-  contentDisplayContainer: {
-    flex: 1,
-  },
-  contentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#f8f9fa',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-  },
-  contentLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.light.text,
-  },
   contentScrollView: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  modalNoteContent: {
-    fontSize: 16,
-    color: Colors.light.text,
-    lineHeight: 26,
-    textAlign: 'left',
-  },
-  // Edición de contenido
-  contentEditContainer: {
-    flex: 1,
-  },
-  contentEditHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#e3f2fd',
-    borderBottomWidth: 1,
-    borderBottomColor: '#bbdefb',
-  },
-  editLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.light.tint,
-  },
-  contentEditActions: {
-    flexDirection: 'row',
-    gap: 8,
   },
   contentTextInput: {
-    flex: 1,
+    minHeight: 100,
     paddingHorizontal: 20,
     paddingVertical: 16,
     fontSize: 16,
     color: Colors.light.text,
     lineHeight: 24,
     textAlignVertical: 'top',
+  },
+  // Text block styles
+  textBlockContainer: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    position: 'relative',
+  },
+  textBlockInput: {
+    fontSize: 16,
+    color: Colors.light.text,
+    lineHeight: 24,
+    textAlignVertical: 'top',
+    minHeight: 40,
+    paddingRight: 30,
+  },
+  deleteBlockButton: {
+    position: 'absolute',
+    right: 20,
+    top: 12,
+    padding: 4,
+  },
+  // Checklist block styles
+  checklistBlockContainer: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  checklistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  checkboxContainer: {
+    marginRight: 12,
+  },
+  checklistItemTextContainer: {
+    flex: 1,
+  },
+  checklistItemText: {
+    fontSize: 16,
+    color: Colors.light.text,
+    lineHeight: 22,
+  },
+  checklistItemTextCompleted: {
+    opacity: 0.5,
+    textDecorationLine: 'line-through',
+  },
+  checklistItemTextInput: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.light.text,
+    lineHeight: 22,
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.light.tint,
+  },
+  deleteChecklistItemButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  checklistBlockFooter: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  addChecklistItemContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  deleteChecklistBlockButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    marginTop: 4,
+  },
+  deleteChecklistBlockText: {
+    color: '#dc3545',
+    fontSize: 14,
+    marginLeft: 6,
+  },
+  addChecklistItemInput: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: Colors.light.text,
+    marginRight: 8,
+  },
+  addChecklistItemButton: {
+    padding: 4,
+  },
+  // Add blocks container
+  addBlocksContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 2,
+    borderTopColor: '#e0e0e0',
+    marginTop: 8,
+  },
+  addBlockButton: {
+    flex: 1,
+    backgroundColor: Colors.light.tint,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addChecklistBlockButton: {
+    backgroundColor: '#6c757d',
+  },
+  addBlockButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

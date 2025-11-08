@@ -92,13 +92,22 @@ class EventController extends Controller
 
             // Log para debugging de overrides
             if ($request->series_id && $request->original_start_utc) {
-                \Log::info('🎯 Creating override for series', [
+                Log::info('🎯 Creating override for series', [
                     'series_id' => $request->series_id,
                     'original_start_utc' => $request->original_start_utc,
                     'new_start_utc' => $request->start_utc,
                     'new_end_utc' => $request->end_utc,
                     'title' => $request->title
                 ]);
+            }
+
+            // Verificar si es un override y si la serie original tiene subtareas
+            $shouldIgnoreColor = false;
+            if ($request->series_id) {
+                $seriesEvent = Event::find($request->series_id);
+                if ($seriesEvent && $seriesEvent->subtasks()->count() > 0) {
+                    $shouldIgnoreColor = true;
+                }
             }
 
             $event = Event::create([
@@ -113,7 +122,7 @@ class EventController extends Controller
                 'end_utc' => $request->end_utc,
                 'all_day' => $request->all_day ?? false,
                 'timezone' => $request->timezone ?? 'UTC',
-                'color' => $request->color,
+                'color' => $shouldIgnoreColor ? null : $request->color,
                 'is_recurring' => $request->is_recurring ?? false,
                 'recurrence_rule' => $request->recurrence_rule,
                 'recurrence_end_date' => $request->recurrence_end_date,
@@ -137,7 +146,7 @@ class EventController extends Controller
 
             // Log de confirmación para overrides
             if ($request->series_id && $request->original_start_utc) {
-                \Log::info('✅ Override created successfully', [
+                Log::info('✅ Override created successfully', [
                     'override_id' => $event->id,
                     'series_id' => $event->series_id,
                     'original_start_utc' => $event->original_start_utc,
@@ -227,12 +236,23 @@ class EventController extends Controller
         try {
             DB::beginTransaction();
 
+            // Verificar si el evento tiene subtareas
+            $hasSubtasks = $event->subtasks()->count() > 0;
+            
+            // Preparar datos para actualizar
+            $updateData = $request->only([
+                'calendar_id', 'title', 'description', 'location',
+                'start_utc', 'end_utc', 'all_day', 'timezone', 'category_id',
+                'is_recurring', 'recurrence_rule', 'recurrence_end_date'
+            ]);
+            
+            // Si el evento tiene subtareas, ignorar el color (se maneja automáticamente por el frontend)
+            if (!$hasSubtasks && $request->has('color')) {
+                $updateData['color'] = $request->color;
+            }
+            
             $event->update(array_merge(
-                $request->only([
-                    'calendar_id', 'title', 'description', 'location',
-                    'start_utc', 'end_utc', 'all_day', 'timezone', 'color', 'category_id',
-                    'is_recurring', 'recurrence_rule', 'recurrence_end_date'
-                ]),
+                $updateData,
                 ['version' => $event->version + 1]
             ));
 
@@ -418,6 +438,74 @@ class EventController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error al eliminar los eventos',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Restaurar eventos eliminados del usuario (últimos 7 días)
+     * Restaura eventos que fueron eliminados con soft delete en los últimos 7 días
+     */
+    public function restoreAllEvents(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        try {
+            DB::beginTransaction();
+
+            // Obtener eventos eliminados en los últimos 7 días (soft delete)
+            $sevenDaysAgo = now()->subDays(7);
+            $deletedEvents = Event::withTrashed()
+                ->where('user_id', $user->id)
+                ->whereNotNull('deleted_at')
+                ->where('deleted_at', '>=', $sevenDaysAgo)
+                ->get();
+
+            $eventsCount = $deletedEvents->count();
+
+            if ($eventsCount === 0) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'No hay eventos eliminados en los últimos 7 días para restaurar',
+                    'data' => [
+                        'events_restored' => 0
+                    ]
+                ]);
+            }
+
+            // Restaurar todos los eventos
+            foreach ($deletedEvents as $event) {
+                $event->restore();
+            }
+
+            DB::commit();
+
+            Log::info('✅ EVENTOS RESTAURADOS (ÚLTIMOS 7 DÍAS)', [
+                'user_id' => $user->id,
+                'user_email' => $user->email,
+                'events_restored' => $eventsCount,
+                'timestamp' => now()->toDateTimeString()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Se restauraron {$eventsCount} evento(s) eliminados en los últimos 7 días",
+                'data' => [
+                    'events_restored' => $eventsCount
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error restaurando eventos', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al restaurar los eventos',
                 'error' => $e->getMessage()
             ], 500);
         }

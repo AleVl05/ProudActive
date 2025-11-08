@@ -1,10 +1,11 @@
 import { START_HOUR, WEEK_DAY_ITEMS } from './dateConstants';
 
 // Utilidades fecha/UTC mínimas para API
-export const dateKeyToLocalDate = (dateKey: string, minutesFromStart: number) => {
+export const dateKeyToLocalDate = (dateKey: string, minutesFromStart: number, startHour: number = START_HOUR) => {
   const [y, m, d] = dateKey.split('-').map(Number);
   // Crear fecha directamente en UTC para evitar problemas de zona horaria
-  const dt = new Date(Date.UTC(y, (m - 1), d, START_HOUR, 0, 0, 0));
+  // Usar startHour proporcionado (por defecto START_HOUR para compatibilidad)
+  const dt = new Date(Date.UTC(y, (m - 1), d, startHour, 0, 0, 0));
   dt.setUTCMinutes(dt.getUTCMinutes() + minutesFromStart);
   return dt; // UTC Date
 };

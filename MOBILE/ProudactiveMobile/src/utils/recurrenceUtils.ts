@@ -181,7 +181,9 @@ export const generateRecurrentInstances = (
   masterEvent: any, 
   startDate: Date, 
   endDate: Date,
-  overridesMap?: Map<string, any>
+  overridesMap?: Map<string, any>,
+  startHour: number = START_HOUR,
+  endHour: number = 24
 ): any[] => {
   if (!masterEvent || !masterEvent.is_recurring) {
     return [];
@@ -253,46 +255,83 @@ export const generateRecurrentInstances = (
         } else if (overridesMap && overridesMap.has(instanceUtcKey)) {
           const override = overridesMap.get(instanceUtcKey);
           
-          // Convertir override a formato Event
-          const overrideEvent: any = {
-            id: String(override.id),
-            title: override.title,
-            description: override.description,
-            startTime: (new Date(override.start_utc).getUTCHours() * 60 + new Date(override.start_utc).getUTCMinutes()) - (START_HOUR * 60),
-            duration: Math.round((new Date(override.end_utc).getTime() - new Date(override.start_utc).getTime()) / (1000 * 60)),
-            color: override.color,
-            category: override.category || 'General',
-            date: new Date(override.start_utc).toISOString().slice(0, 10),
-            is_recurring: false,
-            // 🆕 Heredar información de subtareas del evento maestro
-            subtasks_count: masterEvent.subtasks_count || 0,
-            subtasks_completed_count: masterEvent.subtasks_completed_count || 0,
-          };
-          instances.push(overrideEvent);
+          // Verificar si el override está dentro del rango configurado
+          const overrideStartHour = instanceStart.getUTCHours();
+          const overrideStartMinute = instanceStart.getUTCMinutes();
+          const overrideEndHour = instanceEnd.getUTCHours();
+          const overrideEndMinute = instanceEnd.getUTCMinutes();
+          const effectiveEndHour = endHour === 24 ? 24 : endHour;
+          
+          const overrideStartTotalMinutes = overrideStartHour * 60 + overrideStartMinute;
+          const overrideEndTotalMinutes = overrideEndHour * 60 + overrideEndMinute;
+          const rangeStartTotalMinutes = startHour * 60;
+          const rangeEndTotalMinutes = effectiveEndHour === 24 ? 24 * 60 : effectiveEndHour * 60;
+          
+          const isCompletelyBeforeRange = overrideEndTotalMinutes < rangeStartTotalMinutes;
+          const isCompletelyAfterRange = overrideStartTotalMinutes >= rangeEndTotalMinutes;
+          
+          if (!isCompletelyBeforeRange && !isCompletelyAfterRange) {
+            // Convertir override a formato Event solo si está en el rango
+            const overrideEvent: any = {
+              id: String(override.id),
+              title: override.title,
+              description: override.description,
+              startTime: (new Date(override.start_utc).getUTCHours() * 60 + new Date(override.start_utc).getUTCMinutes()) - (startHour * 60),
+              duration: Math.round((new Date(override.end_utc).getTime() - new Date(override.start_utc).getTime()) / (1000 * 60)),
+              color: override.color,
+              category: override.category || 'General',
+              date: new Date(override.start_utc).toISOString().slice(0, 10),
+              is_recurring: false,
+              // 🆕 Heredar información de subtareas del evento maestro
+              subtasks_count: masterEvent.subtasks_count || 0,
+              subtasks_completed_count: masterEvent.subtasks_completed_count || 0,
+            };
+            instances.push(overrideEvent);
+          }
         } else {
           // Generar instancia normal
-          const startTime = (instanceStart.getUTCHours() * 60 + instanceStart.getUTCMinutes()) - (START_HOUR * 60);
+          const startTime = (instanceStart.getUTCHours() * 60 + instanceStart.getUTCMinutes()) - (startHour * 60);
           
-          const instance: any = {
-            id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
-            title: masterEvent.title,
-            description: masterEvent.description,
-            startTime: startTime,
-            duration: Math.round(duration / (1000 * 60)),
-            color: masterEvent.color,
-            category: masterEvent.category || 'General',
-            date: instanceStart.toISOString().slice(0, 10),
-            is_recurring: masterEvent.is_recurring,
-            recurrence_rule: masterEvent.recurrence_rule,
-            recurrence_end_date: masterEvent.recurrence_end_date,
-            series_id: masterEvent.id,
-            original_start_utc: masterEvent.start_utc,
-            // 🆕 Heredar información de subtareas del evento maestro
-            subtasks_count: masterEvent.subtasks_count || 0,
-            subtasks_completed_count: masterEvent.subtasks_completed_count || 0,
-          };
+          // Verificar si la instancia está dentro del rango configurado
+          const instanceStartHour = instanceStart.getUTCHours();
+          const instanceEndHour = instanceEnd.getUTCHours();
+          const effectiveEndHour = endHour === 24 ? 24 : endHour;
+          
+          // Calcular minutos totales para comparación
+          const instanceStartTotalMinutes = instanceStartHour * 60 + instanceStart.getUTCMinutes();
+          const instanceEndTotalMinutes = instanceEndHour * 60 + instanceEnd.getUTCMinutes();
+          const rangeStartTotalMinutes = startHour * 60;
+          const rangeEndTotalMinutes = effectiveEndHour === 24 ? 24 * 60 : effectiveEndHour * 60;
+          
+          // Si está completamente fuera del rango, no incluirla
+          const isCompletelyBeforeRange = instanceEndTotalMinutes < rangeStartTotalMinutes;
+          const isCompletelyAfterRange = instanceStartTotalMinutes >= rangeEndTotalMinutes;
+          
+          if (isCompletelyBeforeRange || isCompletelyAfterRange) {
+            // Saltar esta instancia - está fuera del rango visible
+            // Continuar al siguiente cálculo de fecha (se hace al final del while)
+          } else {
+            const instance: any = {
+              id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
+              title: masterEvent.title,
+              description: masterEvent.description,
+              startTime: startTime,
+              duration: Math.round(duration / (1000 * 60)),
+              color: masterEvent.color,
+              category: masterEvent.category || 'General',
+              date: instanceStart.toISOString().slice(0, 10),
+              is_recurring: masterEvent.is_recurring,
+              recurrence_rule: masterEvent.recurrence_rule,
+              recurrence_end_date: masterEvent.recurrence_end_date,
+              series_id: masterEvent.id,
+              original_start_utc: masterEvent.start_utc,
+              // 🆕 Heredar información de subtareas del evento maestro
+              subtasks_count: masterEvent.subtasks_count || 0,
+              subtasks_completed_count: masterEvent.subtasks_completed_count || 0,
+            };
 
-          instances.push(instance);
+            instances.push(instance);
+          }
         }
       }
 

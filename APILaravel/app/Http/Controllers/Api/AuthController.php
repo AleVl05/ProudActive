@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\UserPreferences;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class AuthController extends Controller
@@ -571,4 +573,237 @@ class AuthController extends Controller
             ]);
         }
     }
+
+    /**
+     * Obtener preferencias del usuario
+     */
+    public function getPreferences(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $preferences = $user->preferences;
+
+        // Si no tiene preferencias, crear con valores por defecto
+        if (!$preferences) {
+            $preferences = $user->preferences()->create([
+                'time_interval_minutes' => 30,
+                'start_hour' => 6,
+                'end_hour' => 22,
+                'default_view' => 'week',
+                'week_starts_on' => 'monday',
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $preferences
+        ]);
+    }
+
+    /**
+     * Actualizar preferencias del usuario
+     */
+    public function updatePreferences(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'time_interval_minutes' => 'sometimes|integer|min:5|max:60',
+            'start_hour' => 'sometimes|integer|min:0|max:23',
+            'end_hour' => 'sometimes|integer|min:1|max:24',
+            'default_view' => 'sometimes|in:day,week,month',
+            'week_starts_on' => 'sometimes|in:monday,sunday',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = $request->user();
+        $preferences = $user->preferences;
+
+        // Si no tiene preferencias, crear con valores por defecto
+        if (!$preferences) {
+            $preferences = $user->preferences()->create([
+                'time_interval_minutes' => 30,
+                'start_hour' => 6,
+                'end_hour' => 22,
+                'default_view' => 'week',
+                'week_starts_on' => 'monday',
+            ]);
+        }
+
+        // Validar que end_hour sea mayor que start_hour
+        $startHour = $request->has('start_hour') ? $request->start_hour : $preferences->start_hour;
+        $endHour = $request->has('end_hour') ? $request->end_hour : $preferences->end_hour;
+
+        // Si end_hour es 24, tratarlo como 24 (medianoche del día siguiente)
+        // Pero para validación, si end_hour es 24, permitirlo
+        if ($endHour == 24) {
+            // Permitir end_hour = 24 (medianoche)
+        } else if ($endHour <= $startHour) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La hora de fin debe ser mayor que la hora de inicio'
+            ], 422);
+        }
+
+        $updateData = $request->only([
+            'time_interval_minutes',
+            'start_hour',
+            'end_hour',
+            'default_view',
+            'week_starts_on'
+        ]);
+        
+        Log::info('💾 Actualizando preferencias', [
+            'user_id' => $user->id,
+            'update_data' => $updateData,
+            'preferences_before' => $preferences->toArray()
+        ]);
+        
+        $preferences->update($updateData);
+        
+        $updatedPreferences = $preferences->fresh();
+        
+        Log::info('✅ Preferencias actualizadas', [
+            'user_id' => $user->id,
+            'preferences_after' => $updatedPreferences->toArray()
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Preferencias actualizadas exitosamente',
+            'data' => $updatedPreferences
+        ]);
+    }
+
+    /**
+     * Registrar acceso diario y calcular días consecutivos
+     */
+    public function registerDailyAccess(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            $preferences = $user->preferences;
+
+            // Si no tiene preferencias, crear con valores por defecto
+            if (!$preferences) {
+                $preferences = $user->preferences()->create([
+                    'time_interval_minutes' => 30,
+                    'start_hour' => 6,
+                    'end_hour' => 22,
+                    'default_view' => 'week',
+                    'week_starts_on' => 'monday',
+                    'consecutive_days' => 0,
+                    'last_access_date' => null,
+                ]);
+            }
+
+            $today = now()->toDateString();
+            $lastAccessDate = $preferences->last_access_date 
+                ? $preferences->last_access_date->toDateString() 
+                : null;
+            
+            $consecutiveDays = $preferences->consecutive_days ?? 0;
+            $previousConsecutiveDays = $consecutiveDays;
+            $wasIncreased = false;
+
+            // Si ya se registró acceso hoy, no hacer nada
+            if ($lastAccessDate === $today) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Acceso ya registrado hoy',
+                    'data' => [
+                        'consecutive_days' => $consecutiveDays,
+                        'last_access_date' => $lastAccessDate,
+                        'was_increased' => false,
+                    ]
+                ]);
+            }
+
+            // Calcular días consecutivos
+            if ($lastAccessDate === null) {
+                // Primera vez que accede
+                $consecutiveDays = 1;
+                $wasIncreased = true;
+            } else {
+                $lastAccess = \Carbon\Carbon::parse($lastAccessDate);
+                $yesterday = now()->subDay()->toDateString();
+                
+                if ($lastAccessDate === $yesterday) {
+                    // Accedió ayer, incrementar racha
+                    $consecutiveDays = $consecutiveDays + 1;
+                    $wasIncreased = true;
+                } else {
+                    // No accedió ayer, resetear racha
+                    $consecutiveDays = 1;
+                    $wasIncreased = ($previousConsecutiveDays === 0);
+                }
+            }
+
+            // Actualizar preferencias
+            $preferences->update([
+                'last_access_date' => $today,
+                'consecutive_days' => $consecutiveDays,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Acceso registrado exitosamente',
+                'data' => [
+                    'consecutive_days' => $consecutiveDays,
+                    'previous_consecutive_days' => $previousConsecutiveDays,
+                    'last_access_date' => $today,
+                    'was_increased' => $wasIncreased,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error registrando acceso diario', [
+                'user_id' => $request->user()->id ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al registrar acceso diario',
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener estadísticas del usuario (días consecutivos, etc.)
+     */
+    public function getStats(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            $preferences = $user->preferences;
+
+            $consecutiveDays = 0;
+            if ($preferences) {
+                $consecutiveDays = $preferences->consecutive_days ?? 0;
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'consecutive_days' => $consecutiveDays,
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error obteniendo estadísticas', [
+                'user_id' => $request->user()->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener estadísticas',
+            ], 500);
+        }
+    }
+
 }

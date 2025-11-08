@@ -1,12 +1,12 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Modal, ScrollView, Image, Switch, Platform, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Modal, ScrollView, Image, Switch, Platform, Linking, Animated } from 'react-native';
 import { Colors } from '@/constants/theme';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'expo-router';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import authService, { User } from '../../services/auth';
 import tutorialService from '../../src/utils/tutorialService';
 import { PermissionsAndroid } from 'react-native';
-import { apiDeleteAllEvents } from '../../services/calendarApi';
+import { apiDeleteAllEvents, apiRestoreAllEvents, apiGetPreferences, apiUpdatePreferences, apiFetchEvents, apiGetStats } from '../../services/calendarApi';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -24,20 +24,22 @@ export default function ProfileScreen() {
   const [showDeleteAllEventsModal, setShowDeleteAllEventsModal] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [isDeletingEvents, setIsDeletingEvents] = useState(false);
+  const [isRestoringEvents, setIsRestoringEvents] = useState(false);
   
-  // Estadísticas del usuario (simuladas por ahora)
+  // Estadísticas del usuario
   const [userStats, setUserStats] = useState({
-    consecutiveDays: 7,
+    consecutiveDays: 0,
     totalTasks: 23,
     completedTasks: 18,
     streak: 5,
-    consecutiveAccesses: 7
+    consecutiveAccesses: 0
   });
-
-  useEffect(() => {
-    loadUserData();
-    checkNotificationPermissions();
-  }, []);
+  
+  // Animación para días consecutivos
+  const consecutiveDaysAnim = useState(new Animated.Value(0))[0];
+  const [previousConsecutiveDays, setPreviousConsecutiveDays] = useState(0);
+  const [showConsecutiveDaysAnimation, setShowConsecutiveDaysAnimation] = useState(false);
+  const [animatedValue, setAnimatedValue] = useState(0);
 
   const loadUserData = async () => {
     const userData = await authService.getUser();
@@ -45,6 +47,171 @@ export default function ProfileScreen() {
     if (userData) {
       setEditName(userData.name || '');
       setEditEmail(userData.email || '');
+    }
+  };
+
+  const loadPreferences = async () => {
+    try {
+      const response = await apiGetPreferences();
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          setStartHour(result.data.start_hour?.toString() || '6');
+          setEndHour(result.data.end_hour?.toString() || '24');
+          // Cargar días consecutivos desde las preferencias
+          const consecutiveDays = result.data.consecutive_days || 0;
+          setUserStats(prev => ({
+            ...prev,
+            consecutiveDays: consecutiveDays,
+            consecutiveAccesses: consecutiveDays
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading preferences:', error);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const response = await apiGetStats();
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          const newConsecutiveDays = result.data.consecutive_days || 0;
+          const oldConsecutiveDays = userStats.consecutiveDays;
+          
+          // Si aumentó, mostrar animación
+          if (newConsecutiveDays > oldConsecutiveDays && oldConsecutiveDays > 0) {
+            setPreviousConsecutiveDays(oldConsecutiveDays);
+            setShowConsecutiveDaysAnimation(true);
+            setAnimatedValue(oldConsecutiveDays);
+            // Animación de número que sube
+            consecutiveDaysAnim.setValue(oldConsecutiveDays);
+            
+            // Listener para actualizar el valor mostrado
+            const listener = consecutiveDaysAnim.addListener(({ value }) => {
+              setAnimatedValue(Math.round(value));
+            });
+            
+            Animated.sequence([
+              Animated.timing(consecutiveDaysAnim, {
+                toValue: newConsecutiveDays,
+                duration: 800,
+                useNativeDriver: false,
+              }),
+              Animated.delay(1500),
+            ]).start(() => {
+              consecutiveDaysAnim.removeListener(listener);
+              setShowConsecutiveDaysAnimation(false);
+            });
+          }
+          
+          setUserStats(prev => ({
+            ...prev,
+            consecutiveDays: newConsecutiveDays,
+            consecutiveAccesses: newConsecutiveDays
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading stats:', error);
+    }
+  };
+
+  useEffect(() => {
+    loadUserData();
+    checkNotificationPermissions();
+    loadPreferences();
+    loadStats();
+  }, []);
+  
+  // Recargar stats cuando se enfoca la pantalla del perfil
+  useFocusEffect(
+    useCallback(() => {
+      loadStats();
+    }, [])
+  );
+
+  const checkEventsOutsideRange = async (newStartHour: number, newEndHour: number): Promise<number> => {
+    try {
+      // Obtener eventos del último mes y próximo mes para verificar
+      const now = new Date();
+      const startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 1);
+      const endDate = new Date(now);
+      endDate.setMonth(endDate.getMonth() + 1);
+
+      const response = await apiFetchEvents(startDate.toISOString(), endDate.toISOString());
+      if (!response.ok) {
+        return 0;
+      }
+
+      const result = await response.json();
+      if (!result.success || !Array.isArray(result.data)) {
+        return 0;
+      }
+
+      let count = 0;
+      for (const event of result.data) {
+        if (!event.start_utc) continue;
+        
+        const eventDate = new Date(event.start_utc);
+        const eventHour = eventDate.getUTCHours();
+        const eventEndDate = event.end_utc ? new Date(event.end_utc) : new Date(eventDate.getTime() + 30 * 60 * 1000);
+        const eventEndHour = eventEndDate.getUTCHours();
+        
+        // Verificar si el evento está fuera del rango configurado
+        // Si end_hour es 24, tratarlo como medianoche (0 del día siguiente)
+        const effectiveEndHour = newEndHour === 24 ? 24 : newEndHour;
+        
+        // Evento está fuera del rango si:
+        // - Empieza antes de start_hour
+        // - Termina después de end_hour (o empieza después si end_hour es 24)
+        if (eventHour < newStartHour || (effectiveEndHour < 24 && eventEndHour >= effectiveEndHour) || (effectiveEndHour === 24 && eventHour >= 24)) {
+          count++;
+        }
+      }
+
+      return count;
+    } catch (error) {
+      console.error('Error checking events outside range:', error);
+      return 0;
+    }
+  };
+
+  const saveHourPreferences = async (startHourNum: number, endHourNum: number) => {
+    setIsLoading(true);
+    try {
+      console.log('💾 Guardando preferencias:', { start_hour: startHourNum, end_hour: endHourNum });
+      const response = await apiUpdatePreferences({
+        start_hour: startHourNum,
+        end_hour: endHourNum
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('💾 Respuesta del servidor:', result);
+        if (result.success) {
+          console.log('✅ Preferencias guardadas correctamente:', result.data);
+          Alert.alert('Configuración guardada', `Horas del calendario: ${startHourNum}:00 - ${endHourNum === 24 ? '00:00' : endHourNum + ':00'}`);
+          setShowHourConfig(false);
+          // Recargar preferencias para asegurar sincronización
+          await loadPreferences();
+        } else {
+          console.error('❌ Error guardando preferencias:', result.message);
+          Alert.alert('Error', result.message || 'No se pudo guardar la configuración');
+        }
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Error en respuesta:', response.status, errorData);
+        Alert.alert('Error', errorData.message || 'No se pudo guardar la configuración');
+      }
+    } catch (error) {
+      console.error('❌ Excepción guardando preferencias:', error);
+      Alert.alert('Error', 'Error al guardar la configuración');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -218,6 +385,41 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleRestoreAllEvents = async () => {
+    Alert.alert(
+      '🔄 Restaurar Eventos',
+      '¿Deseas restaurar los eventos que fueron eliminados en los últimos 7 días?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sí, restaurar',
+          onPress: async () => {
+            setIsRestoringEvents(true);
+            try {
+              const response = await apiRestoreAllEvents();
+              const result = await response.json();
+
+              if (result.success) {
+                Alert.alert(
+                  '✅ Eventos restaurados',
+                  result.message || 'Los eventos eliminados en los últimos 7 días han sido restaurados exitosamente.',
+                  [{ text: 'OK' }]
+                );
+              } else {
+                Alert.alert('Error', result.message || 'No se pudieron restaurar los eventos.');
+              }
+            } catch (error) {
+              console.error('Error restaurando eventos:', error);
+              Alert.alert('Error', 'Ocurrió un error al restaurar los eventos. Por favor intenta de nuevo.');
+            } finally {
+              setIsRestoringEvents(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // Si no hay usuario autenticado, mostrar pantalla de login
   if (!user) {
     return (
@@ -277,7 +479,31 @@ export default function ProfileScreen() {
         
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{userStats.consecutiveDays}</Text>
+            {showConsecutiveDaysAnimation ? (
+              <View style={styles.animatedNumberContainer}>
+                <Animated.Text 
+                  style={[
+                    styles.statNumber,
+                    styles.animatedNumber,
+                    {
+                      transform: [{
+                        scale: consecutiveDaysAnim.interpolate({
+                          inputRange: [previousConsecutiveDays, userStats.consecutiveDays],
+                          outputRange: [1, 1.3],
+                        })
+                      }],
+                    }
+                  ]}
+                >
+                  {animatedValue}
+                </Animated.Text>
+                <View style={styles.celebrationBadge}>
+                  <Text style={styles.celebrationText}>🎉</Text>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.statNumber}>{userStats.consecutiveDays}</Text>
+            )}
             <Text style={styles.statLabel}>Días consecutivos</Text>
           </View>
           
@@ -381,6 +607,17 @@ export default function ProfileScreen() {
                 🗑️ Eliminar todos los eventos
               </Text>
               <Ionicons name="chevron-forward" size={16} color="#ff3b30" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.settingItem, styles.restoreSettingItem]}
+              onPress={handleRestoreAllEvents}
+              disabled={isRestoringEvents}
+            >
+              <Text style={[styles.settingText, styles.restoreText]}>
+                {isRestoringEvents ? '🔄 Restaurando eventos...' : '🔄 Restaurar eventos (últimos 7 días)'}
+              </Text>
+              {!isRestoringEvents && <Ionicons name="chevron-forward" size={16} color={Colors.light.tint} />}
             </TouchableOpacity>
           </View>
         )}
@@ -539,10 +776,46 @@ export default function ProfileScreen() {
               
               <TouchableOpacity 
                 style={[styles.modalButton, styles.saveButton]}
-                onPress={() => {
-                  // TODO: Guardar configuración y aplicar cambios
-                  Alert.alert('Configuración guardada', `Horas: ${startHour}:00 - ${endHour}:00`);
-                  setShowHourConfig(false);
+                onPress={async () => {
+                  const newStartHour = parseInt(startHour, 10);
+                  const newEndHour = parseInt(endHour, 10);
+
+                  // Validaciones básicas
+                  if (isNaN(newStartHour) || newStartHour < 0 || newStartHour > 23) {
+                    Alert.alert('Error', 'La hora de inicio debe ser un número entre 0 y 23');
+                    return;
+                  }
+
+                  if (isNaN(newEndHour) || newEndHour < 1 || newEndHour > 24) {
+                    Alert.alert('Error', 'La hora de fin debe ser un número entre 1 y 24');
+                    return;
+                  }
+
+                  if (newEndHour !== 24 && newEndHour <= newStartHour) {
+                    Alert.alert('Error', 'La hora de fin debe ser mayor que la hora de inicio');
+                    return;
+                  }
+
+                  // Verificar eventos fuera del rango
+                  const eventsOutsideRange = await checkEventsOutsideRange(newStartHour, newEndHour);
+                  
+                  if (eventsOutsideRange > 0) {
+                    Alert.alert(
+                      'Eventos fuera del rango',
+                      `Hay ${eventsOutsideRange} evento(s) en las horas que estás eliminando del calendario. Estos eventos NO serán eliminados, pero NO serán visibles hasta que vuelvas a expandir el rango de horas del calendario.`,
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        {
+                          text: 'Continuar',
+                          onPress: async () => {
+                            await saveHourPreferences(newStartHour, newEndHour);
+                          }
+                        }
+                      ]
+                    );
+                  } else {
+                    await saveHourPreferences(newStartHour, newEndHour);
+                  }
                 }}
               >
                 <Text style={styles.saveButtonText}>Guardar</Text>
@@ -982,5 +1255,39 @@ const styles = StyleSheet.create({
     color: Colors.light.tint,
     fontSize: 14,
     fontWeight: '600',
+  },
+  restoreSettingItem: {
+    borderTopWidth: 1,
+    borderTopColor: '#e8f5e9',
+    marginTop: 8,
+    paddingTop: 16,
+  },
+  restoreText: {
+    color: Colors.light.tint,
+    fontWeight: '600',
+  },
+  animatedNumberContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  animatedNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: Colors.light.tint,
+  },
+  celebrationBadge: {
+    position: 'absolute',
+    top: -10,
+    right: -20,
+    backgroundColor: '#ffd700',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  celebrationText: {
+    fontSize: 16,
   },
 });

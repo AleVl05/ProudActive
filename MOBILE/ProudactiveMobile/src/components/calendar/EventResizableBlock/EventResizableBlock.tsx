@@ -1194,6 +1194,7 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
                   }
                   dragTouchStartRef.current = null;
                   hasMovedRef.current = false;
+                  lastTouchMoveRef.current = null; // 🔧 FIX: Limpiar ref de movimiento
                 }
               }}
               style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 15 }}

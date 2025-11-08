@@ -83,6 +83,19 @@ async function apiDeleteAllEvents(password: string) {
   return res;
 }
 
+/**
+ * Restaurar TODOS los eventos eliminados del usuario
+ * Restaura eventos que fueron eliminados con soft delete
+ */
+async function apiRestoreAllEvents() {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/events/restore-all`, {
+    method: 'POST',
+    headers,
+  });
+  return res;
+}
+
 async function apiFetchEvents(startIso: string, endIso: string) {
   const headers = await getAuthHeaders();
   const params = new URLSearchParams({ start: startIso, end: endIso });
@@ -134,7 +147,7 @@ async function apiGetSubtasks(eventId: string) {
   return res;
 }
 
-async function apiCreateSubtask(eventId: string, text: string, sortOrder: number = 0) {
+async function apiCreateSubtask(eventId: string, text: string, sortOrder: number = 0, completed: boolean = false) {
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_BASE}/subtasks`, {
     method: 'POST',
@@ -142,7 +155,8 @@ async function apiCreateSubtask(eventId: string, text: string, sortOrder: number
     body: JSON.stringify({
       event_id: eventId,
       text: text,
-      sort_order: sortOrder
+      sort_order: sortOrder,
+      completed: completed
     }),
   });
   return res;
@@ -263,6 +277,44 @@ async function apiHideSubtaskForInstance(subtaskId: string, eventInstanceId: str
   return res;
 }
 
+// ===== USER PREFERENCES =====
+async function apiGetPreferences() {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/auth/preferences`, { headers });
+  return res;
+}
+
+async function apiUpdatePreferences(preferences: {
+  start_hour?: number;
+  end_hour?: number;
+  time_interval_minutes?: number;
+  default_view?: string;
+  week_starts_on?: string;
+}) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/auth/preferences`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(preferences),
+  });
+  return res;
+}
+
+async function apiRegisterDailyAccess() {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/auth/register-daily-access`, {
+    method: 'POST',
+    headers,
+  });
+  return res;
+}
+
+async function apiGetStats() {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/auth/stats`, { headers });
+  return res;
+}
+
 export {
   apiPutEventTimes,
   apiPutEvent,
@@ -270,6 +322,7 @@ export {
   apiPostEvent,
   apiDeleteEvent,
   apiDeleteAllEvents,
+  apiRestoreAllEvents,
   apiFetchEvents,
   apiFetchMonthEvents,
   apiPostMonthEvent,
@@ -288,5 +341,11 @@ export {
   // Custom Subtasks
   apiCreateCustomSubtask,
   apiUpdateCustomSubtask,
-  apiDeleteCustomSubtask
+  apiDeleteCustomSubtask,
+  // User Preferences
+  apiGetPreferences,
+  apiUpdatePreferences,
+  // User Stats
+  apiRegisterDailyAccess,
+  apiGetStats
 };
