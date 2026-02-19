@@ -1,9 +1,8 @@
-// calendar.tsx - Main calendar component with day/week/month views
+﻿// calendar.tsx - Main calendar component with day/week/month views
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   FlatList,
   TouchableOpacity,
   Pressable,
@@ -17,40 +16,39 @@ import {
   PanResponder,
   Animated,
   Switch,
-  Platform,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 
-// Importación opcional de expo-screen-orientation (requiere rebuild nativo)
+// Importaci?n opcional de expo-screen-orientation (requiere rebuild nativo)
 let ScreenOrientation: any = null;
 let ScreenOrientationAvailable = false;
 let warningShown = false;
 
 try {
   ScreenOrientation = require('expo-screen-orientation');
-  // Verificar que el módulo realmente funciona
+  // Verificar que el m?dulo realmente funciona
   if (ScreenOrientation && ScreenOrientation.lockAsync && ScreenOrientation.unlockAsync) {
     ScreenOrientationAvailable = true;
   } else {
     if (!warningShown) {
-      console.warn('expo-screen-orientation no está disponible. Necesitas hacer rebuild de la app nativa.');
+      console.warn('expo-screen-orientation no est? disponible. Necesitas hacer rebuild de la app nativa.');
       warningShown = true;
     }
   }
 } catch (e) {
   // Mostrar warning solo una vez
   if (!warningShown) {
-    console.warn('expo-screen-orientation no está disponible. Necesitas hacer rebuild de la app nativa.');
+    console.warn('expo-screen-orientation no est? disponible. Necesitas hacer rebuild de la app nativa.');
     warningShown = true;
   }
   ScreenOrientationAvailable = false;
 }
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { API_BASE } from '../../src/config/api';
-import authService from '../../services/auth';
+import { API_BASE } from '@/config/api';
+import authService from '@/services/auth';
 import {
   apiPutEventTimes,
   apiPutEvent,
@@ -76,7 +74,7 @@ import {
   apiDeleteCustomSubtask,
   apiGetPreferences,
   apiRegisterDailyAccess
-} from '../../services/calendarApi';
+} from '@/services/calendarApi';
 import {
   WEEK_DAY_ITEMS,
   WEEK_DAY_CODES,
@@ -88,7 +86,7 @@ import {
   START_HOUR,
   END_HOUR,
   DEFAULT_TIMEZONE
-} from '../../src/utils/dateConstants';
+} from '@/utils/dateConstants';
 import {
   dateKeyToLocalDate,
   dateKeyToDate,
@@ -96,7 +94,7 @@ import {
   formatDisplayMonthYear,
   getWeekDayCode,
   buildMonthMatrix
-} from '../../src/utils/dateUtils';
+} from '@/utils/dateUtils';
 import {
   createDefaultRecurrenceConfig,
   cloneRecurrenceConfig,
@@ -108,23 +106,32 @@ import {
   sanitizeRecurrenceDraft,
   RECURRENCE_MODE_LABEL,
   INTERVAL_UNIT_LABEL
-} from '../../src/utils/recurrenceUtils';
+} from '@/utils/recurrenceUtils';
 import {
   toggleItemInArray,
   sortNumericArray
-} from '../../src/utils/eventUtils';
-import GridBackground from '../../src/components/calendar/GridBackground';
-import RecurrenceModal from '../../src/components/calendar/RecurrenceModal';
-import EventModal from '../../src/components/calendar/EventModal';
-import DeleteModal from '../../src/components/calendar/DeleteModal';
-import SubtaskChangesModal from '../../src/components/calendar/SubtaskChangesModal';
-import EventResizableBlock from '../../src/components/calendar/EventResizableBlock/EventResizableBlock';
-import MonthView from '../../src/components/calendar/MonthView';
-import YearView from '../../src/components/calendar/YearView';
-import { MonthEvent, fetchMonthEvents as fetchMonthEventsHelper, fetchYearEvents as fetchYearEventsHelper, monthEventFrontendToBackend } from '../../src/components/calendar/monthEventHelpers';
-import TutorialOverlay from '../../src/components/tutorial/TutorialOverlay';
-import { calendarTutorialSteps } from '../../src/components/tutorial/tutorialSteps';
-import tutorialService from '../../src/utils/tutorialService';
+} from '@/utils/eventUtils';
+import {
+  Event,
+  RecurrenceConfig,
+  RecurrenceRule,
+  SelectedCell,
+  SelectedMonthCell,
+  SubtaskItem
+} from '@/types/calendarTypes';
+import GridBackground from '@/components/calendar/GridBackground';
+import RecurrenceModal from '@/components/calendar/RecurrenceModal';
+import EventModal from '@/components/calendar/EventModal';
+import DeleteModal from '@/components/calendar/DeleteModal';
+import SubtaskChangesModal from '@/components/calendar/SubtaskChangesModal';
+import { celebrationStyles, recurrenceStyles, styles } from './calendar.styles';
+import EventResizableBlock from '@/components/calendar/EventResizableBlock/EventResizableBlock';
+import MonthView from '@/components/calendar/MonthView';
+import YearView from '@/components/calendar/YearView';
+import { MonthEvent, fetchMonthEvents as fetchMonthEventsHelper, fetchYearEvents as fetchYearEventsHelper, monthEventFrontendToBackend } from '@/components/calendar/monthEventHelpers';
+import TutorialOverlay from '@/components/tutorial/TutorialOverlay';
+import { calendarTutorialSteps } from '@/components/tutorial/tutorialSteps';
+import tutorialService from '@/utils/tutorialService';
 
 const { width } = Dimensions.get('window');
 
@@ -136,83 +143,18 @@ const { width } = Dimensions.get('window');
 
 
 
-interface Event {
-  id: string;
-  title: string;
-  description?: string;
-  location?: string;
-  startTime: number; // minutos desde las 6 AM
-  duration: number; // minutos
-  color: string;
-  category: string;
-  date: string; // 'YYYY-MM-DD' -> fecha absoluta del evento
-  // Campos de recurrencia
-  is_recurring?: boolean;
-  recurrence_rule?: string | object | null;
-  recurrence_end_date?: string | null;
-  // Campos para detectar si viene de una serie
-  series_id?: string | number | null;
-  original_start_utc?: string | null;
-  // 🆕 Campos de información de subtareas
-  subtasks_count?: number;
-  subtasks_completed_count?: number;
-}
-
-type RecurrenceMode = 'daily' | 'weekly' | 'monthly';
-
-interface RecurrenceConfig {
-  enabled: boolean;
-  mode: RecurrenceMode;
-  interval: number;
-  weekDays: string[]; // códigos ISO-8601: 'MO', 'TU'...
-  monthDays: number[]; // 1-31
-  hasEndDate: boolean;
-  endDate: string | null; // YYYY-MM-DD
-}
-
-interface RecurrenceRule {
-  frequency: string;
-  interval: number;
-  byWeekDays?: string[];
-  byMonthDays?: number[];
-}
-
-// Utilidades fecha/UTC mínimas para API
-
-
-interface EventResizableBlockProps {
-  ev: Event;
-  onResizeCommit: (event: Event, newStartTime: number, newDuration: number) => void;
-  cellWidth: number;
-  onQuickPress?: (ev: Event) => void; // <-- NEW
-  currentView?: 'day' | 'week' | 'month' | 'year'; // <-- NEW: Para estilos condicionales
-}
-
-// EventResizableBlock - MOVIDO A ../../src/components/calendar/EventResizableBlock/EventResizableBlock.tsx
-
-// MonthEvent interface moved to monthEventHelpers.ts
-
-interface SelectedCell {
-  dayIndex: number;
-  timeIndex: number;
-  startTime: number;
-}
-
-interface SelectedMonthCell {
-  dayIndex: number;
-  day: number;
-}
+// Utilidades fecha/UTC m?nimas para API
 
 interface CalendarViewProps {}
 
-// Componente del Modal de Repetición - MOVIDO A ./components/calendar/RecurrenceModal.tsx
+// Componente del Modal de Repetici?n - MOVIDO A ./components/calendar/RecurrenceModal.tsx
 
 export default function CalendarView({}: CalendarViewProps) {
   const insets = useSafeAreaInsets();
 
   // ===== ESTADO PRINCIPAL =====
   const [events, setEvents] = useState<Event[]>([]);
-  // 🔧 FIX: Ref para leer eventos actuales de forma síncrona (para onMoveCommit)
+  // FIX: Ref para leer eventos actuales de forma s?ncrona (para onMoveCommit)
   const eventsRef = useRef<Event[]>([]);
   
   // Actualizar ref cuando cambien los eventos
@@ -222,14 +164,17 @@ export default function CalendarView({}: CalendarViewProps) {
   
   // Debug: Rastrear cambios de events (comentado para limpiar consola)
   // useEffect(() => {
-  //   console.log('📅 events CHANGED', { 
+  //   console.log('[Calendar] events CHANGED', { 
   //     newCount: events.length,
   //     timestamp: new Date().toISOString(),
   //     stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
   //   });
   // }, [events]);
   const [monthEvents, setMonthEvents] = useState<MonthEvent[]>([]);
-  const [yearEvents, setYearEvents] = useState<MonthEvent[]>([]); // Eventos del año completo
+  const [yearEvents, setYearEvents] = useState<MonthEvent[]>([]); // Eventos del a?o completo
+  const [currentView, setCurrentView] = useState<'day' | 'week' | 'month' | 'year'>('week');
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const currentDateRef = useRef<Date>(currentDate);
   const [selectedEvent, setSelectedEvent] = useState<Event | MonthEvent | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   // Estados de YearView movidos a YearView.tsx
@@ -243,8 +188,6 @@ export default function CalendarView({}: CalendarViewProps) {
   
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
   const [selectedMonthCell, setSelectedMonthCell] = useState<SelectedMonthCell | null>(null);
-  const [currentView, setCurrentView] = useState<'day' | 'week' | 'month' | 'year'>('week');
-  const [currentDate, setCurrentDate] = useState(new Date());
   
   // Estado para fecha/hora personalizada seleccionada desde el picker
   const [customDateKey, setCustomDateKey] = useState<string | null>(null);
@@ -252,7 +195,7 @@ export default function CalendarView({}: CalendarViewProps) {
   
   // Debug: Rastrear cambios de currentDate (comentado para limpiar consola)
   // useEffect(() => {
-  //   console.log('📅 currentDate CHANGED', { 
+  //   console.log('[Calendar] currentDate CHANGED', { 
   //     newDate: currentDate.toISOString().slice(0, 10),
   //     timestamp: new Date().toISOString(),
   //     stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
@@ -263,19 +206,8 @@ export default function CalendarView({}: CalendarViewProps) {
   const [tempRecurrenceConfig, setTempRecurrenceConfig] = useState<RecurrenceConfig | null>(null);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [recurrenceCalendarMonth, setRecurrenceCalendarMonth] = useState<Date>(new Date());
-  
+
   // Estado para subtareas
-  interface SubtaskItem {
-    id: string;
-    text: string;
-    completed: boolean;
-    type?: 'master' | 'custom';
-    instance_id?: string | null;
-    sort_order?: number;
-  }
-  
-  const [subtasks, setSubtasks] = useState<SubtaskItem[]>([]);
-  const [originalSubtasks, setOriginalSubtasks] = useState<SubtaskItem[]>([]); // Para detectar cambios
   const [newSubtaskText, setNewSubtaskText] = useState('');
   const [showSubtaskInput, setShowSubtaskInput] = useState(false);
   const [alarmEnabled, setAlarmEnabled] = useState(false);
@@ -287,40 +219,58 @@ export default function CalendarView({}: CalendarViewProps) {
     removed: SubtaskItem[];
     modified: SubtaskItem[];
   } | null>(null);
-  
-  // Cache de subtareas para evitar llamadas repetidas a la API
-  const [subtasksCache, setSubtasksCache] = useState<{[eventId: string]: SubtaskItem[]}>({});
+
+  const eventById = useMemo(() => {
+    const map: { [key: string]: Event } = {};
+    events.forEach(ev => {
+      map[String(ev.id)] = ev;
+    });
+    return map;
+  }, [events]);
   
   // ===== PREFERENCIAS DE HORAS DEL CALENDARIO =====
   const [userStartHour, setUserStartHour] = useState<number>(START_HOUR);
   const [userEndHour, setUserEndHour] = useState<number>(END_HOUR);
   
-  // Función para cargar preferencias del usuario
+  // Funci?n para cargar preferencias del usuario
   const loadUserPreferences = useCallback(async () => {
     try {
-      console.log('🔄 Cargando preferencias del usuario...');
+      const token = await authService.getToken();
+      if (!token) {
+        // Sin sesi?n: usar valores por defecto y no llamar API
+        setUserStartHour(START_HOUR);
+        setUserEndHour(END_HOUR);
+        return;
+      }
+      console.log('[Calendar] Cargando preferencias del usuario...');
       const response = await apiGetPreferences();
+      if (response.status === 401) {
+        // Sesi?n expirada o logout: no mostrar error
+        setUserStartHour(START_HOUR);
+        setUserEndHour(END_HOUR);
+        return;
+      }
       if (response.ok) {
         const result = await response.json();
-        console.log('📋 Preferencias recibidas:', result.data);
+        console.log('[Calendar] Preferencias recibidas:', result.data);
         if (result.success && result.data) {
           const newStartHour = result.data.start_hour ?? START_HOUR;
           const newEndHour = result.data.end_hour ?? END_HOUR;
-          console.log(`✅ Actualizando horas: ${newStartHour}:00 - ${newEndHour === 24 ? '00:00' : newEndHour + ':00'}`);
+          console.log(`? Actualizando horas: ${newStartHour}:00 - ${newEndHour === 24 ? '00:00' : newEndHour + ':00'}`);
           setUserStartHour(newStartHour);
           setUserEndHour(newEndHour);
         } else {
-          console.warn('⚠️ Preferencias sin datos, usando valores por defecto');
+          console.warn('[Calendar] Preferencias sin datos, usando valores por defecto');
           setUserStartHour(START_HOUR);
           setUserEndHour(END_HOUR);
         }
       } else {
-        console.error('❌ Error en respuesta de preferencias:', response.status);
+        console.error('? Error en respuesta de preferencias:', response.status);
         setUserStartHour(START_HOUR);
         setUserEndHour(END_HOUR);
       }
     } catch (error) {
-      console.error('❌ Error loading user preferences:', error);
+      console.error('? Error loading user preferences:', error);
       // Usar valores por defecto si falla
       setUserStartHour(START_HOUR);
       setUserEndHour(END_HOUR);
@@ -332,7 +282,7 @@ export default function CalendarView({}: CalendarViewProps) {
     loadUserPreferences();
   }, [loadUserPreferences]);
   
-  // Estado para animación de días consecutivos
+  // Estado para animaci?n de d?as consecutivos
   const [showConsecutiveDaysModal, setShowConsecutiveDaysModal] = useState(false);
   const [consecutiveDaysCount, setConsecutiveDaysCount] = useState(0);
   const consecutiveDaysScale = useRef(new Animated.Value(1)).current;
@@ -347,11 +297,11 @@ export default function CalendarView({}: CalendarViewProps) {
           if (response.ok) {
             const result = await response.json();
             if (result.success && result.data && result.data.was_increased) {
-              // Mostrar animación de celebración
+              // Mostrar animaci?n de celebraci?n
               setConsecutiveDaysCount(result.data.consecutive_days);
               setShowConsecutiveDaysModal(true);
               
-              // Animación de escala
+              // Animaci?n de escala
               Animated.sequence([
                 Animated.timing(consecutiveDaysScale, {
                   toValue: 1.2,
@@ -365,7 +315,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 }),
               ]).start();
               
-              // Cerrar automáticamente después de 3 segundos
+              // Cerrar autom?ticamente despu?s de 3 segundos
               setTimeout(() => {
                 setShowConsecutiveDaysModal(false);
               }, 3000);
@@ -383,24 +333,56 @@ export default function CalendarView({}: CalendarViewProps) {
   const [tutorialStep, setTutorialStep] = useState(0);
   const [tutorialCompleted, setTutorialCompleted] = useState(false);
   
-  // Ref para evitar múltiples llamadas a handleTutorialNext para el mismo objetivo
+  // Ref para evitar m?ltiples llamadas a handleTutorialNext para el mismo objetivo
   const tutorialObjectiveCompletedRef = useRef<string | null>(null);
   const tutorialNextTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // ===== HELPER: Registrar handlers de long press =====
   const longPressActiveRef = useRef<{[eventId: string]: boolean}>({});
   const stableHandlersRef = useRef<Map<string, () => void>>(new Map());
+  const pressStateRef = useRef<{[eventId: string]: { active: boolean; startedAt: number }}>({});
+  const selectedEventIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedEventIdRef.current = selectedEvent ? String(selectedEvent.id) : null;
+  }, [selectedEvent]);
+
+  useEffect(() => {
+    currentDateRef.current = currentDate;
+  }, [currentDate]);
+
+  // Estado para subtareas
+  const [subtasks, setSubtasks] = useState<SubtaskItem[]>([]);
+  const [originalSubtasks, setOriginalSubtasks] = useState<SubtaskItem[]>([]); // Para detectar cambios
+  // Cache de subtareas para evitar llamadas repetidas a la API
+  const [subtasksCache, setSubtasksCache] = useState<{[eventId: string]: SubtaskItem[]}>({});
+
+  const markEventPressIn = useCallback((eventId: string) => {
+    pressStateRef.current[eventId] = { active: true, startedAt: Date.now() };
+  }, []);
+
+  const markEventPressOut = useCallback((eventId: string) => {
+    if (pressStateRef.current[eventId]) {
+      pressStateRef.current[eventId].active = false;
+    }
+  }, []);
+
+  const shouldAllowLongPress = useCallback((eventId: string, minMs: number) => {
+    const state = pressStateRef.current[eventId];
+    if (!state || !state.active) return false;
+    return Date.now() - state.startedAt >= minMs;
+  }, []);
   
   const registerEventLongPressHandler = useCallback((eventId: string, handler: () => void) => {
-    // Solo actualizar si el handler realmente cambió
+    // Solo actualizar si el handler realmente cambi?
     const existing = stableHandlersRef.current.get(eventId);
     if (existing === handler) {
-      return; // Ya está registrado, no hacer nada
+      return; // Ya est? registrado, no hacer nada
     }
     stableHandlersRef.current.set(eventId, handler);
     
     setEventLongPressHandlers(prev => {
-      // Evitar actualizar si el handler no cambió para este eventId
+      // Evitar actualizar si el handler no cambi? para este eventId
       if (prev[eventId] === handler) {
         return prev;
       }
@@ -411,22 +393,22 @@ export default function CalendarView({}: CalendarViewProps) {
   // Cache de funciones wrapper estables por eventId
   const wrapperCacheRef = useRef<Map<string, (handler: () => void) => void>>(new Map());
 
-  // Función estable para pasar a EventResizableBlock
+  // Funci?n estable para pasar a EventResizableBlock
   const createLongPressHandler = useCallback((eventId: string) => {
     // Obtener o crear wrapper estable para este eventId
     if (!wrapperCacheRef.current.has(eventId)) {
       const wrapperFn = (handler: () => void) => {
         const existing = stableHandlersRef.current.get(eventId);
-        // Solo registrar si el handler realmente cambió
+        // Solo registrar si el handler realmente cambi?
         if (existing !== handler) {
           const wrapped = () => {
             longPressActiveRef.current[eventId] = true;
             
-            // Detectar si el tutorial está esperando long-press-event
+            // Detectar si el tutorial est? esperando long-press-event
             if (tutorialVisible && !tutorialCompleted && calendarTutorialSteps && calendarTutorialSteps.length > tutorialStep) {
               const currentStepData = calendarTutorialSteps[tutorialStep] as any;
               if (currentStepData?.objective === 'long-press-event' && tutorialObjectiveCompletedRef.current !== 'long-press-event') {
-                console.log('✅ Objetivo cumplido: long-press-event');
+                console.log('? Objetivo cumplido: long-press-event');
                 tutorialObjectiveCompletedRef.current = 'long-press-event';
                 if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
                 tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -434,7 +416,7 @@ export default function CalendarView({}: CalendarViewProps) {
             }
             
             handler();
-            // Liberar después de un tiempo
+            // Liberar despu?s de un tiempo
             setTimeout(() => {
               longPressActiveRef.current[eventId] = false;
             }, 600);
@@ -451,12 +433,58 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // ===== HELPER: Calcular estado de subtareas del evento =====
   const getSubtaskStatus = useCallback((eventId: string): { hasSubtasks: boolean; allCompleted: boolean } => {
-    const eventSubtasks = subtasksCache[eventId];
-    const hasSubtasks = eventSubtasks && eventSubtasks.length > 0;
-    const allCompleted = hasSubtasks && eventSubtasks.every(subtask => subtask.completed);
-    
-    return { hasSubtasks, allCompleted };
-  }, [subtasksCache]);
+    const cached = subtasksCache[eventId];
+    if (cached) {
+      const hasSubtasks = cached.length > 0;
+      const allCompleted = hasSubtasks && cached.every(subtask => subtask.completed);
+      return { hasSubtasks, allCompleted };
+    }
+
+    const ev = eventById[eventId];
+    if (!ev) {
+      return { hasSubtasks: false, allCompleted: false };
+    }
+
+    const total = ev.subtasks_total ?? ev.subtasks_count ?? 0;
+    const completed = ev.subtasks_completed ?? ev.subtasks_completed_count ?? 0;
+    const status = ev.subtask_status;
+
+    if (status === 'done') {
+      return { hasSubtasks: total > 0 || status !== 'none', allCompleted: true };
+    }
+    if (status === 'partial') {
+      return { hasSubtasks: true, allCompleted: false };
+    }
+
+    if (total > 0) {
+      return { hasSubtasks: true, allCompleted: completed >= total };
+    }
+
+    return { hasSubtasks: false, allCompleted: false };
+  }, [subtasksCache, eventById]);
+
+  const computeSubtaskStatus = useCallback((total?: number, completed?: number): 'none' | 'partial' | 'done' => {
+    const safeTotal = total ?? 0;
+    const safeCompleted = completed ?? 0;
+    if (safeTotal <= 0) {
+      return 'none';
+    }
+    if (safeCompleted >= safeTotal) {
+      return 'done';
+    }
+    if (safeCompleted > 0) {
+      return 'partial';
+    }
+    return 'partial';
+  }, []);
+
+  const findExistingOverride = useCallback((seriesId: number, originalStartUtc: string): Event | undefined => {
+    return eventsRef.current.find(ev =>
+      !String(ev.id).includes('_') &&
+      ev.series_id === seriesId &&
+      ev.original_start_utc === originalStartUtc
+    );
+  }, []);
 
   // ===== HANDLERS DE MODALES =====
   const handleOpenRecurrenceModal = useCallback(() => {
@@ -474,20 +502,20 @@ export default function CalendarView({}: CalendarViewProps) {
     if (tutorialVisible && !tutorialCompleted) {
       const currentStepData = calendarTutorialSteps[tutorialStep] as any;
       if (currentStepData?.objective === 'save-recurrence') {
-        console.log('✅ Objetivo cumplido: save-recurrence');
+        console.log('? Objetivo cumplido: save-recurrence');
         setTimeout(() => handleTutorialNext(), 500);
       }
     }
   }, [tutorialVisible, tutorialCompleted, tutorialStep, handleTutorialNext]);
 
   const handleCloseModal = useCallback(() => {
-    // Detectar si debemos avanzar el tutorial cuando se cierra el modal después de completar subtareas
+    // Detectar si debemos avanzar el tutorial cuando se cierra el modal despu?s de completar subtareas
     if (tutorialVisible && !tutorialCompleted) {
       const currentStepData = calendarTutorialSteps[tutorialStep] as any;
       if (currentStepData?.objective === 'complete-subtasks') {
-        // Verificar que todas las subtareas estén completadas
+        // Verificar que todas las subtareas est?n completadas
         if (subtasks.length > 0 && subtasks.every(st => st.completed)) {
-          console.log('✅ Objetivo cumplido: complete-subtasks (modal cerrado con subtareas completadas)');
+          console.log('? Objetivo cumplido: complete-subtasks (modal cerrado con subtareas completadas)');
           setTimeout(() => handleTutorialNext(), 500);
         }
       }
@@ -509,30 +537,22 @@ export default function CalendarView({}: CalendarViewProps) {
     setSubtaskChangesModalVisible(false);
   }, [tutorialVisible, tutorialCompleted, tutorialStep, subtasks, handleTutorialNext, calendarTutorialSteps]);
 
-  // ===== GESTIÓN DE SUBTAREAS =====
+  // ===== GESTI?N DE SUBTAREAS =====
   const loadSubtasks = useCallback(async (eventId: string, event?: Event | MonthEvent | null, forceReload: boolean = false) => {
-    // console.log('🔍 loadSubtasks - START', {
-    //   eventId,
-    //   hasEvent: !!event,
-    //   forceReload,
-    //   cacheHasEvent: !!subtasksCache[eventId]
-    // });
-    
-    // Verificar si ya tenemos las subtareas en caché (solo si no es force reload)
     if (!forceReload && subtasksCache[eventId]) {
       const cached = subtasksCache[eventId];
-      // console.log('📦 loadSubtasks - Using CACHE', { count: cached.length });
-      setSubtasks(cached);
-      setOriginalSubtasks(JSON.parse(JSON.stringify(cached))); // Deep copy
+      if (selectedEventIdRef.current && String(eventId) === selectedEventIdRef.current) {
+        setSubtasks(cached);
+        setOriginalSubtasks(JSON.parse(JSON.stringify(cached))); // Deep copy
+      }
       return;
     }
-    
+
     try {
-      // Determinar si el evento es una instancia de serie recurrente
       const eventData = event || selectedEvent;
       const isRecurringInstance = eventData && 'series_id' in eventData && eventData.series_id !== null && eventData.series_id !== undefined;
-      
-      console.log('🔍 loadSubtasks - Event analysis', {
+
+      console.log('[Calendar] loadSubtasks - Event analysis', {
         eventId,
         title: eventData?.title,
         isRecurringInstance,
@@ -541,30 +561,14 @@ export default function CalendarView({}: CalendarViewProps) {
         hasEvent: !!event,
         hasSelectedEvent: !!selectedEvent
       });
-      
+
       let response;
       let loadedSubtasks: SubtaskItem[] = [];
-      
+
       if (isRecurringInstance) {
-        // Usar endpoint de instancias para eventos recurrentes
-        // console.log('🔄 loadSubtasks - Calling apiGetSubtasksForInstance', { eventId });
         response = await apiGetSubtasksForInstance(eventId);
-        
-        // console.log('📥 loadSubtasks - Response from apiGetSubtasksForInstance', {
-        //   ok: response.ok,
-        //   status: response.status
-        // });
-        
         if (response.ok) {
           const result = await response.json();
-          // console.log('📋 loadSubtasks - Result from instance endpoint', {
-          //   success: result.success,
-          //   subtasksCount: result.data?.subtasks?.length || 0,
-          //   masterEventId: result.data?.master_event_id,
-          //   isRecurringInstance: result.data?.is_recurring_instance
-          // });
-          
-          // El endpoint devuelve subtareas con type, instance_id, etc.
           loadedSubtasks = result.data.subtasks.map((subtask: any) => ({
             id: subtask.id.toString(),
             text: subtask.text,
@@ -573,32 +577,11 @@ export default function CalendarView({}: CalendarViewProps) {
             instance_id: subtask.instance_id ? subtask.instance_id.toString() : null,
             sort_order: subtask.sort_order || 0
           }));
-          
-          // console.log('✅ loadSubtasks - Loaded subtasks from instance', {
-          //   count: loadedSubtasks.length,
-          //   subtasks: loadedSubtasks.map(st => ({ id: st.id, text: st.text, type: st.type, completed: st.completed }))
-          // });
-        } else {
-          const errorText = await response.text();
-          // Error loading subtasks from instance endpoint
         }
       } else {
-        // Usar endpoint normal para eventos únicos o maestros
-        // console.log('📝 loadSubtasks - Calling apiGetSubtasks (normal endpoint)', { eventId });
         response = await apiGetSubtasks(eventId);
-        
-        // console.log('📥 loadSubtasks - Response from apiGetSubtasks', {
-        //   ok: response.ok,
-        //   status: response.status
-        // });
-        
         if (response.ok) {
           const result = await response.json();
-          // console.log('📋 loadSubtasks - Result from normal endpoint', {
-          //   success: result.success,
-          //   subtasksCount: result.data?.length || 0
-          // });
-          
           loadedSubtasks = result.data.map((subtask: any) => ({
             id: subtask.id.toString(),
             text: subtask.text,
@@ -606,324 +589,196 @@ export default function CalendarView({}: CalendarViewProps) {
             type: 'master',
             sort_order: subtask.sort_order || 0
           }));
-          
-          // console.log('✅ loadSubtasks - Loaded subtasks from normal endpoint', {
-          //   count: loadedSubtasks.length,
-          //   subtasks: loadedSubtasks.map(st => ({ id: st.id, text: st.text, completed: st.completed }))
-          // });
-        } else {
-          const errorText = await response.text();
-          // Error loading subtasks from normal endpoint
         }
       }
-      
-      // Guardar en caché y mostrar
-      // console.log('💾 loadSubtasks - Saving to cache and state', {
-      //   eventId,
-      //   count: loadedSubtasks.length
-      // });
-      
+
       setSubtasksCache(prev => ({
         ...prev,
         [eventId]: loadedSubtasks
       }));
-      setSubtasks(loadedSubtasks);
-      setOriginalSubtasks(JSON.parse(JSON.stringify(loadedSubtasks))); // Deep copy para comparar cambios
-      
-      // console.log('✅ loadSubtasks - COMPLETE', {
-      //   eventId,
-      //   loadedCount: loadedSubtasks.length
-      // });
-      
+      const totalFromLoad = loadedSubtasks.length;
+      const completedFromLoad = loadedSubtasks.filter(st => st.completed).length;
+      const statusFromLoad = computeSubtaskStatus(totalFromLoad, completedFromLoad);
+      setEvents(prev => prev.map(ev => {
+        if (ev.id === eventId) {
+          return {
+            ...ev,
+            subtasks_total: totalFromLoad,
+            subtasks_completed: completedFromLoad,
+            subtask_status: statusFromLoad,
+            subtasks_count: totalFromLoad,
+            subtasks_completed_count: completedFromLoad
+          };
+        }
+        return ev;
+      }));
+      if (selectedEventIdRef.current && String(eventId) === selectedEventIdRef.current) {
+        setSubtasks(loadedSubtasks);
+        setOriginalSubtasks(JSON.parse(JSON.stringify(loadedSubtasks)));
+      }
     } catch (error) {
-      // Exception loading subtasks
       setSubtasks([]);
       setOriginalSubtasks([]);
     }
-  }, [subtasksCache, selectedEvent]);
+  }, [computeSubtaskStatus, subtasksCache, selectedEvent]);
 
-  // Función para migrar subtareas de un evento a otro
   const migrateSubtasks = useCallback(async (oldEventId: string, newEventId: string, oldEvent?: Event | null, newEvent?: Event | null) => {
     try {
-      console.log('🔧 migrateSubtasks - START', {
+      console.log('[Calendar] migrateSubtasks - START', {
         oldEventId,
         newEventId,
         oldEventTitle: oldEvent?.title,
         oldEventSeriesId: oldEvent?.series_id
       });
-      
-      // DETECTAR: ¿El evento viejo es un MAESTRO de serie?
+
       const isOldEventMaster = oldEvent && oldEvent.is_recurring && !oldEvent.series_id;
-      
-      // DETECTAR: ¿El evento viejo es un evento ÚNICO?
       const isOldEventUnique = oldEvent && !oldEvent.is_recurring && !oldEvent.series_id;
-      
-      // DETECTAR: ¿El evento viejo es una INSTANCIA de serie (override)?
-      // Una instancia tiene series_id o original_start_utc
       const isOldEventInstance = oldEvent && (oldEvent.series_id || oldEvent.original_start_utc);
-      
-      // DETECTAR: ¿El nuevo evento es un override (tiene series_id)?
-      // Necesitamos verificar el evento nuevo para saber si es override
-      // Por ahora asumimos que si oldEvent tiene series_id, el nuevo también lo tendrá
       const isNewEventOverride = isOldEventInstance;
-      
+
       let oldSubtasks: any[] = [];
-      
-      // 1. Obtener subtareas del evento viejo
-      // Si es instancia, usar apiGetSubtasksForInstance para obtener estados de instancia
+
       if (isOldEventInstance) {
-        console.log('🔧 migrateSubtasks - Obteniendo subtareas de instancia', { oldEventId });
+        console.log('[Calendar] migrateSubtasks - Obteniendo subtareas de instancia', { oldEventId });
         const instanceResponse = await apiGetSubtasksForInstance(oldEventId);
         if (instanceResponse.ok) {
           const instanceResult = await instanceResponse.json();
           oldSubtasks = instanceResult.data?.subtasks || [];
-          console.log('🔧 migrateSubtasks - Subtareas de instancia obtenidas', {
+          console.log('[Calendar] migrateSubtasks - Subtareas de instancia obtenidas', {
             count: oldSubtasks.length,
             completed: oldSubtasks.filter(st => st.completed).length
           });
         }
       } else {
-        // Para eventos únicos o maestros, usar endpoint normal
         const response = await apiGetSubtasks(oldEventId);
         if (response.ok) {
           const result = await response.json();
           oldSubtasks = result.data || [];
-          console.log('🔧 migrateSubtasks - Subtareas normales obtenidas', {
+          console.log('[Calendar] migrateSubtasks - Subtareas normales obtenidas', {
             count: oldSubtasks.length,
             completed: oldSubtasks.filter(st => st.completed).length
           });
         }
       }
-      
+
       if (oldSubtasks.length === 0) {
-        console.log('🔧 migrateSubtasks - No hay subtareas para migrar');
+        console.log('[Calendar] migrateSubtasks - No hay subtareas para migrar');
         return;
       }
-      
-      // 2. Si el nuevo evento es un override, las subtareas ya existen en el master
-      // Solo necesitamos crear las instancias de subtareas con sus estados
+
       if (isNewEventOverride && oldEvent?.series_id) {
-        console.log('🔧 migrateSubtasks - Nuevo evento es override, creando instancias de subtareas');
+        console.log('[Calendar] migrateSubtasks - Nuevo evento es override, creando instancias de subtareas');
         for (const oldSubtask of oldSubtasks) {
           if (oldSubtask.completed && oldSubtask.id) {
             try {
-              // Crear instancia de subtarea con estado completado
-              const toggleResponse = await apiToggleSubtaskInstance(
-                oldSubtask.id.toString(),
-                newEventId,
-                true
-              );
+              const toggleResponse = await apiToggleSubtaskInstance(oldSubtask.id.toString(), newEventId, true);
               if (toggleResponse.ok) {
-                console.log('🔧 migrateSubtasks - Instancia de subtarea creada como completada', {
+                console.log('[Calendar] migrateSubtasks - Instancia de subtarea creada como completada', {
                   subtaskId: oldSubtask.id,
                   newEventId
                 });
               } else {
-                console.log('⚠️ migrateSubtasks - Error creando instancia de subtarea', {
+                console.log('[Calendar] migrateSubtasks - Error creando instancia de subtarea', {
                   subtaskId: oldSubtask.id,
                   status: toggleResponse.status
                 });
               }
             } catch (error) {
-              console.log('⚠️ migrateSubtasks - Excepción creando instancia de subtarea', error);
+              console.log('[Calendar] migrateSubtasks - Excepci?n creando instancia de subtarea', error);
             }
           }
         }
       } else {
-        // 3. Para eventos únicos, crear las subtareas en el nuevo evento
-        console.log('🔧 migrateSubtasks - Creando subtareas en nuevo evento único');
+        console.log('[Calendar] migrateSubtasks - Creando subtareas en nuevo evento ?nico');
         for (let i = 0; i < oldSubtasks.length; i++) {
           const oldSubtask = oldSubtasks[i];
-          const createResponse = await apiCreateSubtask(
-            newEventId, 
-            oldSubtask.text, 
-            i
-          );
-          
-          if (createResponse.ok) {
-            const createdResult = await createResponse.json();
-            const newSubtaskId = createdResult.data?.id;
-            
-            // CRÍTICO: Si la subtarea original estaba completada, copiar ese estado
-            if (oldSubtask.completed && newSubtaskId) {
-              const updateResponse = await apiUpdateSubtask(newSubtaskId.toString(), {
-                completed: true
-              });
-              
-              if (updateResponse.ok) {
-                console.log('🔧 migrateSubtasks - Estado completado copiado', {
-                  subtaskId: newSubtaskId
-                });
-              } else {
-                console.log('⚠️ migrateSubtasks - Error copiando estado completado', {
-                  subtaskId: newSubtaskId
-                });
+          try {
+            const response = await apiCreateSubtask(newEventId, oldSubtask.text, oldSubtask.sort_order ?? i);
+            if (response.ok) {
+              const result = await response.json();
+              if (oldSubtask.completed && result?.data?.id) {
+                const toggleResponse = await apiUpdateSubtask(result.data.id.toString(), { completed: true });
+                if (toggleResponse.ok) {
+                  console.log('[Calendar] migrateSubtasks - Estado completado copiado', { subtaskId: result.data.id });
+                } else {
+                  console.log('[Calendar] migrateSubtasks - Error copiando estado completado', { subtaskId: result.data.id });
+                }
               }
             }
+          } catch (error) {
+            console.log('[Calendar] migrateSubtasks - Excepci?n creando subtarea', error);
           }
         }
-        
-        // 4. CRÍTICO: Solo borrar subtareas del viejo si es un evento ÚNICO
-        // NO borrar si es maestro (otras instancias las usan) NI si es instancia (pertenecen al master)
+
         if (isOldEventUnique) {
-          console.log('🔧 migrateSubtasks - Borrando subtareas del evento viejo (único)');
+          console.log('[Calendar] migrateSubtasks - Borrando subtareas del evento viejo (?nico)');
           for (const oldSubtask of oldSubtasks) {
             try {
               await apiDeleteSubtask(oldSubtask.id.toString());
             } catch (deleteError) {
-              console.log('⚠️ migrateSubtasks - Error borrando subtarea vieja', deleteError);
+              console.log('[Calendar] migrateSubtasks - Error borrando subtarea vieja', deleteError);
             }
           }
         }
       }
-      
-      // 5. Recargar subtareas del nuevo evento
-      // 🔧 FIX: Usar el evento nuevo si está disponible, o leerlo desde eventsRef
+
       let eventForLoadSubtasks = newEvent;
       if (!eventForLoadSubtasks) {
         eventForLoadSubtasks = eventsRef.current.find(e => e.id === newEventId);
       }
-      
-      console.log('🔧 migrateSubtasks - Recargando subtareas del nuevo evento', {
+
+      console.log('[Calendar] migrateSubtasks - Recargando subtareas del nuevo evento', {
         newEventId,
         hasNewEvent: !!newEvent,
         hasEventFromRef: !!eventForLoadSubtasks,
         hasSeriesId: !!eventForLoadSubtasks?.series_id
       });
-      
-      // Pasar el evento para que loadSubtasks detecte correctamente como instancia
+
       await loadSubtasks(newEventId, eventForLoadSubtasks || undefined, true);
-      console.log('✅ migrateSubtasks - COMPLETE');
+      console.log('? migrateSubtasks - COMPLETE');
     } catch (error) {
-      console.log('❌ migrateSubtasks - ERROR', error);
+      console.log('? migrateSubtasks - ERROR', error);
     }
   }, [loadSubtasks]);
 
-  // Funciones para manejar subtareas
-  const handleAddSubtask = useCallback(async () => {
-    if (newSubtaskText.trim()) {
-      const tempId = `temp-${Date.now()}`;
-      const newSubtask: SubtaskItem = {
-        id: tempId,
-        text: newSubtaskText.trim(),
-        completed: false,
-        type: 'master',
-        sort_order: subtasks.length
-      };
-      
-      // Optimistic update - mostrar inmediatamente
-      setSubtasks(prev => [...prev, newSubtask]);
-      setNewSubtaskText('');
-      setShowSubtaskInput(false);
-      
-      // IMPORTANTE: Detectar si es instancia recurrente
-      const isRecurringInstance = selectedEvent && 
-        'series_id' in selectedEvent && 
-        selectedEvent.series_id !== null;
-      
-      // Si estamos editando un evento existente Y NO es instancia recurrente
-      // → crear la subtarea inmediatamente
-      // Si ES instancia recurrente → dejar como temporal, el modal se mostrará al guardar
-      if (selectedEvent && !isRecurringInstance) {
-        try {
-          const response = await apiCreateSubtask(
-            selectedEvent.id, 
-            newSubtaskText.trim(), 
-            subtasks.length
-          );
-          
-          if (response.ok) {
-            const result = await response.json();
-            // Reemplazar la subtarea temporal con la real
-            const realSubtask: SubtaskItem = {
-              id: result.data.id.toString(),
-              text: result.data.text,
-              completed: result.data.completed || false,
-              type: 'master',
-              sort_order: result.data.sort_order || subtasks.length
-            };
-            
-            const updatedSubtasks = [...subtasks.filter(st => st.id !== tempId), realSubtask];
-            setSubtasks(updatedSubtasks);
-            
-            // Invalidar caché para forzar recarga
-            setSubtasksCache(prev => {
-              const newCache = { ...prev };
-              delete newCache[selectedEvent.id];
-              return newCache;
-            });
-            
-            // Actualizar originalSubtasks también
-            setOriginalSubtasks(JSON.parse(JSON.stringify(updatedSubtasks)));
-          } else {
-            // Si falla, remover la subtarea temporal
-            setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
-          }
-        } catch (error) {
-          // Si falla, remover la subtarea temporal
-          setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
-        }
-      } else if (isRecurringInstance) {
-        // No hacer nada, quedará como temporal y el modal se mostrará al guardar
-      }
-    }
-  }, [newSubtaskText, selectedEvent, subtasks]);
-
   const handleToggleSubtask = useCallback(async (id: string) => {
     try {
-      console.log('🔄 handleToggleSubtask - START', { subtaskId: id });
-      
+      console.log('[Calendar] handleToggleSubtask - START', { subtaskId: id });
+
       const subtask = subtasks.find(s => s.id === id);
       if (!subtask) {
-        console.warn('⚠️  handleToggleSubtask - No subtask found', {
-          subtaskId: id
-        });
+        console.warn('[Calendar]  handleToggleSubtask - No subtask found', { subtaskId: id });
         return;
       }
-      
+
       const newCompletedState = !subtask.completed;
-      
-      // Si es una subtarea temporal (antes de crear el evento), solo actualizar localmente
       const isTemporarySubtask = id.startsWith('temp-');
-      
-      // Si es temporal, permitir toggle local incluso sin selectedEvent
+
       if (isTemporarySubtask) {
-        console.log('🔄 handleToggleSubtask - Toggling temporary subtask (local only)', {
+        console.log('[Calendar] handleToggleSubtask - Toggling temporary subtask (local only)', {
           subtaskId: id,
           text: subtask.text,
           currentState: subtask.completed,
           newState: newCompletedState
         });
-        
-        // Optimistic update - actualizar UI inmediatamente
-        const updatedSubtasks = subtasks.map(st => 
-          st.id === id 
-            ? { ...st, completed: newCompletedState }
-            : st
-        );
+        const updatedSubtasks = subtasks.map(st => (st.id === id ? { ...st, completed: newCompletedState } : st));
         setSubtasks(updatedSubtasks);
-        
-        // Si hay selectedEvent, actualizar caché también
         if (selectedEvent) {
           setSubtasksCache(prev => ({
             ...prev,
             [selectedEvent.id]: updatedSubtasks
           }));
         }
-        
-        console.log('✅ handleToggleSubtask - Temporary subtask toggle complete (local only)');
+        console.log('? handleToggleSubtask - Temporary subtask toggle complete (local only)');
         return;
       }
-      
-      // Para subtareas no temporales, necesitamos selectedEvent
+
       if (!selectedEvent) {
-        console.warn('⚠️  handleToggleSubtask - No event selected for non-temporary subtask', {
-          subtaskId: id
-        });
+        console.warn('[Calendar]  handleToggleSubtask - No event selected for non-temporary subtask', { subtaskId: id });
         return;
       }
-      
-      console.log('🔄 handleToggleSubtask - Toggling', {
+
+      console.log('[Calendar] handleToggleSubtask - Toggling', {
         subtaskId: id,
         text: subtask.text,
         currentState: subtask.completed,
@@ -932,128 +787,75 @@ export default function CalendarView({}: CalendarViewProps) {
         eventId: selectedEvent.id,
         eventTitle: selectedEvent.title
       });
-      
-      // Optimistic update - actualizar UI inmediatamente
-      const updatedSubtasks = subtasks.map(st => 
-        st.id === id 
-          ? { ...st, completed: newCompletedState }
-          : st
-      );
+
+      const updatedSubtasks = subtasks.map(st => (st.id === id ? { ...st, completed: newCompletedState } : st));
       setSubtasks(updatedSubtasks);
-      
-      // Actualizar caché
       setSubtasksCache(prev => ({
         ...prev,
         [selectedEvent.id]: updatedSubtasks
       }));
-      
-      console.log('✅ handleToggleSubtask - Optimistic update complete');
-      
-      // Solo actualizar en el servidor si no es una subtarea temporal
+
+      console.log('? handleToggleSubtask - Optimistic update complete');
+
       if (!isTemporarySubtask) {
-        // Determinar si es instancia de serie recurrente
         const isRecurringInstance = 'series_id' in selectedEvent && selectedEvent.series_id !== null && selectedEvent.series_id !== undefined;
-        
-        console.log('🌐 handleToggleSubtask - Syncing to server', {
+
+        console.log('[Calendar] handleToggleSubtask - Syncing to server', {
           isRecurringInstance,
           subtaskType: subtask.type,
           seriesId: 'series_id' in selectedEvent ? selectedEvent.series_id : null
         });
-        
+
         if (isRecurringInstance && subtask.type === 'master') {
-          // Para subtareas heredadas en instancias, usar subtask instances
-          console.log('🔄 handleToggleSubtask - Calling apiToggleSubtaskInstance');
-          const response = await apiToggleSubtaskInstance(
-            id,
-            selectedEvent.id,
-            newCompletedState
-          );
-          
-          console.log('📥 handleToggleSubtask - Response from apiToggleSubtaskInstance', {
+          console.log('[Calendar] handleToggleSubtask - Calling apiToggleSubtaskInstance');
+          const response = await apiToggleSubtaskInstance(id, selectedEvent.id, newCompletedState);
+          console.log('[Calendar] handleToggleSubtask - Response from apiToggleSubtaskInstance', {
             ok: response.ok,
             status: response.status
           });
-          
           if (!response.ok) {
             const errorText = await response.text();
-            console.error('❌ handleToggleSubtask - Failed, reverting', {
-              error: errorText
-            });
-            // Revertir si falla
-            setSubtasks(prev => 
-              prev.map(st => 
-                st.id === id 
-                  ? { ...st, completed: subtask.completed }
-                  : st
-              )
-            );
+            console.error('? handleToggleSubtask - Failed, reverting', { error: errorText });
+            setSubtasks(prev => prev.map(st => (st.id === id ? { ...st, completed: subtask.completed } : st)));
           } else {
-            console.log('✅ handleToggleSubtask - Instance toggle SUCCESS');
+            console.log('? handleToggleSubtask - Instance toggle SUCCESS');
           }
         } else if (subtask.type === 'custom') {
-          // Para subtareas custom, usar el endpoint de custom subtasks
-          console.log('🔄 handleToggleSubtask - Calling apiUpdateCustomSubtask');
-          const response = await apiUpdateCustomSubtask(id, {
-            completed: newCompletedState
-          });
-          
-          console.log('📥 handleToggleSubtask - Response from apiUpdateCustomSubtask', {
+          console.log('[Calendar] handleToggleSubtask - Calling apiUpdateCustomSubtask');
+          const response = await apiUpdateCustomSubtask(id, { completed: newCompletedState });
+          console.log('[Calendar] handleToggleSubtask - Response from apiUpdateCustomSubtask', {
             ok: response.ok,
             status: response.status
           });
-          
           if (!response.ok) {
             const errorText = await response.text();
-            console.error('❌ handleToggleSubtask - Failed, reverting', {
-              error: errorText
-            });
-            // Revertir si falla
-            setSubtasks(prev => 
-              prev.map(st => 
-                st.id === id 
-                  ? { ...st, completed: subtask.completed }
-                  : st
-              )
-            );
+            console.error('? handleToggleSubtask - Failed, reverting', { error: errorText });
+            setSubtasks(prev => prev.map(st => (st.id === id ? { ...st, completed: subtask.completed } : st)));
           } else {
-            console.log('✅ handleToggleSubtask - Custom toggle SUCCESS');
+            console.log('? handleToggleSubtask - Custom toggle SUCCESS');
           }
         } else {
-          // Para eventos únicos o maestros, usar el endpoint normal
-          console.log('🔄 handleToggleSubtask - Calling apiUpdateSubtask (normal)');
-          const response = await apiUpdateSubtask(id, {
-            completed: newCompletedState
-          });
-          
-          console.log('📥 handleToggleSubtask - Response from apiUpdateSubtask', {
+          console.log('[Calendar] handleToggleSubtask - Calling apiUpdateSubtask (normal)');
+          const response = await apiUpdateSubtask(id, { completed: newCompletedState });
+          console.log('[Calendar] handleToggleSubtask - Response from apiUpdateSubtask', {
             ok: response.ok,
             status: response.status
           });
-          
           if (!response.ok) {
             const errorText = await response.text();
-            console.error('❌ handleToggleSubtask - Failed, reverting', {
-              error: errorText
-            });
-            // Revertir si falla
-            setSubtasks(prev => 
-              prev.map(st => 
-                st.id === id 
-                  ? { ...st, completed: subtask.completed }
-                  : st
-              )
-            );
+            console.error('? handleToggleSubtask - Failed, reverting', { error: errorText });
+            setSubtasks(prev => prev.map(st => (st.id === id ? { ...st, completed: subtask.completed } : st)));
           } else {
-            console.log('✅ handleToggleSubtask - Normal toggle SUCCESS');
+            console.log('? handleToggleSubtask - Normal toggle SUCCESS');
           }
         }
       } else {
-        console.log('ℹ️  handleToggleSubtask - Temporary subtask, no server sync');
+        console.log('[Calendar]  handleToggleSubtask - Temporary subtask, no server sync');
       }
-      
-      console.log('✅ handleToggleSubtask - COMPLETE');
+
+      console.log('? handleToggleSubtask - COMPLETE');
     } catch (error) {
-      console.error('❌ handleToggleSubtask - EXCEPTION', {
+      console.error('? handleToggleSubtask - EXCEPTION', {
         subtaskId: id,
         error: error instanceof Error ? error.message : error,
         stack: error instanceof Error ? error.stack : undefined
@@ -1062,43 +864,111 @@ export default function CalendarView({}: CalendarViewProps) {
   }, [subtasks, selectedEvent]);
 
   const handleDeleteSubtask = useCallback(async (id: string) => {
-    // Optimistic update - remover inmediatamente
-    const originalSubtasks = subtasks;
+    const originalSubtasksSnapshot = subtasks;
     const updatedSubtasks = subtasks.filter(subtask => subtask.id !== id);
     setSubtasks(updatedSubtasks);
-    
-    // Actualizar caché si estamos editando un evento existente
+
     if (selectedEvent) {
       setSubtasksCache(prev => ({
         ...prev,
         [selectedEvent.id]: updatedSubtasks
       }));
     }
-    
-    // CRÍTICO: Para instancias recurrentes, NO eliminar del servidor inmediatamente
-    // Esperar a que el usuario elija "Solo este día" o "Toda la serie" en el modal
+
     const isRecurringInstance = selectedEvent && ('series_id' in selectedEvent && selectedEvent.series_id);
-    
-    // Solo eliminar del servidor si:
-    // 1. NO es una subtarea temporal
-    // 2. NO es una instancia recurrente (si lo es, el modal manejará la eliminación)
+
     if (!id.startsWith('temp-') && !isRecurringInstance) {
       try {
         const response = await apiDeleteSubtask(id);
-        
         if (!response.ok) {
-          // Si falla, restaurar la subtarea
-          setSubtasks(originalSubtasks);
+          setSubtasks(originalSubtasksSnapshot);
         }
       } catch (error) {
-        // Si falla, restaurar la subtarea
-        setSubtasks(originalSubtasks);
+        setSubtasks(originalSubtasksSnapshot);
         console.error('Error al eliminar subtarea:', error);
       }
     }
-    // Para subtareas temporales o instancias recurrentes, la eliminación es solo local
-    // El modal manejará la eliminación en el servidor para instancias recurrentes
   }, [subtasks, selectedEvent]);
+
+  const handleAddSubtask = useCallback(async () => {
+    const text = newSubtaskText.trim();
+    if (!text) return;
+    
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let tempSortOrder = 0;
+    
+    // Optimistic update - mostrar inmediatamente
+    setSubtasks(prev => {
+      tempSortOrder = prev.length;
+      const newSubtask: SubtaskItem = {
+        id: tempId,
+        text,
+        completed: false,
+        type: 'master',
+        sort_order: tempSortOrder
+      };
+      return [...prev, newSubtask];
+    });
+    
+    setNewSubtaskText('');
+    setShowSubtaskInput(false);
+    
+    const selectedEventId = selectedEvent?.id;
+    
+    // IMPORTANTE: Detectar si es instancia recurrente
+    const isRecurringInstance = selectedEvent && 
+      'series_id' in selectedEvent && 
+      selectedEvent.series_id !== null;
+    
+    // Si estamos editando un evento existente Y NO es instancia recurrente
+    // ? crear la subtarea inmediatamente
+    // Si ES instancia recurrente ? dejar como temporal, el modal se mostrar? al guardar
+    if (selectedEventId && !isRecurringInstance) {
+      try {
+        const response = await apiCreateSubtask(
+          selectedEventId, 
+          text, 
+          tempSortOrder
+        );
+        
+        if (response.ok) {
+          const result = await response.json();
+          // Reemplazar la subtarea temporal con la real
+          const realSubtask: SubtaskItem = {
+            id: result.data.id.toString(),
+            text: result.data.text,
+            completed: result.data.completed || false,
+            type: 'master',
+            sort_order: result.data.sort_order ?? tempSortOrder
+          };
+          
+          setSubtasks(prev => {
+            const updated = prev.map(st => st.id === tempId ? realSubtask : st);
+            
+            // Invalidar cach? para forzar recarga
+            setSubtasksCache(cachePrev => {
+              const newCache = { ...cachePrev };
+              delete newCache[selectedEventId];
+              return newCache;
+            });
+            
+            // Actualizar originalSubtasks tambi?n
+            setOriginalSubtasks(JSON.parse(JSON.stringify(updated)));
+            
+            return updated;
+          });
+        } else {
+          // Si falla, remover la subtarea temporal
+          setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
+        }
+      } catch (error) {
+        // Si falla, remover la subtarea temporal
+        setSubtasks(prev => prev.filter(subtask => subtask.id !== tempId));
+      }
+    } else if (isRecurringInstance) {
+      // No hacer nada, quedar? como temporal y el modal se mostrar? al guardar
+    }
+  }, [newSubtaskText, selectedEvent]);
 
   const handleEditSubtask = useCallback(async (id: string, newText: string) => {
     // Optimistic update - actualizar inmediatamente
@@ -1109,7 +979,7 @@ export default function CalendarView({}: CalendarViewProps) {
     );
     setSubtasks(updatedSubtasks);
     
-    // Actualizar caché si estamos editando un evento existente
+    // Actualizar cach? si estamos editando un evento existente
     if (selectedEvent) {
       setSubtasksCache(prev => ({
         ...prev,
@@ -1125,7 +995,7 @@ export default function CalendarView({}: CalendarViewProps) {
         });
         
         if (!response.ok) {
-          // Si falla, revertir el cambio (necesitaríamos el texto original)
+          // Si falla, revertir el cambio (necesitar?amos el texto original)
           console.error('Error al actualizar subtarea en servidor');
         }
       } catch (error) {
@@ -1133,7 +1003,7 @@ export default function CalendarView({}: CalendarViewProps) {
       }
     }
     // Para subtareas temporales, el cambio se mantiene localmente
-    // y se sincronizará cuando se guarde el evento
+    // y se sincronizar? cuando se guarde el evento
   }, []);
 
   // Detectar cambios estructurales en subtareas (ignorando toggles de completed)
@@ -1187,12 +1057,12 @@ export default function CalendarView({}: CalendarViewProps) {
     };
   }, [subtasks, originalSubtasks]);
 
-  // Handler: Aplicar cambios de subtareas solo a este día (liberar evento)
+  // Handler: Aplicar cambios de subtareas solo a este d?a (liberar evento)
   const handleApplySubtaskChangesToThisDay = useCallback(async () => {
     if (!selectedEvent || !pendingSubtaskChanges) return;
     
     try {
-      console.log('🔧 handleApplySubtaskChangesToThisDay - START', {
+      console.log('[Calendar] handleApplySubtaskChangesToThisDay - START', {
         selectedEventId: selectedEvent.id,
         changes: pendingSubtaskChanges
       });
@@ -1201,7 +1071,7 @@ export default function CalendarView({}: CalendarViewProps) {
       
       // 1. Crear custom_subtasks para las subtareas NUEVAS (added)
       for (const addedSubtask of pendingSubtaskChanges.added) {
-        console.log('🔧 Creating custom subtask for this day only', {
+        console.log('[Calendar] Creating custom subtask for this day only', {
           text: addedSubtask.text,
           eventInstanceId: selectedEvent.id
         });
@@ -1215,13 +1085,13 @@ export default function CalendarView({}: CalendarViewProps) {
           );
           
           if (response.ok) {
-            console.log('✅ Custom subtask created successfully');
+            console.log('? Custom subtask created successfully');
           } else {
             const errorData = await response.json();
-            console.error('❌ Failed to create custom subtask', { error: errorData });
+            console.error('? Failed to create custom subtask', { error: errorData });
           }
         } catch (error) {
-          console.error('❌ Exception creating custom subtask', { error });
+          console.error('? Exception creating custom subtask', { error });
         }
       }
       
@@ -1229,7 +1099,7 @@ export default function CalendarView({}: CalendarViewProps) {
       for (const removedSubtask of pendingSubtaskChanges.removed) {
         // Solo ocultar si es una subtarea master, no custom
         if (removedSubtask.type === 'master') {
-          console.log('🔧 Hiding master subtask for this day only', {
+          console.log('[Calendar] Hiding master subtask for this day only', {
             subtaskId: removedSubtask.id,
             text: removedSubtask.text,
             eventInstanceId: selectedEvent.id
@@ -1242,17 +1112,17 @@ export default function CalendarView({}: CalendarViewProps) {
             );
             
             if (response.ok) {
-              console.log('✅ Master subtask hidden successfully');
+              console.log('? Master subtask hidden successfully');
             } else {
               const errorData = await response.json();
-              console.error('❌ Failed to hide master subtask', { error: errorData });
+              console.error('? Failed to hide master subtask', { error: errorData });
             }
           } catch (error) {
-            console.error('❌ Exception hiding master subtask', { error });
+            console.error('? Exception hiding master subtask', { error });
           }
         } else if (removedSubtask.type === 'custom') {
           // Si es custom, eliminarla directamente
-          console.log('🔧 Deleting custom subtask', {
+          console.log('[Calendar] Deleting custom subtask', {
             customSubtaskId: removedSubtask.id,
             text: removedSubtask.text
           });
@@ -1261,18 +1131,18 @@ export default function CalendarView({}: CalendarViewProps) {
             const response = await apiDeleteCustomSubtask(removedSubtask.id);
             
             if (response.ok) {
-              console.log('✅ Custom subtask deleted successfully');
+              console.log('? Custom subtask deleted successfully');
             } else {
               const errorData = await response.json();
-              console.error('❌ Failed to delete custom subtask', { error: errorData });
+              console.error('? Failed to delete custom subtask', { error: errorData });
             }
           } catch (error) {
-            console.error('❌ Exception deleting custom subtask', { error });
+            console.error('? Exception deleting custom subtask', { error });
           }
         }
       }
       
-      console.log('✅ handleApplySubtaskChangesToThisDay - COMPLETE', {
+      console.log('? handleApplySubtaskChangesToThisDay - COMPLETE', {
         createdCustomSubtasks: pendingSubtaskChanges.added.length,
         hiddenMasterSubtasks: pendingSubtaskChanges.removed.filter(s => s.type === 'master').length,
         deletedCustomSubtasks: pendingSubtaskChanges.removed.filter(s => s.type === 'custom').length
@@ -1284,12 +1154,12 @@ export default function CalendarView({}: CalendarViewProps) {
       setModalVisible(false);
       handleCloseModal();
       
-      console.log('✅ SubtaskChangesModal - Se ejecutó correctamente "Solo este día"');
-      refreshSubtasksColorsWithDelay(); // Recargar colores de subtareas automáticamente con delay de 3 segundos
+      console.log('? SubtaskChangesModal - Se ejecut? correctamente "Solo este d?a"');
+      // Colores vienen desde backend; no recargar en masa
       
     } catch (error) {
-      console.error('❌ Error al liberar evento:', error);
-      Alert.alert('Error', 'No se pudieron aplicar los cambios solo a este día');
+      console.error('? Error al liberar evento:', error);
+      Alert.alert('Error', 'No se pudieron aplicar los cambios solo a este d?a');
     }
   }, [selectedEvent, pendingSubtaskChanges]);
 
@@ -1329,8 +1199,8 @@ export default function CalendarView({}: CalendarViewProps) {
       setModalVisible(false);
       handleCloseModal();
       
-      console.log('✅ SubtaskChangesModal - Se ejecutó correctamente "Toda la serie"');
-      refreshSubtasksColorsWithDelay(); // Recargar colores de subtareas automáticamente con delay de 3 segundos
+      console.log('? SubtaskChangesModal - Se ejecut? correctamente "Toda la serie"');
+      // Colores vienen desde backend; no recargar en masa
       
     } catch (error) {
       console.error('Error al aplicar cambios a la serie:', error);
@@ -1338,28 +1208,28 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [selectedEvent, pendingSubtaskChanges]);
 
-  // Función refinada para cargar subtareas de todos los eventos (solo cuando es necesario)
+  // Funci?n refinada para cargar subtareas de todos los eventos (solo cuando es necesario)
   const loadAllEventsSubtasks = useCallback(async (events: Event[], forceReload: boolean = false, targetDate?: Date) => {
-    // console.log('🎯 loadAllEventsSubtasks - START', { count: events.length, forceReload });
+    // console.log('[Calendar] loadAllEventsSubtasks - START', { count: events.length, forceReload });
     
     try {
-      // Si forceReload es true, procesar todos los eventos. Si no, solo los que no están en cache
+      // Si forceReload es true, procesar todos los eventos. Si no, solo los que no est?n en cache
       const eventsToProcess = forceReload 
         ? events 
         : events.filter(event => !subtasksCache[event.id]);
       
       if (eventsToProcess.length === 0) {
-        // console.log('🎯 loadAllEventsSubtasks - All events already have subtasks loaded');
+        // console.log('[Calendar] loadAllEventsSubtasks - All events already have subtasks loaded');
         return;
       }
       
-      // console.log('🎯 loadAllEventsSubtasks - Processing', { 
+      // console.log('[Calendar] loadAllEventsSubtasks - Processing', { 
       //   total: events.length, 
       //   toProcess: eventsToProcess.length,
       //   forceReload
       // });
       
-      // 🎯 FILTRAR SOLO EVENTOS DE LA SEMANA/DÍA ACTUAL
+      // FILTRAR SOLO EVENTOS DE LA SEMANA/D?A ACTUAL
       let visibleEvents: Event[] = [];
       
       // Usar targetDate si se proporciona, sino usar currentDate
@@ -1376,9 +1246,9 @@ export default function CalendarView({}: CalendarViewProps) {
           return eventDate >= weekStartStr && eventDate <= weekEndStr;
         });
         
-        // console.log('🎯 FILTRO SEMANA - Rango:', weekStartStr, 'a', weekEndStr, '| Eventos visibles:', visibleEvents.length, 'de', eventsToProcess.length);
+        // console.log('[Calendar] FILTRO SEMANA - Rango:', weekStartStr, 'a', weekEndStr, '| Eventos visibles:', visibleEvents.length, 'de', eventsToProcess.length);
       } else if (currentView === 'day') {
-        // Para la vista de día, cargar toda la semana para mejor experiencia visual
+        // Para la vista de d?a, cargar toda la semana para mejor experiencia visual
         const weekStart = startOfWeek(dateToUse);
         const weekEnd = addDays(weekStart, 6);
         const weekStartStr = weekStart.toISOString().slice(0, 10);
@@ -1389,69 +1259,49 @@ export default function CalendarView({}: CalendarViewProps) {
           return eventDate >= weekStartStr && eventDate <= weekEndStr;
         });
         
-        // console.log('🎯 FILTRO DÍA (SEMANA) - Rango:', weekStartStr, 'a', weekEndStr, '| Eventos visibles:', visibleEvents.length, 'de', eventsToProcess.length);
+        // console.log('[Calendar] FILTRO D?A (SEMANA) - Rango:', weekStartStr, 'a', weekEndStr, '| Eventos visibles:', visibleEvents.length, 'de', eventsToProcess.length);
       } else {
         // Para month y year, usar todos los eventos por ahora
         visibleEvents = eventsToProcess;
-        console.log('🎯 FILTRO MES/AÑO - Usando todos los eventos:', eventsToProcess.length);
+        console.log('[Calendar] FILTRO MES/A?O - Usando todos los eventos:', eventsToProcess.length);
       }
       
-      // Procesar en lotes más grandes para mejor performance
+      // Procesar en lotes m?s grandes para mejor performance
       const batchSize = 10; // Aumentado de 3 a 10
       
-      // Procesar todos los lotes en paralelo para máxima velocidad
+      // Procesar todos los lotes en paralelo para m?xima velocidad
       const allBatches = [];
       for (let i = 0; i < visibleEvents.length; i += batchSize) {
         const batch = visibleEvents.slice(i, i + batchSize);
         allBatches.push(batch);
       }
       
-      // Procesar todos los lotes simultáneamente
+      // Procesar todos los lotes simult?neamente
       const allBatchPromises = allBatches.map(async (batch, batchIndex) => {
         const batchPromises = batch.map(async (event) => {
           try {
-            // console.log('🎯 DEBUG - Event:', event.title, 'Date:', event.date);
+            // console.log('[Calendar] DEBUG - Event:', event.title, 'Date:', event.date);
             await loadSubtasks(event.id, event, true);
-            // console.log('🎯 loadAllEventsSubtasks - Loaded subtasks for', event.id);
+            // console.log('[Calendar] loadAllEventsSubtasks - Loaded subtasks for', event.id);
           } catch (error) {
-            console.log('🎯 loadAllEventsSubtasks - Error loading', event.id, error instanceof Error ? error.message : String(error));
+            console.log('[Calendar] loadAllEventsSubtasks - Error loading', event.id, error instanceof Error ? error.message : String(error));
           }
         });
         
         await Promise.all(batchPromises);
-        // console.log(`🎯 BATCH ${batchIndex + 1}/${allBatches.length} COMPLETE`);
+        // console.log(`?? BATCH ${batchIndex + 1}/${allBatches.length} COMPLETE`);
       });
       
       // Esperar a que todos los lotes terminen
       await Promise.all(allBatchPromises);
       
-      // console.log('🎯 loadAllEventsSubtasks - END');
+      // console.log('[Calendar] loadAllEventsSubtasks - END');
     } catch (error) {
-      console.log('🎯 loadAllEventsSubtasks - Error:', error instanceof Error ? error.message : String(error));
+      console.log('[Calendar] loadAllEventsSubtasks - Error:', error instanceof Error ? error.message : String(error));
     }
-  }, [loadSubtasks, subtasksCache]);
+  }, [loadSubtasks, subtasksCache, currentView, currentDate, startOfWeek, addDays]);
 
-  // Función para refrescar eventos después de crear/editar
-  const refreshEvents = useCallback(async () => {
-    try {
-      const rangeStart = new Date(currentDate);
-      rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás
-      const rangeEnd = new Date(currentDate);
-      rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
-      
-      
-      const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
-      if (fetched) {
-        // Reemplazar completamente los eventos para evitar duplicados
-        setEvents(fetched);
-      }
-    } catch (error) {
-    }
-  }, [currentDate]);
-
-  // ===== MONTH EVENTS: Funciones helper movidas a monthEventHelpers.ts =====
-  
-  // Wrapper functions para mantener compatibilidad con código existente
+  // Funci?n para refrescar eventos despu?s de crear/editar
   const fetchMonthEvents = useCallback(async (year: number, month: number) => {
     return fetchMonthEventsHelper(year, month);
   }, []);
@@ -1480,7 +1330,7 @@ export default function CalendarView({}: CalendarViewProps) {
       const newStartTimeRaw = event.startTime + event.duration + slot;
       const safeStart = Math.min(newStartTimeRaw, dayMinutes - event.duration);
 
-      // 🔧 FIX: Convertir safeStart (en minutos desde userStartHour) a minutos desde START_HOUR
+      // FIX: Convertir safeStart (en minutos desde userStartHour) a minutos desde START_HOUR
       const safeStartFromStartHour = safeStart + (userStartHour - START_HOUR) * 60;
       const safeEndFromStartHour = (safeStart + event.duration) + (userStartHour - START_HOUR) * 60;
       
@@ -1508,7 +1358,7 @@ export default function CalendarView({}: CalendarViewProps) {
       if (postRes.ok && created?.data?.id) {
         await migrateSubtasks(String(event.id), String(created.data.id), event);
         await refreshEvents();
-        Alert.alert('Éxito', 'Evento duplicado correctamente.');
+        Alert.alert('?xito', 'Evento duplicado correctamente.');
       } else {
         Alert.alert('Error', 'No se pudo duplicar el evento');
       }
@@ -1518,11 +1368,11 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [refreshEvents, migrateSubtasks]);
 
-  // Función para eliminar un evento único
-  const handleDeleteSingleEvent = useCallback(async (eventId: string) => {
+  // Funci?n para eliminar un evento ?nico
+  const handleDeleteSingleEvent = useCallback(async (eventId: string, targetEvent?: Event | MonthEvent | null) => {
     try {
       // Detectar si es MonthEvent o Event normal
-      const event = selectedEvent;
+      const event = targetEvent ?? selectedEvent;
       const isMonthEvent = event && 'startDay' in event;
       
       if (isMonthEvent) {
@@ -1564,30 +1414,30 @@ export default function CalendarView({}: CalendarViewProps) {
     const hasRecurrence = hasRecurrenceFields && selectedEvent.is_recurring;
     const belongsToSeries = hasRecurrenceFields && selectedEvent.series_id;
     
-    // 🔥 NUEVO: Detectar si es una instancia generada de una serie (formato "ID_fecha")
+    // NUEVO: Detectar si es una instancia generada de una serie (formato "ID_fecha")
     const isGeneratedInstance = typeof selectedEvent.id === 'string' && selectedEvent.id.includes('_');
     
-    // 🔥 NUEVO: Detectar si es un evento que viene de una serie (tiene is_recurring pero no es el original)
+    // NUEVO: Detectar si es un evento que viene de una serie (tiene is_recurring pero no es el original)
     const isFromSeries = hasRecurrenceFields && selectedEvent.is_recurring && !isGeneratedInstance;
     
     
     if (hasRecurrence || belongsToSeries || isGeneratedInstance || isFromSeries) {
-      // Evento con recurrencia O que pertenece a una serie - mostrar modal de confirmación
+      // Evento con recurrencia O que pertenece a una serie - mostrar modal de confirmaci?n
       setDeleteModalVisible(true);
     } else {
-      // Evento único independiente - eliminar directamente
+      // Evento ?nico independiente - eliminar directamente
       
-      // Implementar eliminación directa
-      handleDeleteSingleEvent(selectedEvent.id);
+      // Implementar eliminaci?n directa
+      handleDeleteSingleEvent(selectedEvent.id, selectedEvent);
     }
   }, [selectedEvent, handleDeleteSingleEvent]);
 
-  // Función wrapper para eliminar desde long press (shortcut del botón de eliminar del modal)
+  // Funci?n wrapper para eliminar desde long press (shortcut del bot?n de eliminar del modal)
   const handleDeleteEventFromLongPress = useCallback((event: Event | MonthEvent) => {
-    // Configurar el evento seleccionado para que el modal de confirmación tenga acceso a él
+    // Configurar el evento seleccionado para que el modal de confirmaci?n tenga acceso a ?l
     setSelectedEvent(event);
     
-    // Ejecutar la misma lógica que handleDeleteEvent pero con el evento pasado como parámetro
+    // Ejecutar la misma l?gica que handleDeleteEvent pero con el evento pasado como par?metro
     // Verificar si es un evento con campos de recurrencia
     const hasRecurrenceFields = 'is_recurring' in event;
     
@@ -1602,18 +1452,18 @@ export default function CalendarView({}: CalendarViewProps) {
     const isFromSeries = hasRecurrenceFields && event.is_recurring && !isGeneratedInstance;
     
     if (hasRecurrence || belongsToSeries || isGeneratedInstance || isFromSeries) {
-      // Evento con recurrencia O que pertenece a una serie - mostrar modal de confirmación
+      // Evento con recurrencia O que pertenece a una serie - mostrar modal de confirmaci?n
       // Usar setTimeout para asegurar que selectedEvent se actualice antes de mostrar el modal
       setTimeout(() => {
         setDeleteModalVisible(true);
       }, 0);
     } else {
-      // Evento único independiente - eliminar directamente
-      handleDeleteSingleEvent(event.id);
+      // Evento ?nico independiente - eliminar directamente
+      handleDeleteSingleEvent(event.id, event);
     }
   }, [handleDeleteSingleEvent]);
 
-  // Función para analizar qué eventos eliminar basado en la estructura de series
+  // Funci?n para analizar qu? eventos eliminar basado en la estructura de series
   const analyzeEventsToDelete = useCallback((event: Event | MonthEvent, deleteType: 'single' | 'series', allEvents: Event[]): number[] => {
     const eventsToDelete: number[] = [];
     
@@ -1631,13 +1481,13 @@ export default function CalendarView({}: CalendarViewProps) {
     const isRecurring = 'is_recurring' in event && event.is_recurring;
     const hasSeriesId = 'series_id' in event && event.series_id;
     
-    // Un evento NO puede ser override de sí mismo
+    // Un evento NO puede ser override de s? mismo
     const isOverride = hasSeriesId && event.series_id !== event.id;
     const isSeriesOriginal = isRecurring && !isOverride;
     
     
     if (deleteType === 'single') {
-      // Solo eliminar este evento específico
+      // Solo eliminar este evento espec?fico
 
       eventsToDelete.push(Number(event.id));
       
@@ -1700,11 +1550,11 @@ export default function CalendarView({}: CalendarViewProps) {
       }
     }
     
-    // Eliminar duplicados y valores inválidos (NaN)
+    // Eliminar duplicados y valores inv?lidos (NaN)
     const validEvents = eventsToDelete.filter(id => !isNaN(id) && id > 0);
     const uniqueEvents = [...new Set(validEvents)];
     
-    // Validación adicional: verificar que los eventos existen
+    // Validaci?n adicional: verificar que los eventos existen
     if (uniqueEvents.length === 0) {
 
       return [];
@@ -1722,13 +1572,13 @@ export default function CalendarView({}: CalendarViewProps) {
     
     try {
       if (deleteType === 'single') {
-        // 🎯 NUEVA LÓGICA: Si es una instancia de serie, convertirla en override primero
+        // NUEVA L?GICA: Si es una instancia de serie, convertirla en override primero
         const isInstance = typeof selectedEvent.id === 'string' && selectedEvent.id.includes('_');
         
         if (isInstance) {
           
           // Crear override con los mismos datos de la instancia
-          // 🎯 CORREGIR: Usar la fecha correcta de la instancia, no la original
+          // CORREGIR: Usar la fecha correcta de la instancia, no la original
           const eventInstance = selectedEvent as Event;
           const instanceDate = eventInstance.date; // Fecha de la instancia (ej: 2025-09-30)
           const instanceStartTime = eventInstance.startTime; // Hora de la instancia
@@ -1740,7 +1590,7 @@ export default function CalendarView({}: CalendarViewProps) {
           const endHours = Math.floor((instanceStartTime + instanceDuration) / 60);
           const endMinutes = (instanceStartTime + instanceDuration) % 60;
           
-          // Obtener calendar_id dinámicamente
+          // Obtener calendar_id din?micamente
           const calJson = await apiGetCalendars();
           const calendarId = calJson?.data?.[0]?.id;
           if (!calendarId) throw new Error('No calendars available');
@@ -1752,7 +1602,7 @@ export default function CalendarView({}: CalendarViewProps) {
             start_utc: new Date(`${instanceDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`).toISOString(),
             end_utc: new Date(`${instanceDate}T${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00.000Z`).toISOString(),
             series_id: eventInstance.series_id,
-            original_start_utc: new Date(`${instanceDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`).toISOString(), // 🎯 CORREGIR: Usar la fecha de la instancia
+            original_start_utc: new Date(`${instanceDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00.000Z`).toISOString(), // CORREGIR: Usar la fecha de la instancia
             color: eventInstance.color,
             all_day: false,
             timezone: 'UTC'
@@ -1763,19 +1613,19 @@ export default function CalendarView({}: CalendarViewProps) {
           if (createRes.ok) {
             const overrideData = await createRes.json();
             
-            // Ahora eliminar el override recién creado
+            // Ahora eliminar el override reci?n creado
             const deleteRes = await apiDeleteEvent(String(overrideData.data.id));
             if (deleteRes.ok) {
             }
           }
         } else {
-          // Es un evento único o override, eliminar directamente
+          // Es un evento ?nico o override, eliminar directamente
           const deleteRes = await apiDeleteEvent(String(selectedEvent.id));
           if (!deleteRes.ok) {
           }
         }
       } else {
-        // Eliminar toda la serie (lógica existente)
+        // Eliminar toda la serie (l?gica existente)
         const eventsToDelete = analyzeEventsToDelete(selectedEvent, deleteType, events);
         
         for (const eventId of eventsToDelete) {
@@ -1804,7 +1654,7 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [selectedEvent, events, analyzeEventsToDelete, refreshEvents]);
 
-  // ===== REFS Y CONFIGURACIÓN =====
+  // ===== REFS Y CONFIGURACI?N =====
   const resizeLockRef = useRef<Set<string>>(new Set());
   const verticalScrollRef = useRef<ScrollView | null>(null);
   const contentHorizontalRef = useRef<ScrollView | null>(null);
@@ -1835,28 +1685,62 @@ export default function CalendarView({}: CalendarViewProps) {
   }, []);
 
   const toDateKey = useCallback((d: Date) => {
-    // Usar fecha local para evitar problemas de timezone
-    // Formato: YYYY-MM-DD usando fecha local (no UTC)
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }, []);
 
-  // Ranuras de tiempo (cada 30 minutos) para vista día/semana
+  const getCellWidth = useCallback(() => {
+    if (currentView === 'day') {
+      return width - 60;
+    } else if (currentView === 'month') {
+      return width - 60; // Mismo ancho que vista de día
+    } else if (currentView === 'week') {
+      return ((width - 60) / 7) * 2; // doble ancho por día
+    }
+    return (width - 60) / 7;
+  }, [currentView, width]);
+
+  const formatHeaderDate = useCallback(() => {
+    const d = new Date(currentDate);
+    const dayNames = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+    if (currentView === 'day') {
+      const localDay = d.getDate();
+      const localMonth = d.getMonth();
+      const localDayName = dayNames[d.getDay()];
+      return `Hoy, ${localDayName}, ${localDay} de ${monthNames[localMonth]}`;
+    } else if (currentView === 'week') {
+      const weekStart = startOfWeek(currentDate);
+      const weekMonth = weekStart.getMonth();
+      const weekMonthName = monthNames[weekMonth];
+      const dayOfMonth = weekStart.getDate();
+      const weekNumber = Math.ceil(dayOfMonth / 7);
+      const capitalizedMonth = weekMonthName.charAt(0).toUpperCase() + weekMonthName.slice(1);
+      return `Semana ${weekNumber}, ${capitalizedMonth}`;
+    } else if (currentView === 'month') {
+      const formatted = d.toLocaleString('es-ES', { month: 'long' });
+      return `${formatted.charAt(0).toUpperCase() + formatted.slice(1)} ${d.getFullYear()}`;
+    } else if (currentView === 'year') {
+      return `${d.getFullYear()}`;
+    }
+    return '';
+  }, [currentView, currentDate, startOfWeek]);
   const timeSlots = useMemo(() => {
     const slots: string[] = [];
     for (let hour = userStartHour; hour < userEndHour; hour++) {
       slots.push(`${hour.toString().padStart(2, '0')}:00`);
       slots.push(`${hour.toString().padStart(2, '0')}:30`);
     }
-    console.log(`⏰ TimeSlots recalculados: ${slots.length} slots desde ${userStartHour}:00 hasta ${userEndHour === 24 ? '00:00' : userEndHour + ':00'}`);
+    console.log(`? TimeSlots recalculados: ${slots.length} slots desde ${userStartHour}:00 hasta ${userEndHour === 24 ? '00:00' : userEndHour + ':00'}`);
     return slots;
   }, [userStartHour, userEndHour]);
 
   const weekDaysFull = useMemo(() => ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'], []);
 
-  // Indexar eventos por fecha+hora para búsqueda rápida
+  // Indexar eventos por fecha+hora para b?squeda r?pida
   const eventsByCell = useMemo(() => {
     const index: { [key: string]: Event } = {};
     events.forEach(ev => {
@@ -1887,52 +1771,48 @@ export default function CalendarView({}: CalendarViewProps) {
     let detail = '';
     if (recurrenceConfig.mode === 'weekly') {
       const days = recurrenceConfig.weekDays.map(code => WEEK_DAY_LABEL_BY_CODE[code] ?? code).join(', ');
-      detail = days ? ` • ${days}` : ' • —';
+      detail = days ? ` ? ${days}` : ' ? ?';
     } else if (recurrenceConfig.mode === 'monthly') {
       const days = recurrenceConfig.monthDays.join(', ');
-      detail = days ? ` • Dias ${days}` : ' • —';
+      detail = days ? ` ? Dias ${days}` : ' ? ?';
     }
 
-    const endText = recurrenceConfig.hasEndDate && recurrenceConfig.endDate ? ` • até ${formatDateKey(recurrenceConfig.endDate)}` : '';
+    const endText = recurrenceConfig.hasEndDate && recurrenceConfig.endDate ? ` ? at? ${formatDateKey(recurrenceConfig.endDate)}` : '';
 
-    return `${RECURRENCE_MODE_LABEL[recurrenceConfig.mode]} • ${intervalText}${detail}${endText}`;
+    return `${RECURRENCE_MODE_LABEL[recurrenceConfig.mode]} ? ${intervalText}${detail}${endText}`;
   }, [recurrenceConfig]);
 
   const normalizeApiEvent = useCallback((apiEvent: any): Event | null => {
     if (!apiEvent?.id || !apiEvent?.start_utc || !apiEvent?.end_utc) {
-      
       return null;
     }
-
-    
-
 
     const startDate = new Date(apiEvent.start_utc);
     const endDate = new Date(apiEvent.end_utc);
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
 
-    // Verificar si el evento está dentro del rango configurado
     const eventStartHour = startDate.getUTCHours();
     const eventStartMinute = startDate.getUTCMinutes();
     const eventEndHour = endDate.getUTCHours();
     const eventEndMinute = endDate.getUTCMinutes();
     const effectiveEndHour = userEndHour === 24 ? 24 : userEndHour;
-    
-    // Calcular minutos totales para comparación más precisa
+
     const eventStartTotalMinutes = eventStartHour * 60 + eventStartMinute;
-    const eventEndTotalMinutes = eventEndHour * 60 + eventEndMinute;
+    let eventEndTotalMinutes = eventEndHour * 60 + eventEndMinute;
     const rangeStartTotalMinutes = userStartHour * 60;
     const rangeEndTotalMinutes = effectiveEndHour === 24 ? 24 * 60 : effectiveEndHour * 60;
-    
-    // Si el evento está completamente fuera del rango, no mostrarlo (pero no causar error)
-    // Evento está fuera si:
-    // - Termina completamente antes de start_hour
-    // - Empieza completamente después de end_hour
+
+    const crossesDay =
+      startDate.getUTCFullYear() !== endDate.getUTCFullYear() ||
+      startDate.getUTCMonth() !== endDate.getUTCMonth() ||
+      startDate.getUTCDate() !== endDate.getUTCDate();
+    if (crossesDay) {
+      eventEndTotalMinutes += 24 * 60;
+    }
+
     const isCompletelyBeforeRange = eventEndTotalMinutes < rangeStartTotalMinutes;
     const isCompletelyAfterRange = eventStartTotalMinutes >= rangeEndTotalMinutes;
-    
     if (isCompletelyBeforeRange || isCompletelyAfterRange) {
-      // Evento fuera del rango - retornar null para no mostrarlo, pero no es un error
       return null;
     }
 
@@ -1943,7 +1823,6 @@ export default function CalendarView({}: CalendarViewProps) {
     const rawDuration = Math.max(30, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
     const snappedDuration = Math.max(30, Math.round(rawDuration / 30) * 30);
 
-
     return {
       id: String(apiEvent.id),
       title: apiEvent.title ?? 'Sin título',
@@ -1953,26 +1832,22 @@ export default function CalendarView({}: CalendarViewProps) {
       date: toDateKey(startDate),
       startTime: snappedStart,
       duration: snappedDuration,
-      // Campos de recurrencia
       is_recurring: apiEvent.is_recurring || false,
       recurrence_rule: apiEvent.recurrence_rule || null,
       recurrence_end_date: apiEvent.recurrence_end_date || null,
-      // Campos para detectar si viene de una serie
       series_id: apiEvent.series_id || null,
       original_start_utc: apiEvent.original_start_utc || null,
+      subtasks_total: apiEvent.subtasks_total ?? apiEvent.subtasks_count ?? 0,
+      subtasks_completed: apiEvent.subtasks_completed ?? apiEvent.subtasks_completed_count ?? 0,
+      subtask_status: apiEvent.subtask_status || 'none',
+      master_subtasks_total: apiEvent.master_subtasks_total ?? undefined,
+      instance_statuses: apiEvent.instance_statuses ?? undefined
     };
   }, [toDateKey, userStartHour, userEndHour]);
 
   const fetchEventsForRange = useCallback(async (rangeStart: Date, rangeEnd: Date) => {
     try {
-      // Expandir el rango para capturar eventos recurrentes que puedan generar instancias en el rango visible
-      const expandedStart = new Date(rangeStart);
-      expandedStart.setMonth(expandedStart.getMonth() - 6); // 6 meses atrás para capturar eventos recurrentes
-      
-      const expandedEnd = new Date(rangeEnd);
-      expandedEnd.setMonth(expandedEnd.getMonth() + 6); // 6 meses adelante para capturar eventos futuros
-      
-      const response = await apiFetchEvents(expandedStart.toISOString(), expandedEnd.toISOString());
+      const response = await apiFetchEvents(rangeStart.toISOString(), rangeEnd.toISOString());
       if (!response.ok) {
         return null;
       }
@@ -1985,21 +1860,13 @@ export default function CalendarView({}: CalendarViewProps) {
       const allEvents: Event[] = [];
       const overrides: any[] = [];
       const series: any[] = [];
-      
-      // Separar eventos en categorías
-      for (const item of body.data) {
-        
-        if (item.series_id && item.original_start_utc) {
-          // Es un override
 
+      for (const item of body.data) {
+        if (item.series_id && item.original_start_utc) {
           overrides.push(item);
         } else if (item.is_recurring) {
-          // Es una serie recurrente
-
           series.push(item);
         } else {
-          // Evento regular
-
           const normalizedEvent = normalizeApiEvent(item);
           if (normalizedEvent) {
             allEvents.push(normalizedEvent);
@@ -2007,45 +1874,69 @@ export default function CalendarView({}: CalendarViewProps) {
         }
       }
 
-      // Crear mapa de overrides para consulta rápida
       const overridesMap = new Map<string, any>();
       overrides.forEach(override => {
-        // Normalizar original_start_utc a ISO UTC para comparación
         const originalStartUtc = new Date(override.original_start_utc).toISOString();
         overridesMap.set(originalStartUtc, override);
       });
 
-      
-      // Procesar series recurrentes con overrides
       for (const seriesItem of series) {
-        
         const recurrentInstances = generateRecurrentInstances(seriesItem, rangeStart, rangeEnd, overridesMap, userStartHour, userEndHour);
         allEvents.push(...recurrentInstances);
       }
 
-      // 🔥 NUEVO: Procesar overrides independientes (sin serie recurrente activa)
-
       for (const override of overrides) {
-        // Verificar si el override tiene una serie recurrente activa
         const hasActiveSeries = series.some(s => s.id === override.series_id);
-        
         if (!hasActiveSeries) {
-          // Override independiente - procesar como evento regular
-          
           const normalizedOverride = normalizeApiEvent(override);
           if (normalizedOverride) {
             allEvents.push(normalizedOverride);
-          } else {
+          }
+        }
+      }
+
+      const existingIds = new Set(allEvents.map(ev => String(ev.id)));
+      for (const override of overrides) {
+        if (existingIds.has(String(override.id))) continue;
+        const startUtc = new Date(override.start_utc);
+        if (Number.isNaN(startUtc.getTime())) continue;
+        if (startUtc >= rangeStart && startUtc <= rangeEnd) {
+          const normalizedOverride = normalizeApiEvent(override);
+          if (normalizedOverride) {
+            allEvents.push(normalizedOverride);
+            existingIds.add(String(normalizedOverride.id));
           }
         }
       }
 
       return allEvents;
     } catch (error) {
-
       return null;
     }
   }, [normalizeApiEvent]);
+
+  const refreshEvents = useCallback(async () => {
+    const dateToUse = currentDate;
+    if (currentView === 'week') {
+      const weekStart = startOfWeek(dateToUse);
+      const weekEnd = addDays(weekStart, 6);
+      weekEnd.setHours(23, 59, 59, 999);
+      const fetched = await fetchEventsForRange(weekStart, weekEnd);
+      if (fetched) {
+        setEvents(fetched);
+      }
+      return;
+    }
+    if (currentView === 'day') {
+      const weekStart = startOfWeek(dateToUse);
+      const weekEnd = addDays(weekStart, 6);
+      weekEnd.setHours(23, 59, 59, 999);
+      const fetched = await fetchEventsForRange(weekStart, weekEnd);
+      if (fetched) {
+        setEvents(fetched);
+      }
+    }
+  }, [currentView, currentDate, startOfWeek, addDays, fetchEventsForRange]);
 
   // Cargar month events cuando se cambia a vista de mes
   useEffect(() => {
@@ -2057,7 +1948,7 @@ export default function CalendarView({}: CalendarViewProps) {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
     
-    // Función async dentro del useEffect para evitar dependencia de fetchMonthEvents
+    // Funci?n async dentro del useEffect para evitar dependencia de fetchMonthEvents
     (async () => {
       try {
         const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
@@ -2076,7 +1967,7 @@ export default function CalendarView({}: CalendarViewProps) {
         // Parsear fechas sin problemas de timezone usando YYYY-MM-DD directamente
         const monthEvents: MonthEvent[] = body.data
           .filter((backendEvent: any) => {
-            // Filtrar por año y mes correctos
+            // Filtrar por a?o y mes correctos
             const eventStartParts = backendEvent.start_date.split('-');
             const eventYear = parseInt(eventStartParts[0], 10);
             const eventMonth = parseInt(eventStartParts[1], 10) - 1; // Backend usa 1-12, frontend usa 0-11
@@ -2089,8 +1980,8 @@ export default function CalendarView({}: CalendarViewProps) {
             const startDay = parseInt(startParts[2], 10);
             const endDay = parseInt(endParts[2], 10);
             
-            // Calcular duración en días (diferencia + 1 para ser inclusivo)
-            // Ejemplo: día 2 a día 2 = 1 día, día 2 a día 3 = 2 días
+            // Calcular duraci?n en d?as (diferencia + 1 para ser inclusivo)
+            // Ejemplo: d?a 2 a d?a 2 = 1 d?a, d?a 2 a d?a 3 = 2 d?as
             const duration = Math.max(1, endDay - startDay + 1);
             
             return {
@@ -2113,10 +2004,10 @@ export default function CalendarView({}: CalendarViewProps) {
     })();
   }, [currentView, currentDate.getFullYear(), currentDate.getMonth()]);
 
-  // Cargar eventos del año completo y forzar orientación horizontal cuando se cambia a vista de año
+  // Cargar eventos del a?o completo y forzar orientaci?n horizontal cuando se cambia a vista de a?o
   useEffect(() => {
     if (currentView !== 'year') {
-      // Restaurar orientación cuando se sale de la vista de año
+      // Restaurar orientaci?n cuando se sale de la vista de a?o
       if (ScreenOrientationAvailable && ScreenOrientation) {
         try {
           ScreenOrientation.unlockAsync().catch(() => {});
@@ -2127,18 +2018,18 @@ export default function CalendarView({}: CalendarViewProps) {
       return;
     }
     
-    // Forzar orientación horizontal si el módulo está disponible
+    // Forzar orientaci?n horizontal si el m?dulo est? disponible
     if (ScreenOrientationAvailable && ScreenOrientation && ScreenOrientation.OrientationLock) {
       try {
         ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
       } catch (e) {
-        // Ignorar errores al bloquear orientación
+        // Ignorar errores al bloquear orientaci?n
       }
     }
     
     const year = currentDate.getFullYear();
     
-    // Función async para cargar eventos del año
+    // Funci?n async para cargar eventos del a?o
     (async () => {
       try {
         const fetched = await fetchYearEvents(year);
@@ -2148,7 +2039,7 @@ export default function CalendarView({}: CalendarViewProps) {
       }
     })();
 
-    // Cleanup: restaurar orientación cuando el componente se desmonte o se salga de la vista
+    // Cleanup: restaurar orientaci?n cuando el componente se desmonte o se salga de la vista
     return () => {
       if (ScreenOrientationAvailable && ScreenOrientation) {
         try {
@@ -2159,6 +2050,9 @@ export default function CalendarView({}: CalendarViewProps) {
       }
     };
   }, [currentView, currentDate.getFullYear(), fetchYearEvents]);
+
+  const eventsLoadRequestRef = useRef(0);
+  const eventsLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (currentView !== 'week' && currentView !== 'day') {
@@ -2172,80 +2066,38 @@ export default function CalendarView({}: CalendarViewProps) {
     const rangeEnd = addDays(rangeStart, 6);
     rangeEnd.setHours(23, 59, 59, 999);
 
-    let ignore = false;
+    const requestId = ++eventsLoadRequestRef.current;
 
-    (async () => {
-      const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
-      
-      if (!ignore && fetched) {
-        setEvents(fetched);
-        // Solo cargar subtareas al cargar el calendario inicialmente
-        await loadAllEventsSubtasks(fetched);
-      }
-    })();
+    if (eventsLoadTimeoutRef.current) {
+      clearTimeout(eventsLoadTimeoutRef.current);
+    }
+
+    eventsLoadTimeoutRef.current = setTimeout(() => {
+      (async () => {
+        const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
+
+        if (eventsLoadRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (fetched) {
+          setEvents(fetched);
+        }
+      })();
+    }, 150);
 
     return () => {
-      ignore = true;
+      if (eventsLoadTimeoutRef.current) {
+        clearTimeout(eventsLoadTimeoutRef.current);
+      }
     };
-  }, [currentView, currentDate, startOfWeek, addDays, fetchEventsForRange, loadAllEventsSubtasks]);
+  }, [currentView, currentDate, startOfWeek, addDays, fetchEventsForRange]);
 
   // Obtener ancho de celda
-  const getCellWidth = useCallback(() => {
-    if (currentView === 'day') {
-      return width - 60;
-    } else if (currentView === 'month') {
-      return width - 60; // Mismo ancho que vista de día
-    } else if (currentView === 'week') {
-      return ((width - 60) / 7) * 2; // doble ancho por día
-    }
-    return (width - 60) / 7;
-  }, [currentView, width]);
-
-  // Formatea el header superior usando currentDate
-  const formatHeaderDate = useCallback(() => {
-    const d = new Date(currentDate);
-    const dayNames = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-    const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-
-    if (currentView === 'day') {
-      // Usar fecha local en lugar de UTC para evitar problemas de timezone
-      const localDay = d.getDate();
-      const localMonth = d.getMonth();
-      const localDayName = dayNames[d.getDay()];
-      return `Hoy, ${localDayName}, ${localDay} de ${monthNames[localMonth]}`;
-    } else if (currentView === 'week') {
-      const weekStart = startOfWeek(currentDate);
-      const weekEnd = addDays(weekStart, 6);
-      
-      // Determinar el mes principal de la semana (usar el mes del inicio de la semana)
-      const weekMonth = weekStart.getMonth();
-      const weekMonthName = monthNames[weekMonth];
-      
-      // Calcular el número de semana del mes
-      // El día del mes del inicio de la semana
-      const dayOfMonth = weekStart.getDate();
-      // Calcular qué semana del mes es (redondear hacia arriba)
-      const weekNumber = Math.ceil(dayOfMonth / 7);
-      
-      // Capitalizar la primera letra del mes
-      const capitalizedMonth = weekMonthName.charAt(0).toUpperCase() + weekMonthName.slice(1);
-      
-      return `Semana ${weekNumber}, ${capitalizedMonth}`;
-    } else if (currentView === 'month') {
-      const formatted = d.toLocaleString('es-ES', { month: 'long' });
-      return `${formatted.charAt(0).toUpperCase() + formatted.slice(1)} ${d.getFullYear()}`;
-    } else if (currentView === 'year') {
-      return `${d.getFullYear()}`;
-    }
-    return '';
-  }, [currentView, currentDate, startOfWeek, addDays]);
-
-  // Manejo de creación/edición de eventos
-  // Determina la fecha real (YYYY-MM-DD) que corresponde a la celda seleccionada
   const dateForCell = useCallback((view: string, cell: SelectedCell | SelectedMonthCell | null) => {
     if (!cell) return null;
     if (view === 'day' && 'timeIndex' in (cell as SelectedCell)) {
-      // Día actual
+      // D?a actual
       return toDateKey(currentDate);
     }
     if (view === 'week' && 'timeIndex' in (cell as SelectedCell)) {
@@ -2266,11 +2118,11 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // ===== MANEJO DE EVENTOS =====
   const handleCellPress = useCallback((dayIndex: number, timeIndex: number) => {
-    // Verificar si estamos en el tutorial y si el objetivo es hacer clic en celda vacía
+    // Verificar si estamos en el tutorial y si el objetivo es hacer clic en celda vac?a
     if (tutorialVisible && !tutorialCompleted) {
       const currentStepData = calendarTutorialSteps[tutorialStep] as any;
       if (currentStepData?.objective === 'click-empty-cell') {
-        // Solo permitir clic en celdas vacías durante este paso del tutorial
+        // Solo permitir clic en celdas vac?as durante este paso del tutorial
         const startTime = timeIndex * 30;
         let dateKey = '';
         if (currentView === 'day') {
@@ -2285,9 +2137,9 @@ export default function CalendarView({}: CalendarViewProps) {
         const lookupKeyFinal = `${dateKey}-${startTime}`;
         const existingEventFinal = eventsByCell[lookupKeyFinal];
         
-        // Si hay un evento, no permitir abrir el modal (acción incorrecta)
+        // Si hay un evento, no permitir abrir el modal (acci?n incorrecta)
         if (existingEventFinal) {
-          console.log('⚠️ Tutorial: Debes hacer clic en una celda vacía, no en un evento existente');
+          console.log('[Calendar] Tutorial: Debes hacer clic en una celda vac?a, no en un evento existente');
           return;
         }
       }
@@ -2344,31 +2196,37 @@ export default function CalendarView({}: CalendarViewProps) {
 
 
   const handleSaveEvent = useCallback(async () => {
-    // 🔥 CRÍTICO: Detectar tutorial ANTES de cualquier validación
-    // Debe detectarse cuando se presiona el botón, independientemente de si pasa las validaciones
+    if (isSaving) {
+      console.log('[Calendar]  handleSaveEvent - Ignored (isSaving=true)');
+      return;
+    }
+    setIsSaving(true);
+    try {
+    // CR?TICO: Detectar tutorial ANTES de cualquier validaci?n
+    // Debe detectarse cuando se presiona el bot?n, independientemente de si pasa las validaciones
     if (tutorialVisible && !tutorialCompleted) {
       const currentStepData = calendarTutorialSteps[tutorialStep] as any;
-      console.log('🎯 handleSaveEvent - Tutorial check:', {
+      console.log('[Calendar] handleSaveEvent - Tutorial check:', {
         step: tutorialStep,
         objective: currentStepData?.objective,
         id: currentStepData?.id,
       });
       
       if (currentStepData?.objective === 'press-create-button') {
-        console.log('✅ Objetivo cumplido: press-create-button (botón presionado)');
-        // Avanzar inmediatamente cuando se presiona el botón crear
+        console.log('? Objetivo cumplido: press-create-button (bot?n presionado)');
+        // Avanzar inmediatamente cuando se presiona el bot?n crear
         setTimeout(() => handleTutorialNext(), 500);
       } else if (currentStepData?.objective === 'save-event-with-subtasks') {
         // Verificar que hay subtareas antes de avanzar
         if (subtasks.length >= 2) {
-          console.log('✅ Objetivo cumplido: save-event-with-subtasks');
+          console.log('? Objetivo cumplido: save-event-with-subtasks');
           setTimeout(() => handleTutorialNext(), 500);
         }
       }
     }
     
     if (!eventTitle.trim()) {
-      Alert.alert('Error', 'El título es obligatorio');
+      Alert.alert('Error', 'El t?tulo es obligatorio');
       return;
     }
 
@@ -2382,7 +2240,7 @@ export default function CalendarView({}: CalendarViewProps) {
     if (isRecurringInstance) {
       const { hasChanges, changes } = detectSubtaskStructuralChanges();
       
-      console.log('🔍 handleSaveEvent - Checking subtask changes', {
+      console.log('[Calendar] handleSaveEvent - Checking subtask changes', {
         isRecurringInstance,
         hasChanges,
         changesDetail: changes
@@ -2390,40 +2248,46 @@ export default function CalendarView({}: CalendarViewProps) {
       
       if (hasChanges) {
         // Guardar cambios pendientes y mostrar modal
-        console.log('📢 handleSaveEvent - SHOWING MODAL for subtask changes');
+        console.log('[Calendar] handleSaveEvent - SHOWING MODAL for subtask changes');
         setPendingSubtaskChanges(changes);
         setSubtaskChangesModalVisible(true);
         return; // Detener el save hasta que el usuario decida
       }
     }
 
-    // Almacena el ID temporal del evento que se está creando/editando
+    // Almacena el ID temporal del evento que se est? creando/editando
     const tempId = selectedEvent?.id; 
     const isNewEvent = !selectedEvent;
 
-    // CRÍTICO: Detectar si hay cambios reales que justifiquen recrear el evento
+    // CR?TICO: Detectar si hay cambios reales que justifiquen recrear el evento
     // Si solo se marcaron checkboxes (sin cambios estructurales), NO recrear
+    const hasTimeChange = selectedEvent && (
+      (customDateKey !== null && customDateKey !== selectedEvent.date) ||
+      (customStartTime !== null && customStartTime !== selectedEvent.startTime)
+    );
     const hasRealChanges = selectedEvent && (
       eventTitle !== selectedEvent.title ||
       eventDescription !== (selectedEvent.description || '') ||
-      eventColor !== selectedEvent.color
-      // Agregar más campos si es necesario
+      eventColor !== selectedEvent.color ||
+      hasTimeChange
+      // Agregar m?s campos si es necesario
     );
     
-    console.log('🔍 handleSaveEvent - Change detection', {
+    console.log('[Calendar] handleSaveEvent - Change detection', {
       hasSelectedEvent: !!selectedEvent,
       hasRealChanges,
+      timeChanged: hasTimeChange,
       titleChanged: selectedEvent ? eventTitle !== selectedEvent.title : 'N/A',
       descChanged: selectedEvent ? eventDescription !== (selectedEvent.description || '') : 'N/A',
       colorChanged: selectedEvent ? eventColor !== selectedEvent.color : 'N/A'
     });
 
-    // Si NO hay cambios reales y NO hay cambios estructurales en subtareas → solo cerrar modal
+    // Si NO hay cambios reales y NO hay cambios estructurales en subtareas ? solo cerrar modal
     if (!isNewEvent && !hasRealChanges && isRecurringInstance) {
       const { hasChanges: hasSubtaskChanges } = detectSubtaskStructuralChanges();
       
       if (!hasSubtaskChanges) {
-        console.log('✅ handleSaveEvent - No real changes detected, closing modal without recreating event');
+        console.log('? handleSaveEvent - No real changes detected, closing modal without recreating event');
         setModalVisible(false);
         setEventTitle('');
         setEventDescription('');
@@ -2435,13 +2299,119 @@ export default function CalendarView({}: CalendarViewProps) {
       }
     }
 
-    // 🔥 NUEVA LÓGICA: Detectar si estamos editando recurrencia en un evento que viene de una serie
+    // NUEVA L?GICA: Detectar si estamos editando recurrencia en un evento que viene de una serie
     // NOTA: Un evento liberado (sin series_id local) que se le aplica recurrencia debe crear nueva serie independiente
     const isEditingRecurrenceOnSeriesEvent = !isNewEvent && 
       selectedEvent && 
       'startTime' in selectedEvent && 
       (selectedEvent.series_id || selectedEvent.original_start_utc) && 
       recurrenceConfig.enabled;
+
+    // CASO CR?TICO: Mover/cambiar hora de una instancia de serie
+    // - Si es instancia virtual (id tipo "serieId_YYYY-MM-DD"): crear override nuevo
+    // - Si ya es override real (id num?rico con series_id): actualizar el override existente
+    const isVirtualInstance = selectedEvent && typeof selectedEvent.id === 'string' && selectedEvent.id.includes('_');
+    if (selectedEvent && !isNewEvent && 'startTime' in selectedEvent && (selectedEvent.series_id || selectedEvent.original_start_utc) && hasTimeChange) {
+      try {
+        const seriesId = selectedEvent.series_id ? Number(selectedEvent.series_id) : null;
+        if (!seriesId) throw new Error('No series_id for recurring instance');
+
+        // Fecha/hora destino
+        const eventDate = customDateKey || selectedEvent.date;
+        const eventStartTime = customStartTime !== null ? customStartTime : selectedEvent.startTime;
+        const eventDuration = selectedEvent.duration || 30;
+
+        const eventStartTimeFromStartHour = eventStartTime + (userStartHour - START_HOUR) * 60;
+        const eventEndTimeFromStartHour = (eventStartTime + eventDuration) + (userStartHour - START_HOUR) * 60;
+
+        const baseStartLocal = dateKeyToLocalDate(eventDate, eventStartTimeFromStartHour);
+        const baseEndLocal = dateKeyToLocalDate(eventDate, eventEndTimeFromStartHour);
+
+        // Calcular original_start_utc del d?a original de la instancia
+        let originalStartUtc = selectedEvent.original_start_utc || null;
+        if (!originalStartUtc) {
+          const originalStartTimeFromStartHour = selectedEvent.startTime + (userStartHour - START_HOUR) * 60;
+          const originalStartLocal = dateKeyToLocalDate(selectedEvent.date, originalStartTimeFromStartHour);
+          originalStartUtc = originalStartLocal.toISOString();
+        }
+
+        const calendarId = (await apiGetCalendars())?.data?.[0]?.id;
+        if (!calendarId) throw new Error('No hay calendars disponibles');
+
+        if (isVirtualInstance) {
+          const overridePayload: any = {
+            calendar_id: calendarId,
+            title: eventTitle,
+            description: eventDescription,
+            start_utc: baseStartLocal.toISOString(),
+            end_utc: baseEndLocal.toISOString(),
+            color: eventColor,
+            is_recurring: false,
+            series_id: seriesId,
+            original_start_utc: originalStartUtc
+          };
+
+          const postRes = await apiPostEvent(overridePayload);
+          const created = await postRes.json();
+
+          if (postRes.ok && created?.data?.id) {
+            const newOverrideId = String(created.data.id);
+            // Migrar subtareas/estado de instancia al override nuevo
+            await migrateSubtasks(String(selectedEvent.id), newOverrideId, selectedEvent, {
+              ...selectedEvent,
+              id: newOverrideId,
+              series_id: seriesId,
+              is_recurring: false,
+              startTime: eventStartTime,
+              duration: eventDuration,
+              date: eventDate,
+              original_start_utc: originalStartUtc
+            } as any);
+
+            await refreshEvents();
+            setModalVisible(false);
+            setEventTitle('');
+            setEventDescription('');
+            setSelectedEvent(null);
+            setSelectedCell(null);
+            setSelectedMonthCell(null);
+            setRecurrenceConfig(createDefaultRecurrenceConfig());
+            setCustomDateKey(null);
+            setCustomStartTime(null);
+            return;
+          }
+        } else {
+          // Override real: solo actualizar horas/fecha del override existente
+          const updatePayload = {
+            title: eventTitle,
+            description: eventDescription,
+            start_utc: baseStartLocal.toISOString(),
+            end_utc: baseEndLocal.toISOString(),
+            color: eventColor,
+            is_recurring: false,
+            series_id: seriesId,
+            original_start_utc: originalStartUtc
+          };
+          const updateRes = await apiPutEvent(String(selectedEvent.id), updatePayload);
+          if (updateRes.ok) {
+            await refreshEvents();
+            setModalVisible(false);
+            setEventTitle('');
+            setEventDescription('');
+            setSelectedEvent(null);
+            setSelectedCell(null);
+            setSelectedMonthCell(null);
+            setRecurrenceConfig(createDefaultRecurrenceConfig());
+            setCustomDateKey(null);
+            setCustomStartTime(null);
+            return;
+          }
+        }
+      } catch (error) {
+        Alert.alert('Error', 'No se pudo mover la instancia de la serie.');
+        return;
+      }
+    }
 
 
     if (isEditingRecurrenceOnSeriesEvent) {
@@ -2454,7 +2424,7 @@ export default function CalendarView({}: CalendarViewProps) {
         const eventStartTime = customStartTime !== null ? customStartTime : (selectedEvent && 'startTime' in selectedEvent ? selectedEvent.startTime : 0);
         const eventDuration = selectedEvent && 'duration' in selectedEvent ? selectedEvent.duration : 30;
         
-        // 🔧 FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
+        // FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
         const eventStartTimeFromStartHour = eventStartTime + (userStartHour - START_HOUR) * 60;
         const eventEndTimeFromStartHour = (eventStartTime + eventDuration) + (userStartHour - START_HOUR) * 60;
         
@@ -2487,12 +2457,12 @@ export default function CalendarView({}: CalendarViewProps) {
         const created = await postRes.json();
 
         if (postRes.ok && created?.data?.id) {      
-          console.log('🔄 handleSaveEvent - Migrating subtasks after creating new recurring event');
+          console.log('[Calendar] handleSaveEvent - Migrating subtasks after creating new recurring event');
           
           // 2. Migrar subtareas del evento anterior al nuevo (pasar selectedEvent para detectar si es maestro)
           await migrateSubtasks(String(selectedEvent.id), String(created.data.id), selectedEvent);
           
-          // 3. Eliminar el evento original que venía de la serie
+          // 3. Eliminar el evento original que ven?a de la serie
           await apiDeleteEvent(String(selectedEvent.id));
           
           // 4. Refrescar eventos para mostrar la nueva serie
@@ -2518,11 +2488,12 @@ export default function CalendarView({}: CalendarViewProps) {
     }
 
     if (tempId && !isNewEvent) {
-      // 🔥 NUEVA LÓGICA: Si es un evento liberado (sin series_id local), cualquier edición
-      // debe crear una nueva serie independiente en lugar de solo actualizar
+      // NUEVA L?GICA: Si el usuario activa recurrencia en un evento ?nico,
+      // crear una nueva serie independiente en lugar de solo actualizar.
       if ('startTime' in selectedEvent && 
           !selectedEvent.series_id && 
-          !selectedEvent.original_start_utc) {
+          !selectedEvent.original_start_utc &&
+          recurrenceConfig.enabled) {
         
 
         
@@ -2533,7 +2504,7 @@ export default function CalendarView({}: CalendarViewProps) {
           const eventStartTime = customStartTime !== null ? customStartTime : (selectedEvent && 'startTime' in selectedEvent ? selectedEvent.startTime : 0);
           const eventDuration = selectedEvent && 'duration' in selectedEvent ? selectedEvent.duration : 30;
           
-          // 🔧 FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
+          // FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
           const eventStartTimeFromStartHour = eventStartTime + (userStartHour - START_HOUR) * 60;
           const eventEndTimeFromStartHour = (eventStartTime + eventDuration) + (userStartHour - START_HOUR) * 60;
           
@@ -2569,7 +2540,7 @@ export default function CalendarView({}: CalendarViewProps) {
           const created = await postRes.json();
 
           if (postRes.ok && created?.data?.id) {
-            console.log('🔄 handleSaveEvent - Migrating subtasks after converting to recurring');
+            console.log('[Calendar] handleSaveEvent - Migrating subtasks after converting to recurring');
 
             // 2. Migrar subtareas del evento anterior al nuevo (pasar selectedEvent para detectar si es maestro)
             await migrateSubtasks(String(selectedEvent.id), String(created.data.id), selectedEvent);
@@ -2600,7 +2571,7 @@ export default function CalendarView({}: CalendarViewProps) {
         }
       }
       
-      // Lógica para actualizar un evento existente
+      // L?gica para actualizar un evento existente
       if ('startTime' in selectedEvent) {
         
         // Actualizar localmente primero
@@ -2620,14 +2591,14 @@ export default function CalendarView({}: CalendarViewProps) {
           recurrence_end_date: recurrenceConfig.hasEndDate ? recurrenceConfig.endDate : null
         } : ev));
         
-        // 🔥 NUEVO: Enviar actualización al servidor
+        // NUEVO: Enviar actualizaci?n al servidor
         try {
           // Usar fecha/hora personalizada si existe, de lo contrario usar la del evento
           const eventDate = customDateKey || (selectedEvent && 'date' in selectedEvent ? selectedEvent.date : '');
           const eventStartTime = customStartTime !== null ? customStartTime : (selectedEvent && 'startTime' in selectedEvent ? selectedEvent.startTime : 0);
           const eventDuration = selectedEvent && 'duration' in selectedEvent ? selectedEvent.duration : 30;
           
-          // 🔧 FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
+          // FIX: Convertir eventStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
           const eventStartTimeFromStartHour = eventStartTime + (userStartHour - START_HOUR) * 60;
           const eventEndTimeFromStartHour = (eventStartTime + eventDuration) + (userStartHour - START_HOUR) * 60;
           
@@ -2689,20 +2660,26 @@ export default function CalendarView({}: CalendarViewProps) {
             
             const updateRes = await apiPutMonthEvent(String(selectedEvent.id), updatePayload);
             if (updateRes.ok) {
+              setMonthEvents(prev => prev.map(ev => ev.id === String(selectedEvent.id) ? {
+                ...ev,
+                title: eventTitle,
+                description: eventDescription,
+                color: eventColor
+              } : ev));
               await refreshMonthEvents();
             }
           } catch (error) {
             // Error updating month event
           }
         } else {
-          // Fallback: si no es MonthEvent pero está en monthEvents, actualizar localmente
+          // Fallback: si no es MonthEvent pero est? en monthEvents, actualizar localmente
           if (selectedEvent && 'startDay' in selectedEvent === false) {
             // No hacer nada, solo para eventos normales que no son month events
           }
         }
       }
     } else if (selectedCell) {
-      // Lógica para crear un nuevo evento
+      // L?gica para crear un nuevo evento
       let dateKey = '';
       if (currentView === 'day') {
         dateKey = toDateKey(currentDate);
@@ -2742,10 +2719,10 @@ export default function CalendarView({}: CalendarViewProps) {
         setEvents(prev => [...prev, newEvent!]);
       }
 
-      // Persistencia API con reconciliación de ID
+      // Persistencia API con reconciliaci?n de ID
       try {
         // Calcular fechas base usando fecha/hora personalizada si existe
-        // 🔧 FIX: Convertir finalStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
+        // FIX: Convertir finalStartTime (en minutos desde userStartHour) a minutos desde START_HOUR
         const finalStartTimeFromStartHour = finalStartTime + (userStartHour - START_HOUR) * 60;
         const finalEndTimeFromStartHour = (finalStartTime + 30) + (userStartHour - START_HOUR) * 60;
         
@@ -2770,12 +2747,12 @@ export default function CalendarView({}: CalendarViewProps) {
           finalEndLocal = new Date(adjustedStart.getTime() + duration);
           
         }
-        // Obtener calendar_id válido
+        // Obtener calendar_id v?lido
         const calJson = await apiGetCalendars();
         const calendarId = calJson?.data?.[0]?.id;
         if (!calendarId) throw new Error('No hay calendars disponibles');
 
-        // Crear regla de recurrencia si está habilitada
+        // Crear regla de recurrencia si est? habilitada
         let recurrenceRule: RecurrenceRule | null = null;
         if (recurrenceConfig.enabled) {
           recurrenceRule = {
@@ -2813,7 +2790,7 @@ export default function CalendarView({}: CalendarViewProps) {
         if (res.ok && createdEvent?.data?.id) {
           const newEventId = createdEvent.data.id.toString();
           
-          // Guardar subtareas temporales para el evento recién creado
+          // Guardar subtareas temporales para el evento reci?n creado
           if (subtasks.length > 0) {
             try {
               const tempSubtasks = subtasks.filter(subtask => subtask.id.startsWith('temp-'));
@@ -2823,7 +2800,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 const response = await apiCreateSubtask(newEventId, tempSubtask.text, i, tempSubtask.completed);
                 if (response.ok) {
                   const result = await response.json();
-                  // Si la subtarea estaba completada, actualizarla después de crearla
+                  // Si la subtarea estaba completada, actualizarla despu?s de crearla
                   if (tempSubtask.completed && !result.data.completed) {
                     await apiUpdateSubtask(result.data.id.toString(), { completed: true });
                   }
@@ -2840,7 +2817,7 @@ export default function CalendarView({}: CalendarViewProps) {
                   );
                   setSubtasks(updatedSubtasks);
                   
-                  // Actualizar caché para el nuevo evento
+                  // Actualizar cach? para el nuevo evento
                   setSubtasksCache(prev => ({
                     ...prev,
                     [newEventId]: updatedSubtasks
@@ -2874,7 +2851,7 @@ export default function CalendarView({}: CalendarViewProps) {
             setEvents(prev => [...prev.filter(e => e.id !== localId), finalEvent]);
           }
         } else {
-          Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
+          Alert.alert('Aviso', 'El evento se cre? localmente pero no en el servidor.');
         }
       } catch (e) {
         console.error('Error creating event:', e);
@@ -2917,7 +2894,7 @@ export default function CalendarView({}: CalendarViewProps) {
         if (res.ok && createdEvent?.data?.id) {
           await refreshMonthEvents();
         } else {
-          Alert.alert('Aviso', 'El evento se creó localmente pero no en el servidor.');
+          Alert.alert('Aviso', 'El evento se cre? localmente pero no en el servidor.');
         }
       } catch (e) {
         Alert.alert('Error', 'No se pudo crear el evento en el servidor.');
@@ -2935,18 +2912,21 @@ export default function CalendarView({}: CalendarViewProps) {
     setSubtasks([]);
     setNewSubtaskText('');
     setShowSubtaskInput(false);
-    // NO resetear recurrenceConfig aquí - se mantiene para próximos eventos
-  }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, recurrenceConfig, subtasks, migrateSubtasks, monthEventFrontendToBackend, refreshMonthEvents, getRandomColor, tutorialVisible, tutorialCompleted, tutorialStep, handleTutorialNext, calendarTutorialSteps]);
+    // NO resetear recurrenceConfig aqu? - se mantiene para pr?ximos eventos
+    } finally {
+      setIsSaving(false);
+    }
+  }, [eventTitle, eventDescription, eventColor, selectedEvent, selectedCell, selectedMonthCell, currentView, currentDate, recurrenceConfig, subtasks, migrateSubtasks, monthEventFrontendToBackend, refreshMonthEvents, getRandomColor, tutorialVisible, tutorialCompleted, tutorialStep, handleTutorialNext, calendarTutorialSteps, isSaving, customDateKey, customStartTime, userStartHour]);
 
-  // Scroll automático al día actual cuando se entra a la vista semanal
+  // Scroll autom?tico al d?a actual cuando se entra a la vista semanal
   useEffect(() => {
     if (currentView === 'week' && contentHorizontalRef.current) {
-      // Calcular el día de la semana actual
+      // Calcular el d?a de la semana actual
       const weekStart = startOfWeek(currentDate);
       const today = new Date();
       const todayDateKey = today.toDateString();
       
-      // Encontrar el índice del día actual en la semana (0-6)
+      // Encontrar el ?ndice del d?a actual en la semana (0-6)
       let dayIndex = -1;
       for (let i = 0; i < 7; i++) {
         const dayDate = addDays(weekStart, i);
@@ -2956,13 +2936,13 @@ export default function CalendarView({}: CalendarViewProps) {
         }
       }
       
-      // Si encontramos el día actual en esta semana, hacer scroll
+      // Si encontramos el d?a actual en esta semana, hacer scroll
       if (dayIndex >= 0) {
-        // Pequeño delay para asegurar que el layout esté listo
+        // Peque?o delay para asegurar que el layout est? listo
         setTimeout(() => {
           const cellWidth = getCellWidth();
-          // Calcular la posición de scroll para centrar el día actual (o al menos mostrarlo)
-          // Intentamos centrarlo, pero si está al inicio o al final, ajustamos
+          // Calcular la posici?n de scroll para centrar el d?a actual (o al menos mostrarlo)
+          // Intentamos centrarlo, pero si est? al inicio o al final, ajustamos
           const screenWidth = width - 60; // Ancho disponible (menos columna de horas)
           const scrollPosition = Math.max(0, (dayIndex * cellWidth) - (screenWidth / 2) + (cellWidth / 2));
           
@@ -2971,7 +2951,7 @@ export default function CalendarView({}: CalendarViewProps) {
             animated: true
           });
           
-          // También sincronizar el header
+          // Tambi?n sincronizar el header
           headerHorizontalRef.current?.scrollTo({
             x: scrollPosition,
             animated: true
@@ -2981,148 +2961,89 @@ export default function CalendarView({}: CalendarViewProps) {
     }
   }, [currentView, currentDate, startOfWeek, addDays, getCellWidth, width]);
 
-  // ===== NAVEGACIÓN =====
-  const navigateDate = useCallback(async (direction: 'prev' | 'next') => {
-    console.log('🧭 navigateDate - START', { 
-      direction, 
-      currentView, 
-      currentDate: currentDate.toISOString().slice(0, 10),
-      eventsCount: events.length,
-      timestamp: new Date().toISOString()
-    });
-    
-    if (currentView === 'day') {
-      const newDate = addDays(currentDate, direction === 'next' ? 1 : -1);
-      console.log('🧭 navigateDate - Day navigation', { 
-        oldDate: currentDate.toISOString().slice(0, 10),
-        newDate: newDate.toISOString().slice(0, 10)
-      });
-      setCurrentDate(newDate);
-      // Reset de scrolls
-      verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
-      contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
-      
-      // Calcular la semana del nuevo día para cargar toda la semana
-      const newWeekStart = startOfWeek(newDate);
-      console.log('🧭 navigateDate - Day week calculation', { 
-        newDate: newDate.toISOString().slice(0, 10),
-        newWeekStart: newWeekStart.toISOString().slice(0, 10)
-      });
-      
-      // Cargar eventos y subtareas para toda la semana del nuevo día
-      setTimeout(async () => {
-        console.log('🧭 navigateDate - Loading events and subtasks for new day week');
-        
-        // Calcular el rango de la semana del nuevo día
-        const newWeekEnd = addDays(newWeekStart, 6);
-        const rangeStart = new Date(newWeekStart);
-        rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás para capturar eventos recurrentes
-        const rangeEnd = new Date(newWeekEnd);
-        rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
-        
-        // Cargar eventos de la semana del nuevo día
-        const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
-        if (fetched) {
-          setEvents(fetched);
-          // Ahora cargar las subtareas con los nuevos eventos
-          await loadAllEventsSubtasks(fetched, true, newWeekStart);
-        }
-      }, 200);
-      return;
-    }
-
-    if (currentView === 'week') {
-      const weekStart = startOfWeek(currentDate);
-      const newWeekStart = addDays(weekStart, direction === 'next' ? 7 : -7);
-      console.log('🧭 navigateDate - Week navigation', { 
-        oldWeekStart: weekStart.toISOString().slice(0, 10),
-        newWeekStart: newWeekStart.toISOString().slice(0, 10)
-      });
-      setCurrentDate(newWeekStart);
-      // Reset de scroll horizontal/vertical
-      setTimeout(() => {
-        contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
-        headerHorizontalRef.current?.scrollTo({ x: 0, animated: false });
-        verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
-        
-        // Cargar eventos y subtareas para la nueva semana después del scroll
-        setTimeout(async () => {
-          console.log('🧭 navigateDate - Loading events and subtasks for new week');
-          
-          // Calcular el rango de la nueva semana
-          const newWeekEnd = addDays(newWeekStart, 6);
-          const rangeStart = new Date(newWeekStart);
-          rangeStart.setDate(rangeStart.getDate() - 7); // 1 semana atrás para capturar eventos recurrentes
-          const rangeEnd = new Date(newWeekEnd);
-          rangeEnd.setDate(rangeEnd.getDate() + 30); // 1 mes adelante
-          
-          // Cargar eventos de la nueva semana
-          const fetched = await fetchEventsForRange(rangeStart, rangeEnd);
-          if (fetched) {
-            setEvents(fetched);
-            // Ahora cargar las subtareas con los nuevos eventos
-            await loadAllEventsSubtasks(fetched, true, newWeekStart);
-          }
-        }, 200);
-      }, 20);
-      return;
-    }
-
-    if (currentView === 'month') {
-      const newDate = addMonths(currentDate, direction === 'next' ? 1 : -1);
-      setCurrentDate(newDate);
-      setTimeout(() => {
-        verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
-        contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
-        headerHorizontalRef.current?.scrollTo({ x: 0, animated: false });
-      }, 20);
-      
-      // Cargar month events para el nuevo mes
-      setTimeout(async () => {
-        const year = newDate.getFullYear();
-        const month = newDate.getMonth();
-        const fetched = await fetchMonthEvents(year, month);
-        setMonthEvents(fetched);
-      }, 100);
-      return;
-    }
-
-    if (currentView === 'year') {
-      const newDate = new Date(currentDate);
-      newDate.setFullYear(newDate.getFullYear() + (direction === 'next' ? 1 : -1));
-      setCurrentDate(newDate);
-      
-      // Cargar eventos del nuevo año
-      setTimeout(async () => {
-        const year = newDate.getFullYear();
-        const fetched = await fetchYearEvents(year);
-        setYearEvents(fetched);
-      }, 100);
-      return;
-    }
-  }, [currentView, currentDate, addDays, addMonths, startOfWeek, loadAllEventsSubtasks, events, fetchMonthEvents, fetchYearEvents]);
-
-  // Función para recargar colores de subtareas (extraída del botón de recarga)
+  // ===== NAVEGACI?N =====
+  const navigationRequestRef = useRef(0);
   const refreshSubtasksColors = useCallback(() => {
     loadAllEventsSubtasks(events, true).then(() => {
-      // console.log('🔄 refreshSubtasksColors - COMPLETE');
+      // console.log('[Calendar] refreshSubtasksColors - COMPLETE');
     }).catch((error) => {
-      console.log('🔄 refreshSubtasksColors - Error:', error instanceof Error ? error.message : String(error));
+      console.log('[Calendar] refreshSubtasksColors - Error:', error instanceof Error ? error.message : String(error));
     });
   }, [loadAllEventsSubtasks, events]);
 
-  // Función para recargar con delay (para evitar conflictos con la DB)
+  // Funci?n para recargar con delay (para evitar conflictos con la DB)
   const refreshSubtasksColorsWithDelay = useCallback(() => {
     setTimeout(() => {
       refreshSubtasksColors();
     }, 3000); // 3 segundos de delay
   }, [refreshSubtasksColors]);
 
+  const navigateDate = useCallback(async (direction: 'prev' | 'next') => {
+    const baseDate = currentDateRef.current;
+    console.log('[Calendar] navigateDate - START', {
+      currentDate: baseDate.toISOString().slice(0, 10),
+      currentView,
+      direction,
+      eventsCount: events.length,
+      timestamp: new Date().toISOString()
+    });
+
+    if (currentView === 'day') {
+      const newDate = addDays(baseDate, direction === 'next' ? 1 : -1);
+      console.log('[Calendar] navigateDate - Day navigation', {
+        oldDate: baseDate.toISOString().slice(0, 10),
+        newDate: newDate.toISOString().slice(0, 10)
+      });
+      setCurrentDate(newDate);
+      currentDateRef.current = newDate;
+      verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
+      contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
+      return;
+    }
+
+    if (currentView === 'week') {
+      const weekStart = startOfWeek(baseDate);
+      const newWeekStart = addDays(weekStart, direction === 'next' ? 7 : -7);
+      console.log('[Calendar] navigateDate - Week navigation', {
+        oldWeekStart: weekStart.toISOString().slice(0, 10),
+        newWeekStart: newWeekStart.toISOString().slice(0, 10)
+      });
+      setCurrentDate(newWeekStart);
+      currentDateRef.current = newWeekStart;
+      setTimeout(() => {
+        contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
+        headerHorizontalRef.current?.scrollTo({ x: 0, animated: false });
+        verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
+      }, 20);
+      return;
+    }
+
+    if (currentView === 'month') {
+      const newDate = addMonths(baseDate, direction === 'next' ? 1 : -1);
+      setCurrentDate(newDate);
+      currentDateRef.current = newDate;
+      setTimeout(() => {
+        verticalScrollRef.current?.scrollTo({ y: 0, animated: true });
+        contentHorizontalRef.current?.scrollTo({ x: 0, animated: true });
+        headerHorizontalRef.current?.scrollTo({ x: 0, animated: false });
+      }, 20);
+      return;
+    }
+
+    if (currentView === 'year') {
+      const newDate = new Date(baseDate);
+      newDate.setFullYear(newDate.getFullYear() + (direction === 'next' ? 1 : -1));
+      setCurrentDate(newDate);
+      currentDateRef.current = newDate;
+      return;
+    }
+  }, [currentView, addDays, addMonths, startOfWeek, events]);
+
   // Cambio de vista desde los botones superiores
-  // - Si elige 'day' volvemos al día de hoy
+  // - Si elige 'day' volvemos al d?a de hoy
   // - Reset de scrolls
   const onChangeView = useCallback((view: 'day'|'week'|'month'|'year') => {
-    // Prevenir cambiar de vista durante el tutorial si estamos en un paso que requiere acción
+    // Prevenir cambiar de vista durante el tutorial si estamos en un paso que requiere acci?n
     // EXCEPTO si el objetivo es cambiar de vista (switch-to-day-view, switch-to-month-view, switch-to-year-view)
     if (tutorialVisible && !tutorialCompleted) {
       const currentStepData = calendarTutorialSteps[tutorialStep] as any;
@@ -3130,7 +3051,7 @@ export default function CalendarView({}: CalendarViewProps) {
       if (currentStepData?.actionRequired && 
           currentStepData?.objective !== 'none' && 
           !allowedObjectives.includes(currentStepData?.objective)) {
-        console.log('⚠️ Tutorial: No se puede cambiar de vista durante este paso del tutorial');
+        console.log('[Calendar] Tutorial: No se puede cambiar de vista durante este paso del tutorial');
         return; // No permitir cambiar de vista
       }
     }
@@ -3166,7 +3087,7 @@ export default function CalendarView({}: CalendarViewProps) {
   const onResizeCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDuration: number) => {
     const eventId = eventToUpdate.id; // ID actual, ya sea temporal o real
 
-    console.log('🔧 onResizeCommit: INICIO', {
+    console.log('[Calendar] onResizeCommit: INICIO', {
       eventId,
       eventStartTime: eventToUpdate.startTime,
       eventDuration: eventToUpdate.duration,
@@ -3179,15 +3100,16 @@ export default function CalendarView({}: CalendarViewProps) {
       eventColor: eventToUpdate.color
     });
 
-    // 🔥 CRÍTICO: Preservar campos de subtareas del evento original
-    const originalSubtasksCount = eventToUpdate.subtasks_count;
-    const originalSubtasksCompletedCount = eventToUpdate.subtasks_completed_count;
+    // CR?TICO: Preservar campos de subtareas del evento original
+    const originalSubtasksTotal = eventToUpdate.subtasks_total ?? eventToUpdate.subtasks_count;
+    const originalSubtasksCompleted = eventToUpdate.subtasks_completed ?? eventToUpdate.subtasks_completed_count;
+    const originalSubtaskStatus = eventToUpdate.subtask_status ?? computeSubtaskStatus(originalSubtasksTotal, originalSubtasksCompleted);
 
-    // Detectar si el tutorial está esperando resize-event
+    // Detectar si el tutorial est? esperando resize-event
     if (tutorialVisible && !tutorialCompleted && calendarTutorialSteps && calendarTutorialSteps.length > tutorialStep) {
       const currentStepData = calendarTutorialSteps[tutorialStep] as any;
       if (currentStepData?.objective === 'resize-event' && tutorialObjectiveCompletedRef.current !== 'resize-event') {
-        console.log('✅ Objetivo cumplido: resize-event');
+        console.log('? Objetivo cumplido: resize-event');
         tutorialObjectiveCompletedRef.current = 'resize-event';
         if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
         tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -3195,31 +3117,34 @@ export default function CalendarView({}: CalendarViewProps) {
     }
 
     if (resizeLockRef.current.has(eventId)) {
-      console.log('⚠️ onResizeCommit: Evento ya está en proceso de resize, ignorando');
+      console.log('[Calendar] onResizeCommit: Evento ya est? en proceso de resize, ignorando');
       return;
     }
     resizeLockRef.current.add(eventId);
 
-    // 1. Actualización optimista de la UI (para que se vea instantáneo)
-    // 🔥 CRÍTICO: Preservar TODOS los campos del evento original (título, color, etc.)
+    // 1. Actualizaci?n optimista de la UI (para que se vea instant?neo)
+    // CR?TICO: Preservar TODOS los campos del evento original (t?tulo, color, etc.)
     setEvents(prev => {
       const oldEvent = prev.find(ev => ev.id === eventId);
       const updatedEvents = prev.map(ev => ev.id === eventId ? { 
         ...ev, 
         startTime: newStartTime, 
         duration: newDuration,
-        // 🔧 FIX: Preservar título y color explícitamente
+        // FIX: Preservar t?tulo y color expl?citamente
         title: eventToUpdate.title || ev.title,
         color: eventToUpdate.color || ev.color,
         description: eventToUpdate.description ?? ev.description,
         category: eventToUpdate.category || ev.category,
         // Preservar campos de subtareas
-        subtasks_count: originalSubtasksCount !== undefined ? originalSubtasksCount : ev.subtasks_count,
-        subtasks_completed_count: originalSubtasksCompletedCount !== undefined ? originalSubtasksCompletedCount : ev.subtasks_completed_count
+        subtasks_total: originalSubtasksTotal !== undefined ? originalSubtasksTotal : ev.subtasks_total,
+        subtasks_completed: originalSubtasksCompleted !== undefined ? originalSubtasksCompleted : ev.subtasks_completed,
+        subtask_status: originalSubtaskStatus || ev.subtask_status,
+        subtasks_count: originalSubtasksTotal !== undefined ? originalSubtasksTotal : ev.subtasks_count,
+        subtasks_completed_count: originalSubtasksCompleted !== undefined ? originalSubtasksCompleted : ev.subtasks_completed_count
       } : ev);
       
       if (oldEvent && oldEvent.duration !== newDuration) {
-        console.log('🔧 onResizeCommit: Duración actualizada en estado', {
+        console.log('[Calendar] onResizeCommit: Duraci?n actualizada en estado', {
           eventId,
           oldDuration: oldEvent.duration,
           newDuration
@@ -3229,12 +3154,12 @@ export default function CalendarView({}: CalendarViewProps) {
       return updatedEvents;
     });
 
-    // 🔧 FIX: Convertir newStartTime (en minutos desde userStartHour) a minutos desde START_HOUR para dateKeyToLocalDate
-    // newStartTime está en minutos desde userStartHour, necesitamos convertir a minutos desde START_HOUR
+    // FIX: Convertir newStartTime (en minutos desde userStartHour) a minutos desde START_HOUR para dateKeyToLocalDate
+    // newStartTime est? en minutos desde userStartHour, necesitamos convertir a minutos desde START_HOUR
     const startTimeFromStartHour = newStartTime + (userStartHour - START_HOUR) * 60;
     const endTimeFromStartHour = (newStartTime + newDuration) + (userStartHour - START_HOUR) * 60;
     
-    console.log('🔧 onResizeCommit: Conversión de tiempo', {
+    console.log('[Calendar] onResizeCommit: Conversi?n de tiempo', {
       eventId: eventToUpdate.id,
       newStartTime,
       newDuration,
@@ -3249,7 +3174,7 @@ export default function CalendarView({}: CalendarViewProps) {
     const startLocal = dateKeyToLocalDate(eventToUpdate.date, startTimeFromStartHour);
     const endLocal = dateKeyToLocalDate(eventToUpdate.date, endTimeFromStartHour);
     
-    console.log('🔧 onResizeCommit: Fechas UTC calculadas', {
+    console.log('[Calendar] onResizeCommit: Fechas UTC calculadas', {
       eventId: eventToUpdate.id,
       startLocal: startLocal.toISOString(),
       endLocal: endLocal.toISOString(),
@@ -3261,18 +3186,18 @@ export default function CalendarView({}: CalendarViewProps) {
 
 
     try {
-        // 🔍 DETECTAR SI ES INSTANCIA GENERADA DE SERIE RECURRENTE
+        // DETECTAR SI ES INSTANCIA GENERADA DE SERIE RECURRENTE
         const match = String(eventToUpdate.id).match(/^(\d+)_(\d{4}-\d{2}-\d{2})$/);
         const isGeneratedInstance = !!match;
         
 
         if (isGeneratedInstance) {
-            // 📝 CREAR OVERRIDE PARA INSTANCIA GENERADA
+            // CREAR OVERRIDE PARA INSTANCIA GENERADA
             
             const seriesId = parseInt(match[1], 10);
             
             // Calcular original_start_utc usando zona horaria de la serie
-            // 🔧 FIX: Convertir eventToUpdate.startTime (en minutos desde userStartHour) a minutos desde START_HOUR
+            // FIX: Convertir eventToUpdate.startTime (en minutos desde userStartHour) a minutos desde START_HOUR
             const originalStartTimeFromStartHour = eventToUpdate.startTime + (userStartHour - START_HOUR) * 60;
             const originalDate = eventToUpdate.date; // YYYY-MM-DD
             const originalStartLocal = dateKeyToLocalDate(originalDate, originalStartTimeFromStartHour);
@@ -3285,8 +3210,9 @@ export default function CalendarView({}: CalendarViewProps) {
             if (!calendarId) throw new Error('No calendars available');
 
             // Crear payload para override
-            // 🔥 CRÍTICO: No enviar color si el evento tiene subtareas (se maneja automáticamente)
-            const hasSubtasks = (originalSubtasksCount !== undefined && originalSubtasksCount > 0) || 
+            // CR?TICO: No enviar color si el evento tiene subtareas (se maneja autom?ticamente)
+            const hasSubtasks = (originalSubtasksTotal !== undefined && originalSubtasksTotal > 0) || 
+                               (eventToUpdate.subtasks_total !== undefined && eventToUpdate.subtasks_total > 0) ||
                                (eventToUpdate.subtasks_count !== undefined && eventToUpdate.subtasks_count > 0);
             
             const overridePayload: any = {
@@ -3306,13 +3232,46 @@ export default function CalendarView({}: CalendarViewProps) {
                 overridePayload.color = eventToUpdate.color;
             }
 
-            const createRes = await apiPostEvent(overridePayload);
-            const body = await createRes.json();
+            const existingOverride = findExistingOverride(seriesId, originalStartUtc);
 
-            if (createRes.ok && body?.data?.id) {
-                const overrideId = String(body.data.id);
+            if (existingOverride) {
+                const overrideId = String(existingOverride.id);
+                // Actualizar override existente en lugar de crear otro
+                const updateRes = await apiPutEventTimes(overrideId, startLocal.toISOString(), endLocal.toISOString());
+                if (!updateRes.ok) {
+                  throw new Error(`Override update failed: ${updateRes.status}`);
+                }
 
-                // 🔥 CRÍTICO: Migrar subtareas del evento original al override
+                // Reemplazar instancia generada por el override existente (evita duplicados)
+                setEvents(prev => {
+                  const withoutGenerated = prev.filter(e => e.id !== eventId);
+                  const updatedOverride: Event = {
+                    ...(existingOverride as Event),
+                    startTime: newStartTime,
+                    duration: newDuration,
+                    date: eventToUpdate.date,
+                    is_recurring: false,
+                    series_id: seriesId,
+                    original_start_utc: originalStartUtc,
+                    subtasks_total: originalSubtasksTotal ?? existingOverride.subtasks_total,
+                    subtasks_completed: originalSubtasksCompleted ?? existingOverride.subtasks_completed,
+                    subtask_status: originalSubtaskStatus ?? existingOverride.subtask_status,
+                    subtasks_count: originalSubtasksTotal ?? existingOverride.subtasks_count,
+                    subtasks_completed_count: originalSubtasksCompleted ?? existingOverride.subtasks_completed_count
+                  };
+                  const hasOverride = withoutGenerated.some(e => e.id === overrideId);
+                  return hasOverride
+                    ? withoutGenerated.map(e => (e.id === overrideId ? updatedOverride : e))
+                    : [...withoutGenerated, updatedOverride];
+                });
+            } else {
+                const createRes = await apiPostEvent(overridePayload);
+                const body = await createRes.json();
+
+                if (createRes.ok && body?.data?.id) {
+                    const overrideId = String(body.data.id);
+
+                // CR?TICO: Migrar subtareas del evento original al override
                 // Para instancias generadas, pasar el eventId original (instancia generada) para obtener estados de instancia
                 try {
                   const eventWithSeriesId = {
@@ -3332,31 +3291,34 @@ export default function CalendarView({}: CalendarViewProps) {
                   // Pasar el eventId original (instancia generada) para obtener subtareas con estados de instancia
                   await migrateSubtasks(eventId, overrideId, eventWithSeriesId, newEventWithSeriesId);
                 } catch (migrationError) {
-                  console.log('⚠️ Error migrando subtareas en resize:', migrationError);
+                  console.log('[Calendar] Error migrando subtareas en resize:', migrationError);
                 }
 
                 // Reemplazar la instancia temporal con el override del servidor
-                // 🔥 CRÍTICO: Preservar campos de subtareas y series_id al reemplazar
+                // CR?TICO: Preservar campos de subtareas y series_id al reemplazar
                 setEvents(prev => prev.map(e => 
                     e.id === eventId 
                         ? { 
                             ...e, 
                             id: overrideId, 
                             is_recurring: false,
-                            series_id: seriesId, // 🔧 FIX: Preservar series_id para que loadSubtasks detecte como instancia
-                            // Preservar campos de subtareas (se recargarán después)
-                            subtasks_count: originalSubtasksCount,
-                            subtasks_completed_count: originalSubtasksCompletedCount
+                            series_id: seriesId, // FIX: Preservar series_id para que loadSubtasks detecte como instancia
+                            // Preservar campos de subtareas (se recargar?n despu?s)
+                            subtasks_total: originalSubtasksTotal,
+                            subtasks_completed: originalSubtasksCompleted,
+                            subtask_status: originalSubtaskStatus,
+                            subtasks_count: originalSubtasksTotal,
+                            subtasks_completed_count: originalSubtasksCompleted
                           }
                         : e
                 ));
 
-                // 🔥 CRÍTICO: Recargar conteos de subtareas después de crear override
+                // CR?TICO: Recargar conteos de subtareas despu?s de crear override
                 setTimeout(async () => {
                   try {
                     // Obtener el evento actualizado para pasarlo a loadSubtasks
                     const currentEvent = eventsRef.current.find(e => e.id === overrideId);
-                    console.log('🔧 onResizeCommit - Recargando subtareas', {
+                    console.log('[Calendar] onResizeCommit - Recargando subtareas', {
                       overrideId,
                       hasSeriesId: !!currentEvent?.series_id,
                       seriesId: currentEvent?.series_id
@@ -3368,26 +3330,30 @@ export default function CalendarView({}: CalendarViewProps) {
                     // Esperar un momento para que el estado se actualice
                     await new Promise(resolve => setTimeout(resolve, 100));
                     // Actualizar el estado con los conteos actualizados desde el cache
-                    // Usar una función de actualización que lea el cache actual
+                    // Usar una funci?n de actualizaci?n que lea el cache actual
                     setEvents(prev => {
-                      // Leer el cache actual en el momento de la actualización
+                      // Leer el cache actual en el momento de la actualizaci?n
                       const currentCache = subtasksCache[overrideId];
                       if (currentCache) {
                         const total = currentCache.length;
                         const completed = currentCache.filter((st: any) => st.completed).length;
-                        console.log('🔧 onResizeCommit - Actualizando conteos de subtareas', {
+                        console.log('[Calendar] onResizeCommit - Actualizando conteos de subtareas', {
                           overrideId,
                           total,
                           completed,
                           seriesId: prev.find(e => e.id === overrideId)?.series_id
                         });
+                        const status = computeSubtaskStatus(total, completed);
                         return prev.map(e => {
                           if (e.id === overrideId) {
                             return {
                               ...e,
+                              subtasks_total: total,
+                              subtasks_completed: completed,
+                              subtask_status: status,
                               subtasks_count: total,
                               subtasks_completed_count: completed,
-                              // 🔧 FIX: Asegurar que series_id se preserve
+                              // FIX: Asegurar que series_id se preserve
                               series_id: e.series_id || seriesId
                             };
                           }
@@ -3397,24 +3363,26 @@ export default function CalendarView({}: CalendarViewProps) {
                       return prev;
                     });
                   } catch (error) {
-                    console.log('⚠️ Error recargando conteos de subtareas:', error);
+                    console.log('[Calendar] Error recargando conteos de subtareas:', error);
                   }
                 }, 500);
-            } else {
-                throw new Error(`Override creation failed: ${JSON.stringify(body)}`);
+                } else {
+                    throw new Error(`Override creation failed: ${JSON.stringify(body)}`);
+                }
             }
         } else {
-            // 🔄 FLUJO NORMAL: Evento existente en servidor
+            // FLUJO NORMAL: Evento existente en servidor
             const res = await apiPutEventTimes(eventId, startLocal.toISOString(), endLocal.toISOString());
 
             if (res.status === 404) {
-                // FALLBACK: El evento no existía en el servidor, lo creamos
+                // FALLBACK: El evento no exist?a en el servidor, lo creamos
                 const calJson = await apiGetCalendars();
                 const calendarId = calJson?.data?.[0]?.id;
                 if (!calendarId) throw new Error('No calendars available');
 
-                // 🔥 CRÍTICO: No enviar color si el evento tiene subtareas (se maneja automáticamente)
-                const hasSubtasks = (originalSubtasksCount !== undefined && originalSubtasksCount > 0) || 
+                // CR?TICO: No enviar color si el evento tiene subtareas (se maneja autom?ticamente)
+                const hasSubtasks = (originalSubtasksTotal !== undefined && originalSubtasksTotal > 0) || 
+                                   (eventToUpdate.subtasks_total !== undefined && eventToUpdate.subtasks_total > 0) ||
                                    (eventToUpdate.subtasks_count !== undefined && eventToUpdate.subtasks_count > 0);
                 
                 const payload: any = {
@@ -3435,25 +3403,28 @@ export default function CalendarView({}: CalendarViewProps) {
                 if (createRes.ok && body?.data?.id) {
                     const serverId = String(body.data.id);
 
-                    // Reemplazamos el ID temporal por el ID del servidor EN el evento que ya habíamos actualizado
-                    // 🔥 CRÍTICO: Preservar campos de subtareas
+                    // Reemplazamos el ID temporal por el ID del servidor EN el evento que ya hab?amos actualizado
+                    // CR?TICO: Preservar campos de subtareas
                     setEvents(prev => prev.map(e => (e.id === eventId ? { 
                       ...e, 
                       id: serverId,
-                      subtasks_count: originalSubtasksCount,
-                      subtasks_completed_count: originalSubtasksCompletedCount
+                      subtasks_total: originalSubtasksTotal,
+                      subtasks_completed: originalSubtasksCompleted,
+                      subtask_status: originalSubtaskStatus,
+                      subtasks_count: originalSubtasksTotal,
+                      subtasks_completed_count: originalSubtasksCompleted
                     } : e)));
 
                     // Reintentamos el guardado de la hora correcta con el nuevo ID
                     const retryRes = await apiPutEventTimes(serverId, startLocal.toISOString(), endLocal.toISOString());
                     if (!retryRes.ok) throw new Error('Failed to update after fallback create');
 
-                    // 🔥 CRÍTICO: Recargar conteos de subtareas después de actualizar
+                    // CR?TICO: Recargar conteos de subtareas despu?s de actualizar
                     setTimeout(async () => {
                       try {
                         await loadSubtasks(serverId, undefined, true);
                       } catch (error) {
-                        console.log('⚠️ Error recargando conteos de subtareas:', error);
+                        console.log('[Calendar] Error recargando conteos de subtareas:', error);
                       }
                     }, 500);
                 } else {
@@ -3462,12 +3433,12 @@ export default function CalendarView({}: CalendarViewProps) {
             } else if (!res.ok) {
                 throw new Error(`API error: ${res.status}`);
             } else {
-                // 🔥 CRÍTICO: Recargar conteos de subtareas después de actualizar evento existente
+                // CR?TICO: Recargar conteos de subtareas despu?s de actualizar evento existente
                 setTimeout(async () => {
                   try {
                     await loadSubtasks(eventId, eventToUpdate, true);
                   } catch (error) {
-                    console.log('⚠️ Error recargando conteos de subtareas:', error);
+                    console.log('[Calendar] Error recargando conteos de subtareas:', error);
                   }
                 }, 500);
             }
@@ -3479,17 +3450,18 @@ export default function CalendarView({}: CalendarViewProps) {
     } finally {
         resizeLockRef.current.delete(eventId);
     }
-  }, [migrateSubtasks, loadSubtasks, subtasksCache, tutorialVisible, tutorialCompleted, tutorialStep, handleTutorialNext, userStartHour]);
+  }, [migrateSubtasks, loadSubtasks, subtasksCache, tutorialVisible, tutorialCompleted, tutorialStep, handleTutorialNext, userStartHour, computeSubtaskStatus, findExistingOverride]);
 
   // Callback de commit desde bloque movible
   const onMoveCommit = useCallback(async (eventToUpdate: Event, newStartTime: number, newDate: string) => {
     const eventId = eventToUpdate.id;
 
-    // 🔥 CRÍTICO: Preservar campos de subtareas del evento original
-    const originalSubtasksCount = eventToUpdate.subtasks_count;
-    const originalSubtasksCompletedCount = eventToUpdate.subtasks_completed_count;
+    // CR?TICO: Preservar campos de subtareas del evento original
+    const originalSubtasksTotal = eventToUpdate.subtasks_total ?? eventToUpdate.subtasks_count;
+    const originalSubtasksCompleted = eventToUpdate.subtasks_completed ?? eventToUpdate.subtasks_completed_count;
+    const originalSubtaskStatus = eventToUpdate.subtask_status ?? computeSubtaskStatus(originalSubtasksTotal, originalSubtasksCompleted);
 
-    // Detectar si el tutorial está esperando drag-event
+    // Detectar si el tutorial est? esperando drag-event
     if (tutorialVisible && !tutorialCompleted && calendarTutorialSteps && calendarTutorialSteps.length > tutorialStep) {
       const currentStepData = calendarTutorialSteps[tutorialStep] as any;
       if (currentStepData?.objective === 'drag-event' && tutorialObjectiveCompletedRef.current !== 'drag-event') {
@@ -3504,21 +3476,21 @@ export default function CalendarView({}: CalendarViewProps) {
     }
     resizeLockRef.current.add(eventId);
 
-    // 🔧 FIX: Leer la duración actualizada del estado en lugar de usar eventToUpdate.duration
-    // Esto asegura que si hubo un resize antes del drag, se use la duración correcta
+    // FIX: Leer la duraci?n actualizada del estado en lugar de usar eventToUpdate.duration
+    // Esto asegura que si hubo un resize antes del drag, se use la duraci?n correcta
     const currentEvent = eventsRef.current.find(ev => ev.id === eventId);
     const currentDuration = currentEvent?.duration ?? eventToUpdate.duration;
     
     if (currentEvent && currentEvent.duration !== eventToUpdate.duration) {
-      console.log('🔧 onMoveCommit: Duración actualizada detectada', {
+      console.log('[Calendar] onMoveCommit: Duraci?n actualizada detectada', {
         eventId,
         oldDuration: eventToUpdate.duration,
         newDuration: currentEvent.duration
       });
     }
 
-    // 1. Actualización optimista de la UI
-    // 🔥 CRÍTICO: Preservar campos de subtareas en la actualización optimista
+    // 1. Actualizaci?n optimista de la UI
+    // CR?TICO: Preservar campos de subtareas en la actualizaci?n optimista
     setEvents(prev => prev.map(ev => 
       ev.id === eventId 
         ? { 
@@ -3526,21 +3498,24 @@ export default function CalendarView({}: CalendarViewProps) {
             startTime: newStartTime, 
             date: newDate,
             // Preservar campos de subtareas
-            subtasks_count: originalSubtasksCount !== undefined ? originalSubtasksCount : ev.subtasks_count,
-            subtasks_completed_count: originalSubtasksCompletedCount !== undefined ? originalSubtasksCompletedCount : ev.subtasks_completed_count
+            subtasks_total: originalSubtasksTotal !== undefined ? originalSubtasksTotal : ev.subtasks_total,
+            subtasks_completed: originalSubtasksCompleted !== undefined ? originalSubtasksCompleted : ev.subtasks_completed,
+            subtask_status: originalSubtaskStatus || ev.subtask_status,
+            subtasks_count: originalSubtasksTotal !== undefined ? originalSubtasksTotal : ev.subtasks_count,
+            subtasks_completed_count: originalSubtasksCompleted !== undefined ? originalSubtasksCompleted : ev.subtasks_completed_count
           }
         : ev
     ));
 
-    // Calcular nuevos timestamps UTC usando la duración actualizada
-    // 🔧 FIX: Convertir newStartTime (en minutos desde userStartHour) a minutos desde START_HOUR para dateKeyToLocalDate
+    // Calcular nuevos timestamps UTC usando la duraci?n actualizada
+    // FIX: Convertir newStartTime (en minutos desde userStartHour) a minutos desde START_HOUR para dateKeyToLocalDate
     const startTimeFromStartHour = newStartTime + (userStartHour - START_HOUR) * 60;
     const endTimeFromStartHour = (newStartTime + currentDuration) + (userStartHour - START_HOUR) * 60;
     
     const startLocal = dateKeyToLocalDate(newDate, startTimeFromStartHour);
     const endLocal = dateKeyToLocalDate(newDate, endTimeFromStartHour);
     
-    console.log('🔧 onMoveCommit: Calculando endLocal', {
+    console.log('[Calendar] onMoveCommit: Calculando endLocal', {
       eventId,
       newStartTime,
       currentDuration,
@@ -3557,7 +3532,7 @@ export default function CalendarView({}: CalendarViewProps) {
         const seriesId = parseInt(match[1], 10);
         
         // Calcular original_start_utc usando zona horaria correcta
-        // 🔧 FIX: Convertir eventToUpdate.startTime (en minutos desde userStartHour) a minutos desde START_HOUR
+        // FIX: Convertir eventToUpdate.startTime (en minutos desde userStartHour) a minutos desde START_HOUR
         const originalStartTimeFromStartHour = eventToUpdate.startTime + (userStartHour - START_HOUR) * 60;
         const originalDate = eventToUpdate.date; // YYYY-MM-DD
         const originalStartLocal = dateKeyToLocalDate(originalDate, originalStartTimeFromStartHour);
@@ -3568,8 +3543,9 @@ export default function CalendarView({}: CalendarViewProps) {
         const calendarId = calJson?.data?.[0]?.id;
         if (!calendarId) throw new Error('No calendars available');
 
-        // 🔥 CRÍTICO: No enviar color si el evento tiene subtareas (se maneja automáticamente)
-        const hasSubtasks = (originalSubtasksCount !== undefined && originalSubtasksCount > 0) || 
+        // CR?TICO: No enviar color si el evento tiene subtareas (se maneja autom?ticamente)
+        const hasSubtasks = (originalSubtasksTotal !== undefined && originalSubtasksTotal > 0) || 
+                           (eventToUpdate.subtasks_total !== undefined && eventToUpdate.subtasks_total > 0) ||
                            (eventToUpdate.subtasks_count !== undefined && eventToUpdate.subtasks_count > 0);
         
         const overridePayload: any = {
@@ -3589,13 +3565,44 @@ export default function CalendarView({}: CalendarViewProps) {
           overridePayload.color = eventToUpdate.color;
         }
 
-        const createRes = await apiPostEvent(overridePayload);
-        const body = await createRes.json();
+        const existingOverride = findExistingOverride(seriesId, originalStartUtc);
 
-        if (createRes.ok && body?.data?.id) {
-          const overrideId = String(body.data.id);
+        if (existingOverride) {
+          const overrideId = String(existingOverride.id);
+          const updateRes = await apiPutEventTimes(overrideId, startLocal.toISOString(), endLocal.toISOString());
+          if (!updateRes.ok) {
+            throw new Error(`Override update failed: ${updateRes.status}`);
+          }
 
-          // 🔥 CRÍTICO: Migrar subtareas del evento original al override
+          setEvents(prev => {
+            const withoutGenerated = prev.filter(e => e.id !== eventId);
+            const updatedOverride: Event = {
+              ...(existingOverride as Event),
+              startTime: newStartTime,
+              date: newDate,
+              duration: currentDuration,
+              is_recurring: false,
+              series_id: seriesId,
+              original_start_utc: originalStartUtc,
+              subtasks_total: originalSubtasksTotal ?? existingOverride.subtasks_total,
+              subtasks_completed: originalSubtasksCompleted ?? existingOverride.subtasks_completed,
+              subtask_status: originalSubtaskStatus ?? existingOverride.subtask_status,
+              subtasks_count: originalSubtasksTotal ?? existingOverride.subtasks_count,
+              subtasks_completed_count: originalSubtasksCompleted ?? existingOverride.subtasks_completed_count
+            };
+            const hasOverride = withoutGenerated.some(e => e.id === overrideId);
+            return hasOverride
+              ? withoutGenerated.map(e => (e.id === overrideId ? updatedOverride : e))
+              : [...withoutGenerated, updatedOverride];
+          });
+        } else {
+          const createRes = await apiPostEvent(overridePayload);
+          const body = await createRes.json();
+
+          if (createRes.ok && body?.data?.id) {
+            const overrideId = String(body.data.id);
+
+          // CR?TICO: Migrar subtareas del evento original al override
           // Para instancias generadas, pasar el eventId original (instancia generada) para obtener estados de instancia
           try {
             const eventWithSeriesId = {
@@ -3615,30 +3622,33 @@ export default function CalendarView({}: CalendarViewProps) {
             // Pasar el eventId original (instancia generada) para obtener subtareas con estados de instancia
             await migrateSubtasks(eventId, overrideId, eventWithSeriesId, newEventWithSeriesId);
           } catch (migrationError) {
-            console.log('⚠️ Error migrando subtareas en move:', migrationError);
+            console.log('[Calendar] Error migrando subtareas en move:', migrationError);
           }
 
-          // 🔥 CRÍTICO: Preservar campos de subtareas y series_id al reemplazar
+          // CR?TICO: Preservar campos de subtareas y series_id al reemplazar
           setEvents(prev => prev.map(e => 
             e.id === eventId 
               ? { 
                   ...e, 
                   id: overrideId, 
                   is_recurring: false,
-                  series_id: seriesId, // 🔧 FIX: Preservar series_id para que loadSubtasks detecte como instancia
-                  // Preservar campos de subtareas (se recargarán después)
-                  subtasks_count: originalSubtasksCount,
-                  subtasks_completed_count: originalSubtasksCompletedCount
+                  series_id: seriesId, // FIX: Preservar series_id para que loadSubtasks detecte como instancia
+                  // Preservar campos de subtareas (se recargar?n despu?s)
+                  subtasks_total: originalSubtasksTotal,
+                  subtasks_completed: originalSubtasksCompleted,
+                  subtask_status: originalSubtaskStatus,
+                  subtasks_count: originalSubtasksTotal,
+                  subtasks_completed_count: originalSubtasksCompleted
                 }
               : e
           ));
 
-          // 🔥 CRÍTICO: Recargar conteos de subtareas después de crear override
+          // CR?TICO: Recargar conteos de subtareas despu?s de crear override
           setTimeout(async () => {
             try {
               // Obtener el evento actualizado para pasarlo a loadSubtasks
               const currentEvent = eventsRef.current.find(e => e.id === overrideId);
-              console.log('🔧 onMoveCommit - Recargando subtareas', {
+              console.log('[Calendar] onMoveCommit - Recargando subtareas', {
                 overrideId,
                 hasSeriesId: !!currentEvent?.series_id,
                 seriesId: currentEvent?.series_id
@@ -3650,26 +3660,30 @@ export default function CalendarView({}: CalendarViewProps) {
               // Esperar un momento para que el estado se actualice
               await new Promise(resolve => setTimeout(resolve, 100));
               // Actualizar el estado con los conteos actualizados desde el cache
-              // Usar una función de actualización que lea el cache actual
+              // Usar una funci?n de actualizaci?n que lea el cache actual
               setEvents(prev => {
-                // Leer el cache actual en el momento de la actualización
+                // Leer el cache actual en el momento de la actualizaci?n
                 const currentCache = subtasksCache[overrideId];
                 if (currentCache) {
                   const total = currentCache.length;
                   const completed = currentCache.filter((st: any) => st.completed).length;
-                  console.log('🔧 onMoveCommit - Actualizando conteos de subtareas', {
+                  console.log('[Calendar] onMoveCommit - Actualizando conteos de subtareas', {
                     overrideId,
                     total,
                     completed,
                     seriesId: prev.find(e => e.id === overrideId)?.series_id
                   });
+                  const status = computeSubtaskStatus(total, completed);
                   return prev.map(e => {
                     if (e.id === overrideId) {
                       return {
                         ...e,
+                        subtasks_total: total,
+                        subtasks_completed: completed,
+                        subtask_status: status,
                         subtasks_count: total,
                         subtasks_completed_count: completed,
-                        // 🔧 FIX: Asegurar que series_id se preserve
+                        // FIX: Asegurar que series_id se preserve
                         series_id: e.series_id || seriesId
                       };
                     }
@@ -3679,11 +3693,12 @@ export default function CalendarView({}: CalendarViewProps) {
                 return prev;
               });
             } catch (error) {
-              console.log('⚠️ Error recargando conteos de subtareas:', error);
+              console.log('[Calendar] Error recargando conteos de subtareas:', error);
             }
           }, 500);
-        } else {
-          throw new Error(`Move override creation failed: ${JSON.stringify(body)}`);
+          } else {
+            throw new Error(`Move override creation failed: ${JSON.stringify(body)}`);
+          }
         }
       } else {
         // Evento existente - actualizar directamente
@@ -3695,8 +3710,9 @@ export default function CalendarView({}: CalendarViewProps) {
           const calendarId = calJson?.data?.[0]?.id;
           if (!calendarId) throw new Error('No calendars available');
 
-          // 🔥 CRÍTICO: No enviar color si el evento tiene subtareas (se maneja automáticamente)
-          const hasSubtasks = (originalSubtasksCount !== undefined && originalSubtasksCount > 0) || 
+          // CR?TICO: No enviar color si el evento tiene subtareas (se maneja autom?ticamente)
+          const hasSubtasks = (originalSubtasksTotal !== undefined && originalSubtasksTotal > 0) || 
+                             (eventToUpdate.subtasks_total !== undefined && eventToUpdate.subtasks_total > 0) ||
                              (eventToUpdate.subtasks_count !== undefined && eventToUpdate.subtasks_count > 0);
           
           const payload: any = {
@@ -3717,20 +3733,23 @@ export default function CalendarView({}: CalendarViewProps) {
 
           if (createRes.ok && body?.data?.id) {
             const serverId = String(body.data.id);
-            // 🔥 CRÍTICO: Preservar campos de subtareas
+            // CR?TICO: Preservar campos de subtareas
             setEvents(prev => prev.map(e => (e.id === eventId ? { 
               ...e, 
               id: serverId,
-              subtasks_count: originalSubtasksCount,
-              subtasks_completed_count: originalSubtasksCompletedCount
+              subtasks_total: originalSubtasksTotal,
+              subtasks_completed: originalSubtasksCompleted,
+              subtask_status: originalSubtaskStatus,
+              subtasks_count: originalSubtasksTotal,
+              subtasks_completed_count: originalSubtasksCompleted
             } : e)));
 
-            // 🔥 CRÍTICO: Recargar conteos de subtareas después de crear evento
+            // CR?TICO: Recargar conteos de subtareas despu?s de crear evento
             setTimeout(async () => {
               try {
                 await loadSubtasks(serverId, undefined, true);
               } catch (error) {
-                console.log('⚠️ Error recargando conteos de subtareas:', error);
+                console.log('[Calendar] Error recargando conteos de subtareas:', error);
               }
             }, 500);
           } else {
@@ -3739,12 +3758,12 @@ export default function CalendarView({}: CalendarViewProps) {
         } else if (!res.ok) {
           throw new Error(`API error: ${res.status}`);
         } else {
-          // 🔥 CRÍTICO: Recargar conteos de subtareas después de actualizar evento existente
+          // CR?TICO: Recargar conteos de subtareas despu?s de actualizar evento existente
           setTimeout(async () => {
             try {
               await loadSubtasks(eventId, eventToUpdate, true);
             } catch (error) {
-              console.log('⚠️ Error recargando conteos de subtareas:', error);
+              console.log('[Calendar] Error recargando conteos de subtareas:', error);
             }
           }, 500);
         }
@@ -3756,9 +3775,9 @@ export default function CalendarView({}: CalendarViewProps) {
     } finally {
       resizeLockRef.current.delete(eventId);
     }
-  }, [migrateSubtasks, loadSubtasks, subtasksCache, userStartHour]); // 🔥 CRÍTICO: Agregar dependencias necesarias
+  }, [migrateSubtasks, loadSubtasks, subtasksCache, userStartHour, computeSubtaskStatus, findExistingOverride]); // CR?TICO: Agregar dependencias necesarias
 
-  // Función para identificar el tipo de evento
+  // Funci?n para identificar el tipo de evento
   const getEventType = (event: Event): string => {
     // Instancia generada (cuadradito de serie)
     if (typeof event.id === 'string' && event.id.includes('_')) {
@@ -3775,13 +3794,13 @@ export default function CalendarView({}: CalendarViewProps) {
       return 'SERIE_ORIGINAL';
     }
     
-    // Evento único
+    // Evento ?nico
     return 'EVENTO_UNICO';
   };
 
-  // Callback para abrir modal al hacer click rápido en evento
+  // Callback para abrir modal al hacer click r?pido en evento
   const onQuickPress = useCallback((event: Event) => {
-    console.log('👆 onQuickPress - Event tapped', {
+    console.log('[Calendar] onQuickPress - Event tapped', {
       eventId: event.id,
       title: event.title,
       is_recurring: event.is_recurring,
@@ -3789,7 +3808,7 @@ export default function CalendarView({}: CalendarViewProps) {
       original_start_utc: event.original_start_utc
     });
     
-    // 🟣 TOUCH_EVENT - EventResizableBlock
+    // TOUCH_EVENT - EventResizableBlock
     const timestamp = new Date().toISOString();
 
     setSelectedEvent(event);
@@ -3800,33 +3819,33 @@ export default function CalendarView({}: CalendarViewProps) {
     setModalVisible(true);
     
     // Cargar subtareas del evento (siempre forzar reload para ver cambios recientes)
-    console.log('📋 onQuickPress - About to load subtasks', {
+    console.log('[Calendar] onQuickPress - About to load subtasks', {
       eventId: event.id,
       forceReload: true
     });
     loadSubtasks(event.id, event, true);
   }, [loadSubtasks]);
 
-  // ===== LÓGICA DEL TUTORIAL =====
-  // Función para verificar el estado del tutorial
+  // ===== L?GICA DEL TUTORIAL =====
+  // Funci?n para verificar el estado del tutorial
   const checkTutorialStatus = useCallback(async () => {
     try {
       const isCompleted = await tutorialService.isTutorialCompleted();
-      // console.log('📚 Tutorial: checkTutorialStatus - isCompleted:', isCompleted);
+      // console.log('[Calendar] Tutorial: checkTutorialStatus - isCompleted:', isCompleted);
       
       if (!isCompleted) {
         const savedStep = await tutorialService.getCurrentStep();
-        // console.log('📚 Tutorial: Restaurando paso:', savedStep);
+        // console.log('[Calendar] Tutorial: Restaurando paso:', savedStep);
         setTutorialStep(savedStep);
         setTutorialVisible(true);
         setTutorialCompleted(false);
       } else {
-        // console.log('📚 Tutorial: Ya completado, no mostrar');
+        // console.log('[Calendar] Tutorial: Ya completado, no mostrar');
         setTutorialCompleted(true);
         setTutorialVisible(false);
       }
     } catch (error) {
-      console.error('❌ Tutorial: Error en checkTutorialStatus:', error);
+      console.error('? Tutorial: Error en checkTutorialStatus:', error);
       // Si hay error, no mostrar tutorial
       setTutorialCompleted(true);
       setTutorialVisible(false);
@@ -3835,9 +3854,9 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // Verificar si el tutorial debe mostrarse al montar - SOLO UNA VEZ
   useEffect(() => {
-    // Delay más largo para asegurar que la UI esté completamente cargada
+    // Delay m?s largo para asegurar que la UI est? completamente cargada
     const timer = setTimeout(() => {
-      // console.log('📚 Tutorial: Iniciando verificación después de delay');
+      // console.log('[Calendar] Tutorial: Iniciando verificaci?n despu?s de delay');
       checkTutorialStatus();
     }, 1000); // 1 segundo de delay
     return () => clearTimeout(timer);
@@ -3846,7 +3865,7 @@ export default function CalendarView({}: CalendarViewProps) {
   // Verificar cuando la pantalla vuelve a estar en foco (cuando vuelves de configuraciones)
   useFocusEffect(
     useCallback(() => {
-      // console.log('📚 Tutorial: Pantalla en foco, verificando estado');
+      // console.log('[Calendar] Tutorial: Pantalla en foco, verificando estado');
       checkTutorialStatus();
     }, [checkTutorialStatus])
   );
@@ -3873,7 +3892,7 @@ export default function CalendarView({}: CalendarViewProps) {
 
   // Saltar el tutorial
   const handleTutorialSkip = useCallback(async () => {
-    console.log('🔘 Tutorial: handleTutorialSkip llamado');
+    console.log('[Calendar] Tutorial: handleTutorialSkip llamado');
     try {
       // Primero ocultar el tutorial inmediatamente
       setTutorialVisible(false);
@@ -3882,17 +3901,17 @@ export default function CalendarView({}: CalendarViewProps) {
       
       // Luego marcar como completado en storage
       await tutorialService.markTutorialCompleted();
-      console.log('✅ Tutorial: Tutorial saltado exitosamente');
+      console.log('? Tutorial: Tutorial saltado exitosamente');
     } catch (error) {
-      console.error('❌ Tutorial: Error al saltar tutorial:', error);
+      console.error('? Tutorial: Error al saltar tutorial:', error);
       // Incluso si hay error, asegurar que se oculte
       setTutorialVisible(false);
       setTutorialCompleted(true);
     }
   }, []);
 
-  // Detectar acciones del usuario para avanzar pasos automáticamente
-  // Usa el sistema de objetivos para solo avanzar cuando se cumple la acción correcta
+  // Detectar acciones del usuario para avanzar pasos autom?ticamente
+  // Usa el sistema de objetivos para solo avanzar cuando se cumple la acci?n correcta
   useEffect(() => {
     if (!tutorialVisible || tutorialCompleted) {
       tutorialObjectiveCompletedRef.current = null;
@@ -3907,14 +3926,14 @@ export default function CalendarView({}: CalendarViewProps) {
     
     const objective = currentStepData.objective;
     
-    // Si ya se completó este objetivo, no hacer nada
-    // Usar clave única por paso y objetivo para evitar conflictos
+    // Si ya se complet? este objetivo, no hacer nada
+    // Usar clave ?nica por paso y objetivo para evitar conflictos
     const objectiveKey = `${tutorialStep}-${objective}`;
     if (tutorialObjectiveCompletedRef.current === objectiveKey || tutorialObjectiveCompletedRef.current === objective) {
       return;
     }
     
-    // console.log('📚 Tutorial DEBUG: Paso actual:', {
+    // console.log('[Calendar] Tutorial DEBUG: Paso actual:', {
     //   step: tutorialStep,
     //   id: currentStepData.id,
     //   objective,
@@ -3924,9 +3943,9 @@ export default function CalendarView({}: CalendarViewProps) {
     // Solo avanzar cuando se cumple el objetivo correcto
     switch (objective) {
       case 'click-empty-cell':
-        // Solo avanzar si se abrió el modal al hacer clic en una celda vacía (no al editar un evento existente)
+        // Solo avanzar si se abri? el modal al hacer clic en una celda vac?a (no al editar un evento existente)
         if (modalVisible && !selectedEvent) {
-          console.log('✅ Objetivo cumplido: click-empty-cell');
+          console.log('? Objetivo cumplido: click-empty-cell');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -3936,7 +3955,7 @@ export default function CalendarView({}: CalendarViewProps) {
       case 'enter-event-name':
         // Avanzar cuando se ingresa cualquier nombre (no solo "ir al gimnasio")
         if (eventTitle.trim().length > 0) {
-          console.log('✅ Objetivo cumplido: enter-event-name');
+          console.log('? Objetivo cumplido: enter-event-name');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -3944,24 +3963,24 @@ export default function CalendarView({}: CalendarViewProps) {
         break;
         
       case 'press-create-button':
-        // Este se detecta cuando se cierra el modal después de presionar crear
-        // Se detecta en handleCloseModal o cuando modalVisible cambia a false después de guardar
+        // Este se detecta cuando se cierra el modal despu?s de presionar crear
+        // Se detecta en handleCloseModal o cuando modalVisible cambia a false despu?s de guardar
         break;
         
       case 'click-event-item':
         // Avanzar cuando se abre el modal al hacer clic en un evento existente
         if (modalVisible && selectedEvent) {
-          console.log('✅ Objetivo cumplido: click-event-item');
+          console.log('? Objetivo cumplido: click-event-item');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
-          // Dar más tiempo para que el modal se renderice completamente antes de avanzar
+          // Dar m?s tiempo para que el modal se renderice completamente antes de avanzar
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 300);
         }
         break;
         
       case 'open-recurrence-modal':
         if (recurrenceModalVisible) {
-          console.log('✅ Objetivo cumplido: open-recurrence-modal');
+          console.log('? Objetivo cumplido: open-recurrence-modal');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -3969,9 +3988,9 @@ export default function CalendarView({}: CalendarViewProps) {
         break;
         
       case 'enable-recurrence':
-        // Verificar que la recurrencia esté habilitada en el modal
+        // Verificar que la recurrencia est? habilitada en el modal
         if (recurrenceModalVisible && recurrenceConfig.enabled) {
-          console.log('✅ Objetivo cumplido: enable-recurrence');
+          console.log('? Objetivo cumplido: enable-recurrence');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -3981,7 +4000,7 @@ export default function CalendarView({}: CalendarViewProps) {
       case 'select-weekly-mode':
         // Verificar que el modo sea semanal
         if (recurrenceModalVisible && recurrenceConfig.enabled && recurrenceConfig.mode === 'weekly') {
-          console.log('✅ Objetivo cumplido: select-weekly-mode');
+          console.log('? Objetivo cumplido: select-weekly-mode');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -3989,13 +4008,13 @@ export default function CalendarView({}: CalendarViewProps) {
         break;
         
       case 'select-recurrence-days':
-        // Verificar que se hayan seleccionado los días específicos: Lunes (MO), Martes (TU), Jueves (TH), Viernes (FR)
+        // Verificar que se hayan seleccionado los d?as espec?ficos: Lunes (MO), Martes (TU), Jueves (TH), Viernes (FR)
         const requiredDays = ['MO', 'TU', 'TH', 'FR'];
         if (recurrenceConfig.enabled && 
             recurrenceConfig.mode === 'weekly' && 
             recurrenceConfig.weekDays.length >= 4 &&
             requiredDays.every(day => recurrenceConfig.weekDays.includes(day))) {
-          console.log('✅ Objetivo cumplido: select-recurrence-days');
+          console.log('? Objetivo cumplido: select-recurrence-days');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -4003,16 +4022,16 @@ export default function CalendarView({}: CalendarViewProps) {
         break;
         
       case 'save-recurrence':
-        // Se detecta cuando se cierra el modal de recurrencia después de guardar
+        // Se detecta cuando se cierra el modal de recurrencia despu?s de guardar
         // Se detecta cuando recurrenceModalVisible cambia a false y hay recurrencia configurada
         break;
         
       case 'add-subtasks':
         // Verificar que se hayan agregado al menos 2 subtareas
-        // Ya no requiere textos específicos, solo que haya 2 o más subtareas
-        // También verificar que el modal esté visible (estamos en el paso correcto)
+        // Ya no requiere textos espec?ficos, solo que haya 2 o m?s subtareas
+        // Tambi?n verificar que el modal est? visible (estamos en el paso correcto)
         if (modalVisible && subtasks.length >= 2) {
-          console.log('✅ Objetivo cumplido: add-subtasks (2 o más subtareas agregadas)');
+          console.log('? Objetivo cumplido: add-subtasks (2 o m?s subtareas agregadas)');
           tutorialObjectiveCompletedRef.current = `${tutorialStep}-${objective}`;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -4020,16 +4039,16 @@ export default function CalendarView({}: CalendarViewProps) {
         break;
         
       case 'save-event-with-subtasks':
-        // Se detecta cuando se guarda el evento después de agregar subtareas
+        // Se detecta cuando se guarda el evento despu?s de agregar subtareas
         // Se detecta en handleSaveEvent
         break;
         
       case 'complete-subtasks':
-        // Solo avanzar si todas las subtareas están completadas Y se está editando (no solo marcando)
-        // El tutorial debe avanzar cuando se cierra el modal después de completar las subtareas
-        // Esto se detecta cuando modalVisible cambia a false y todas las subtareas están completadas
+        // Solo avanzar si todas las subtareas est?n completadas Y se est? editando (no solo marcando)
+        // El tutorial debe avanzar cuando se cierra el modal despu?s de completar las subtareas
+        // Esto se detecta cuando modalVisible cambia a false y todas las subtareas est?n completadas
         if (subtasks.length > 0 && subtasks.every(st => st.completed) && !modalVisible) {
-          console.log('✅ Objetivo cumplido: complete-subtasks (todas completadas y modal cerrado)');
+          console.log('? Objetivo cumplido: complete-subtasks (todas completadas y modal cerrado)');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -4045,13 +4064,13 @@ export default function CalendarView({}: CalendarViewProps) {
         break;
         
       case 'long-press-event':
-        // Se detecta cuando se muestra el menú contextual (long press)
+        // Se detecta cuando se muestra el men? contextual (long press)
         break;
         
       case 'switch-to-day-view':
         // Se detecta cuando currentView cambia a 'day'
         if (currentView === 'day') {
-          console.log('✅ Objetivo cumplido: switch-to-day-view');
+          console.log('? Objetivo cumplido: switch-to-day-view');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -4061,7 +4080,7 @@ export default function CalendarView({}: CalendarViewProps) {
       case 'switch-to-month-view':
         // Se detecta cuando currentView cambia a 'month'
         if (currentView === 'month') {
-          console.log('✅ Objetivo cumplido: switch-to-month-view');
+          console.log('? Objetivo cumplido: switch-to-month-view');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -4071,7 +4090,7 @@ export default function CalendarView({}: CalendarViewProps) {
       case 'switch-to-year-view':
         // Se detecta cuando currentView cambia a 'year'
         if (currentView === 'year') {
-          console.log('✅ Objetivo cumplido: switch-to-year-view');
+          console.log('? Objetivo cumplido: switch-to-year-view');
           tutorialObjectiveCompletedRef.current = objective;
           if (tutorialNextTimeoutRef.current) clearTimeout(tutorialNextTimeoutRef.current);
           tutorialNextTimeoutRef.current = setTimeout(() => handleTutorialNext(), 100);
@@ -4079,7 +4098,7 @@ export default function CalendarView({}: CalendarViewProps) {
         break;
         
       default:
-        // Sin objetivo, no avanzar automáticamente
+        // Sin objetivo, no avanzar autom?ticamente
         break;
     }
   }, [tutorialVisible, tutorialStep, modalVisible, selectedEvent, eventTitle, recurrenceModalVisible, subtasks, recurrenceConfig, handleTutorialNext, tutorialCompleted, currentView]);
@@ -4098,7 +4117,7 @@ export default function CalendarView({}: CalendarViewProps) {
               onPress={() => onChangeView(view)}
             >
               <Text style={[styles.filterText, currentView === view && styles.activeFilterText]}>
-                {view === 'day' ? 'Día' : view === 'week' ? 'Semana' : view === 'month' ? 'Mes' : 'Año'}
+                {view === 'day' ? 'D?a' : view === 'week' ? 'Semana' : view === 'month' ? 'Mes' : 'A?o'}
               </Text>
             </TouchableOpacity>
           ))}
@@ -4106,25 +4125,25 @@ export default function CalendarView({}: CalendarViewProps) {
 
         <View style={styles.dateNavigation}>
           <TouchableOpacity onPress={() => navigateDate('prev')}>
-            <Text style={styles.navButton}>‹</Text>
+            <Text style={styles.navButton}>?</Text>
           </TouchableOpacity>
           <Text style={styles.currentDate}>{formatHeaderDate()}</Text>
           <TouchableOpacity onPress={() => navigateDate('next')}>
-            <Text style={styles.navButton}>›</Text>
+            <Text style={styles.navButton}>?</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={refreshSubtasksColors} style={{
-            display: 'none' // Ocultar visualmente el botón pero mantener la funcionalidad
+            display: 'none' // Ocultar visualmente el bot?n pero mantener la funcionalidad
           }}>
             <Text style={{
               fontSize: 18, 
               fontWeight: 'bold', 
               color: Colors.light.tint 
-            }}>↻</Text>
+            }}>?</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Header de días (si no es month ni year). En semana sincronizamos el scroll horizontal del header */}
+      {/* Header de d?as (si no es month ni year). En semana sincronizamos el scroll horizontal del header */}
       {currentView !== 'month' && currentView !== 'year' && (
         <View style={styles.weekHeader}>
           <View style={styles.timeColumn} />
@@ -4234,7 +4253,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 })}
               </View>
 
-              {/* Contenido de la grilla - solo un día */}
+              {/* Contenido de la grilla - solo un d?a */}
               <View style={{ position: 'absolute', left: 60, top: 0, width: getCellWidth(), height: timeSlots.length * CELL_HEIGHT }}>
                 {timeSlots.map((time, timeIndex) => {
                   const dateKey = toDateKey(currentDate);
@@ -4246,7 +4265,7 @@ export default function CalendarView({}: CalendarViewProps) {
                   const currentHour = now.getHours();
                   const currentMinute = now.getMinutes();
                   const currentTimeInMinutes = currentHour * 60 + currentMinute;
-                  const slotStartTime = START_HOUR * 60 + (timeIndex * 30);
+                  const slotStartTime = userStartHour * 60 + (timeIndex * 30);
                   const slotEndTime = slotStartTime + 30;
                   const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
                   
@@ -4265,7 +4284,7 @@ export default function CalendarView({}: CalendarViewProps) {
                         event && pressed && { opacity: 1 } // Mantener opacidad constante cuando hay evento
                       ]}
                       onPress={(e) => {
-                        console.log('👆 CALENDAR DEBUG: Click en celda (día):', {
+                        console.log('[Calendar] CALENDAR DEBUG: Click en celda (d?a):', {
                           timeIndex,
                           locationX: e.nativeEvent.locationX,
                           locationY: e.nativeEvent.locationY,
@@ -4289,7 +4308,7 @@ export default function CalendarView({}: CalendarViewProps) {
                           setSelectedCell({ dayIndex: 0, timeIndex, startTime: timeIndex * 30 });
                           setModalVisible(true);
                         } else {
-                          // 🔧 FIX: Si hubo long press activo en este evento, no abrir modal al soltar
+                          // FIX: Si hubo long press activo en este evento, no abrir modal al soltar
                           if (longPressActiveRef.current[event.id]) {
                             return;
                           }
@@ -4297,9 +4316,22 @@ export default function CalendarView({}: CalendarViewProps) {
                           onQuickPress(event);
                         }
                       }}
-                      onLongPress={() => {
-                        // 🎯 LONG PRESS para eventos en vista de día
+                      onPressIn={() => {
                         if (event) {
+                          markEventPressIn(event.id);
+                        }
+                      }}
+                      onPressOut={() => {
+                        if (event) {
+                          markEventPressOut(event.id);
+                        }
+                      }}
+                      onLongPress={() => {
+                        // LONG PRESS para eventos en vista de d?a
+                        if (event) {
+                          if (!shouldAllowLongPress(event.id, 1900)) {
+                            return;
+                          }
                           // Usar el handler del EventResizableBlock si existe
                           const handler = eventLongPressHandlers[event.id];
                           if (handler) {
@@ -4307,10 +4339,10 @@ export default function CalendarView({}: CalendarViewProps) {
                           }
                         }
                       }}
-                      delayLongPress={1500}
+                      delayLongPress={2000}
                     >
                       {(() => {
-                        // 🔧 FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
+                        // FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
                         if (event) {
                           return (
                             <EventResizableBlock 
@@ -4329,7 +4361,7 @@ export default function CalendarView({}: CalendarViewProps) {
                           );
                         }
                         
-                        // 🔧 FIX: Buscar eventos que ocupan esta celda pero empiezan antes
+                        // FIX: Buscar eventos que ocupan esta celda pero empiezan antes
                         let occupyingEvent = null;
                         let isFirstCell = false;
                         let isLastCell = false;
@@ -4345,14 +4377,14 @@ export default function CalendarView({}: CalendarViewProps) {
                             occupyingEvent = checkEvent;
                             // Verificar si esta es la primera celda del evento
                             isFirstCell = (checkEvent.startTime === startTime);
-                            // Verificar si esta es la última celda del evento
+                            // Verificar si esta es la ?ltima celda del evento
                             const eventEndTime = checkEvent.startTime + checkEvent.duration;
                             isLastCell = (eventEndTime > startTime && eventEndTime <= startTime + 30);
                             break;
                           }
                         }
                         
-                        // 🔧 FIX: Renderizar drag handler en celdas intermedias
+                        // FIX: Renderizar drag handler en celdas intermedias
                         if (occupyingEvent && !isFirstCell && !isLastCell) {
                           return (
                             <EventResizableBlock 
@@ -4373,7 +4405,7 @@ export default function CalendarView({}: CalendarViewProps) {
                           );
                         }
                         
-                        // 🔧 FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
+                        // FIX: Renderizar bloque extendido SOLO en la ?ltima celda para el handler de abajo
                         if (occupyingEvent && !isFirstCell && isLastCell) {
                           return (
                             <EventResizableBlock 
@@ -4401,7 +4433,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 })}
               </View>
 
-              {/* Fondo del grid para día */}
+              {/* Fondo del grid para d?a */}
               <View style={{ marginLeft: 60 }}>
                 <GridBackground 
                   width={getCellWidth()} 
@@ -4473,7 +4505,7 @@ export default function CalendarView({}: CalendarViewProps) {
                 cellHeight={CELL_HEIGHT} 
               />
               
-              {/* Contenido de días horizontal (scrollable) */}
+              {/* Contenido de d?as horizontal (scrollable) */}
               <ScrollView
                 horizontal
                 ref={contentHorizontalRef}
@@ -4490,7 +4522,7 @@ export default function CalendarView({}: CalendarViewProps) {
                     const currentHour = now.getHours();
                     const currentMinute = now.getMinutes();
                     const currentTimeInMinutes = currentHour * 60 + currentMinute;
-                    const slotStartTime = START_HOUR * 60 + (timeIndex * 30);
+                    const slotStartTime = userStartHour * 60 + (timeIndex * 30);
                     const slotEndTime = slotStartTime + 30;
                     const isCurrentHour = currentTimeInMinutes >= slotStartTime && currentTimeInMinutes < slotEndTime;
                     
@@ -4526,10 +4558,47 @@ export default function CalendarView({}: CalendarViewProps) {
                                 styles.cellTouchable,
                                 pressed && { opacity: 1 } // Mantener opacidad constante
                               ]}
+                              onPressIn={() => {
+                                // Registrar press para long press correcto
+                                let pressEvent = event;
+                                if (!pressEvent) {
+                                  for (let i = 0; i < 48; i++) {
+                                    const checkTime = startTime - (i * 30);
+                                    if (checkTime < 0) break;
+                                    const checkKey = `${dateKey}-${checkTime}`;
+                                    const checkEvent = eventsByCell[checkKey];
+                                    if (checkEvent && checkEvent.startTime <= startTime && (checkEvent.startTime + checkEvent.duration) > startTime) {
+                                      pressEvent = checkEvent;
+                                      break;
+                                    }
+                                  }
+                                }
+                                if (pressEvent) {
+                                  markEventPressIn(pressEvent.id);
+                                }
+                              }}
+                              onPressOut={() => {
+                                let pressEvent = event;
+                                if (!pressEvent) {
+                                  for (let i = 0; i < 48; i++) {
+                                    const checkTime = startTime - (i * 30);
+                                    if (checkTime < 0) break;
+                                    const checkKey = `${dateKey}-${checkTime}`;
+                                    const checkEvent = eventsByCell[checkKey];
+                                    if (checkEvent && checkEvent.startTime <= startTime && (checkEvent.startTime + checkEvent.duration) > startTime) {
+                                      pressEvent = checkEvent;
+                                      break;
+                                    }
+                                  }
+                                }
+                                if (pressEvent) {
+                                  markEventPressOut(pressEvent.id);
+                                }
+                              }}
                               onPress={() => {
-                              // 🟣 TOUCH_EVENT - WeekViewCell
+                              // TOUCH_EVENT - WeekViewCell
                               const timestamp = new Date().toISOString();
-                              // 🔧 FIX: Verificar si hay un evento que ocupa esta celda
+                              // FIX: Verificar si hay un evento que ocupa esta celda
                               let hasOccupyingEvent = !!event;
                               let occupyingEvent = event;
                               
@@ -4551,13 +4620,13 @@ export default function CalendarView({}: CalendarViewProps) {
                               
                               
                               
-                              // 🔧 FIX: Solo ejecutar handleCellPress si NO hay evento ocupando esta celda
+                              // FIX: Solo ejecutar handleCellPress si NO hay evento ocupando esta celda
                               if (!hasOccupyingEvent) {
                                 handleCellPress(dayIndex, timeIndex);
                               } else {
-                                // 🔧 FIX: Si hay un evento ocupando la celda, abrir su modal
+                                // FIX: Si hay un evento ocupando la celda, abrir su modal
                                 if (occupyingEvent) {
-                                  // 🔧 FIX: Si hubo long press activo en este evento, no abrir modal al soltar
+                                  // FIX: Si hubo long press activo en este evento, no abrir modal al soltar
                                   if (longPressActiveRef.current[occupyingEvent.id]) {
                                     return;
                                   }
@@ -4566,7 +4635,7 @@ export default function CalendarView({}: CalendarViewProps) {
                               }
                             }}
                             onLongPress={() => {
-                              // 🎯 LONG PRESS para eventos extendidos
+                              // LONG PRESS para eventos extendidos
                               let hasOccupyingEvent = !!event;
                               let occupyingEvent = event;
                               
@@ -4587,7 +4656,10 @@ export default function CalendarView({}: CalendarViewProps) {
                               }
                               
                               if (hasOccupyingEvent && occupyingEvent) {
-                                console.log('🎯 LONG PRESS DETECTED - Extended Event:', occupyingEvent.title, 'ID:', occupyingEvent.id);
+                                if (!shouldAllowLongPress(occupyingEvent.id, 1900)) {
+                                  return;
+                                }
+                                console.log('[Calendar] LONG PRESS DETECTED - Extended Event:', occupyingEvent.title, 'ID:', occupyingEvent.id);
                                 
                                 // Usar el handler del EventResizableBlock si existe
                                 const handler = eventLongPressHandlers[occupyingEvent.id];
@@ -4596,10 +4668,10 @@ export default function CalendarView({}: CalendarViewProps) {
                                 }
                               }
                             }}
-                            delayLongPress={1500}
+                            delayLongPress={2000}
                           >
                             {(() => {
-                              // 🔧 FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
+                              // FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
                               if (event) {
                                 return (
                                   <EventResizableBlock 
@@ -4618,7 +4690,7 @@ export default function CalendarView({}: CalendarViewProps) {
                                 );
                               }
                               
-                              // 🔧 FIX: Buscar eventos que ocupan esta celda pero empiezan antes
+                              // FIX: Buscar eventos que ocupan esta celda pero empiezan antes
                               let occupyingEvent = null;
                               let isFirstCell = false;
                               let isLastCell = false;
@@ -4633,17 +4705,17 @@ export default function CalendarView({}: CalendarViewProps) {
                                   occupyingEvent = checkEvent;
                                   // Verificar si esta es la primera celda del evento
                                   isFirstCell = (checkEvent.startTime === startTime);
-                                  // Verificar si esta es la última celda del evento
-                                  // El evento termina en esta celda si el endTime está dentro de este slot
+                                  // Verificar si esta es la ?ltima celda del evento
+                                  // El evento termina en esta celda si el endTime est? dentro de este slot
                                   const eventEndTime = checkEvent.startTime + checkEvent.duration;
-                                  // Esta es la última celda si el evento termina en este slot o en el siguiente
+                                  // Esta es la ?ltima celda si el evento termina en este slot o en el siguiente
                                   // Pero el evento visualmente ocupa hasta el final de este slot
                                   isLastCell = (eventEndTime > startTime && eventEndTime <= startTime + 30);
                                   break;
                                 }
                               }
                               
-                              // 🔧 FIX: Renderizar drag handler en celdas intermedias
+                              // FIX: Renderizar drag handler en celdas intermedias
                               if (occupyingEvent && !isFirstCell && !isLastCell) {
                                 // Renderizar EventResizableBlock solo con drag handler en celdas intermedias
                                 return (
@@ -4665,10 +4737,10 @@ export default function CalendarView({}: CalendarViewProps) {
                                 );
                               }
                               
-                              // 🔧 FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
+                              // FIX: Renderizar bloque extendido SOLO en la ?ltima celda para el handler de abajo
                               if (occupyingEvent && !isFirstCell && isLastCell) {
                                 // Debug log comentado - Extended Block
-                                // console.log('🔵 DEBUG - Extended Block (LAST CELL):', {
+                                // console.log('[Calendar] DEBUG - Extended Block (LAST CELL):', {
                                 //   eventId: occupyingEvent.id,
                                 //   eventTitle: occupyingEvent.title,
                                 //   startTime,
@@ -4680,7 +4752,7 @@ export default function CalendarView({}: CalendarViewProps) {
                                 //   eventEndTime: occupyingEvent.startTime + occupyingEvent.duration
                                 // });
                                 
-                                // Renderizar EventResizableBlock SOLO para el handler de abajo en la última celda
+                                // Renderizar EventResizableBlock SOLO para el handler de abajo en la ?ltima celda
                                 // Usamos el mismo evento pero solo renderizamos el handler de abajo
                                 return (
                                   <EventResizableBlock 
@@ -4740,6 +4812,7 @@ export default function CalendarView({}: CalendarViewProps) {
         selectedEvent={selectedEvent}
         onDeleteEvent={handleDeleteEvent}
         selectedCell={selectedCell}
+        selectedMonthCell={selectedMonthCell}
         tutorialVisible={tutorialVisible && !tutorialCompleted}
         tutorialStep={tutorialStep}
         tutorialSteps={calendarTutorialSteps}
@@ -4771,7 +4844,7 @@ export default function CalendarView({}: CalendarViewProps) {
         alarmOption={alarmOption}
       />
 
-      {/* Modal de Repetición */}
+      {/* Modal de Repetici?n */}
       <Modal
         visible={recurrenceModalVisible}
         animationType="slide"
@@ -4800,7 +4873,7 @@ export default function CalendarView({}: CalendarViewProps) {
         />
       </Modal>
 
-      {/* Modal de confirmación de borrado */}
+      {/* Modal de confirmaci?n de borrado */}
       <DeleteModal
         visible={deleteModalVisible}
         onClose={() => setDeleteModalVisible(false)}
@@ -4836,7 +4909,7 @@ export default function CalendarView({}: CalendarViewProps) {
 
     </View>
     
-    {/* Modal de celebración de días consecutivos - Componente separado */}
+    {/* Modal de celebraci?n de d?as consecutivos - Componente separado */}
     <ConsecutiveDaysCelebration
       visible={showConsecutiveDaysModal}
       consecutiveDaysCount={consecutiveDaysCount}
@@ -4847,7 +4920,7 @@ export default function CalendarView({}: CalendarViewProps) {
   );
 }
 
-// Componente separado para el modal de celebración - Similar a TutorialOverlay
+// Componente separado para el modal de celebraci?n - Similar a TutorialOverlay
 function ConsecutiveDaysCelebration({ 
   visible, 
   consecutiveDaysCount, 
@@ -4878,869 +4951,17 @@ function ConsecutiveDaysCelebration({
             }
           ]}
         >
-          <Text style={celebrationStyles.emoji}>🎉</Text>
-          <Text style={celebrationStyles.title}>¡Racha de días consecutivos!</Text>
+          <Text style={celebrationStyles.emoji}>*</Text>
+          <Text style={celebrationStyles.title}>?Racha de d?as consecutivos!</Text>
           <Text style={celebrationStyles.number}>
-            {consecutiveDaysCount} {consecutiveDaysCount === 1 ? 'día' : 'días'}
+            {consecutiveDaysCount} {consecutiveDaysCount === 1 ? 'd?a' : 'd?as'}
           </Text>
-          <Text style={celebrationStyles.subtitle}>Sigue así, ¡estás haciendo un gran trabajo!</Text>
+          <Text style={celebrationStyles.subtitle}>Sigue as?, ?est?s haciendo un gran trabajo!</Text>
         </Animated.View>
       </View>
     </Modal>
   );
 }
 
-// Estilos separados para el modal de celebración
-const celebrationStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  content: {
-    backgroundColor: 'white',
-    borderRadius: 20,
-    padding: 32,
-    alignItems: 'center',
-    minWidth: 280,
-    maxWidth: '85%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 10,
-  },
-  emoji: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: Colors.light.text,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  number: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: Colors.light.tint,
-    marginBottom: 12,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Colors.light.text,
-    opacity: 0.7,
-    textAlign: 'center',
-  },
-});
 
-// ===== ESTILOS =====
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.light.background },
-  header: { backgroundColor: Colors.light.background, borderBottomWidth: 1, borderBottomColor: '#e0e0e0', paddingVertical: 12 },
-  viewFilters: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 12 },
-  filterButton: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f5f5f5' },
-  activeFilterButton: { backgroundColor: Colors.light.tint },
-  filterText: { fontSize: 14, fontWeight: '500', color: Colors.light.text },
-  activeFilterText: { color: 'white' },
-  dateNavigation: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
-  navButton: { fontSize: 24, fontWeight: 'bold', color: Colors.light.tint, paddingHorizontal: 16 },
-  currentDate: { fontSize: 16, fontWeight: '600', color: Colors.light.text },
-  weekHeader: { flexDirection: 'row', backgroundColor: Colors.light.background, borderBottomWidth: 1, borderBottomColor: '#e0e0e0', paddingVertical: 12 },
-  timeColumn: { width: 60, alignItems: 'center', justifyContent: 'center' },
-  monthRow: { flexDirection: 'row', height: CELL_HEIGHT },
-  weekContainer: { flexDirection: 'row', flex: 1 },
-  dayContainer: { flexDirection: 'row', flex: 1 },
-  fixedTimeColumn: { width: 60, backgroundColor: '#f8f9fa', borderRightWidth: 1, borderRightColor: '#e0e0e0' },
-  weekContent: { flex: 1 },
-  dayHeader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  gridCell: { position: 'absolute', borderWidth: 0.5, borderColor: '#e0e0e0', backgroundColor: 'transparent' },
-  currentHourCell: { backgroundColor: 'rgba(107, 83, 226, 0.1)' },
-  currentTimeLine: { position: 'absolute', height: 2, backgroundColor: '#ff4444', zIndex: 10 },
-  dayText: { fontSize: 14, fontWeight: '600', color: Colors.light.tint },
-  calendarContainer: { flex: 1 },
-  timeRow: { flexDirection: 'row', height: CELL_HEIGHT },
-  timeText: { fontSize: 12, color: Colors.light.text, textAlign: 'center' },
-  cell: { flex: 1, borderRightWidth: 0.5, borderRightColor: '#f0f0f0', position: 'relative' },
-  cellTouchable: { flex: 1, position: 'relative' },
-  todayCell: { position: 'relative' },
-  todayLine: {
-    position: 'absolute',
-    top: 0,
-    left: '50%',
-    width: 2,
-    height: '100%',
-    backgroundColor: 'rgba(107, 83, 226, 0.3)',
-    zIndex: 1001
-  },
-  currentHourLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: 'rgba(107, 83, 226, 0.3)',
-    zIndex: 1001
-  },
-  todayHeader: { backgroundColor: '#6b53e2', borderRadius: 8, marginHorizontal: 2, paddingVertical: 1 },
-  todayHeaderText: { color: 'white', fontWeight: '700' },
-  // Estilos para vista de año
-  yearContainer: { flex: 1, backgroundColor: Colors.light.background },
-  yearScrollContent: { paddingHorizontal: 20, paddingVertical: 20, paddingBottom: 40 }, // Más padding abajo para evitar que se corte
-  yearView: { flex: 1 },
-  monthsBarContainer: {
-    position: 'relative',
-    width: '100%',
-  },
-  monthsBar: { 
-    flexDirection: 'row',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    overflow: 'hidden',
-    marginBottom: 60, // Espacio para las líneas de objetivos
-    width: '100%',
-    minWidth: 1800, // 12 meses * 150px mínimo cada uno (para nombres largos)
-  },
-  monthSegment: {
-    flex: 1, // Cada mes ocupa el mismo espacio
-    minWidth: 150, // Ancho mínimo para nombres largos como "Septiembre"
-    paddingVertical: 15,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#e0e0e0',
-    minHeight: 60,
-  },
-  monthLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.light.text,
-    textAlign: 'center',
-    width: '100%',
-    overflow: 'hidden',
-  },
-  objectivesContainer: {
-    position: 'absolute',
-    top: 75, // Debajo de la barra de meses
-    left: 0,
-    right: 0,
-    height: 40,
-    width: '100%',
-  },
-  objectiveLine: {
-    position: 'absolute',
-    height: 10,
-    borderRadius: 5,
-    top: '50%',
-    marginTop: -5,
-  },
-  colorLegendDivider: {
-    height: 1,
-    backgroundColor: '#e0e0e0',
-    marginTop: 20,
-    marginBottom: 16,
-    width: '100%',
-  },
-  colorLegendScrollContainer: {
-    maxHeight: 200, // Altura máxima para permitir scroll si hay muchas filas
-    paddingHorizontal: 10,
-  },
-  colorLegendContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingVertical: 12,
-  },
-  colorLegendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  colorLegendCircle: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginRight: 8,
-  },
-  colorLegendText: {
-    fontSize: 14,
-    color: Colors.light.text,
-    fontWeight: '500',
-  },
-  // Estilos para botón Planear Año
-  yearPlanButtonContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: Colors.light.background,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    zIndex: 10,
-  },
-  yearPlanButton: {
-    backgroundColor: Colors.light.tint,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  yearPlanButtonText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: 'white',
-  },
-  // Estilos para Modal Planear Año
-  yearPlanModalContainer: {
-    flex: 1,
-    backgroundColor: Colors.light.background,
-  },
-  yearPlanModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    backgroundColor: 'white',
-  },
-  yearPlanModalBackButton: {
-    padding: 8,
-  },
-  yearPlanModalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.light.text,
-    flex: 1,
-    textAlign: 'center',
-  },
-  yearPlanModalPageIndicator: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  yearPlanModalContent: {
-    flex: 1,
-    padding: 20,
-  },
-  yearPlanInstructions: {
-    fontSize: 16,
-    color: Colors.light.text,
-    marginBottom: 20,
-    fontWeight: '600',
-  },
-  yearPlanSuggestionsContainer: {
-    marginBottom: 24,
-  },
-  yearPlanSuggestionsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.light.text,
-    marginBottom: 12,
-  },
-  yearPlanGoalChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  yearPlanGoalChipSelected: {
-    backgroundColor: Colors.light.tint + '20',
-    borderWidth: 2,
-    borderColor: Colors.light.tint,
-  },
-  yearPlanGoalChipText: {
-    fontSize: 15,
-    color: Colors.light.text,
-    marginLeft: 12,
-    flex: 1,
-  },
-  yearPlanGoalChipTextSelected: {
-    color: Colors.light.tint,
-    fontWeight: '600',
-  },
-  yearPlanCustomGoalContainer: {
-    marginBottom: 24,
-  },
-  yearPlanCustomGoalInput: {
-    backgroundColor: 'white',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  yearPlanSelectedContainer: {
-    marginBottom: 24,
-    padding: 16,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-  },
-  yearPlanSelectedTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.light.text,
-    marginBottom: 12,
-  },
-  yearPlanSelectedGoal: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  yearPlanSelectedGoalText: {
-    fontSize: 15,
-    color: Colors.light.text,
-    flex: 1,
-  },
-  yearPlanRemoveGoalButton: {
-    padding: 4,
-  },
-  yearPlanContinueButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.light.tint,
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginTop: 20,
-    marginBottom: 20,
-  },
-  yearPlanContinueButtonDisabled: {
-    backgroundColor: '#e0e0e0',
-  },
-  yearPlanContinueButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: 'white',
-    marginRight: 8,
-  },
-  yearPlanContinueButtonTextDisabled: {
-    color: '#999',
-  },
-  // Estilos para página 2 (Asignación de fechas)
-  yearPlanDatesContainer: {
-    flex: 1,
-    padding: 20,
-  },
-  yearPlanDatesInstructions: {
-    fontSize: 16,
-    color: Colors.light.text,
-    marginBottom: 20,
-    fontWeight: '600',
-  },
-  yearPlanMonthsBarContainer: {
-    position: 'relative',
-    width: '100%',
-    minWidth: 1800,
-  },
-  yearPlanMonthsBar: {
-    flexDirection: 'row',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    overflow: 'hidden',
-    marginBottom: 60,
-  },
-  yearPlanMonthSegment: {
-    flex: 1,
-    minWidth: 150,
-    paddingVertical: 15,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#e0e0e0',
-    minHeight: 60,
-  },
-  yearPlanMonthLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.light.text,
-    textAlign: 'center',
-    width: '100%',
-    overflow: 'hidden',
-  },
-  yearPlanObjectivesContainer: {
-    position: 'absolute',
-    top: 75,
-    left: 0,
-    right: 0,
-    height: 40,
-    width: '100%',
-  },
-  yearPlanLegendDivider: {
-    height: 1,
-    backgroundColor: '#e0e0e0',
-    marginTop: 20,
-    marginBottom: 16,
-    width: '100%',
-  },
-  yearPlanLegendScrollContainer: {
-    maxHeight: 200,
-    paddingHorizontal: 10,
-  },
-  yearPlanLegendContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingVertical: 12,
-  },
-  yearPlanLegendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  yearPlanLegendCircle: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginRight: 8,
-  },
-  yearPlanLegendText: {
-    fontSize: 14,
-    color: Colors.light.text,
-    fontWeight: '500',
-  },
-  yearPlanFinishButton: {
-    backgroundColor: Colors.light.tint,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
-  },
-  yearPlanFinishButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: 'white',
-  },
-  eventContainer: { position: 'absolute', top: 2, left: 2, right: 2, bottom: 2, zIndex: 1000 },
-  eventBlock: { flex: 1, borderRadius: 4, padding: 4, justifyContent: 'center', minHeight: 20, marginBottom: 2, marginHorizontal: 1, zIndex: 1000 },
-  gridBackground: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 },
-  eventText: { fontSize: 16, color: 'white', fontWeight: '500' },
-  eventTextDay: { fontSize: 22, fontWeight: '600', paddingLeft: 8, paddingRight: 4 }, // Texto más grande para vista de día con padding
-  eventTextWeek: { fontSize: 14, fontWeight: '500', paddingLeft: 4, paddingRight: 2 }, // Texto ligeramente más grande para vista de semana con padding reducido
-  
-  // Estilos para resaltar la hora actual
-  currentHourRow: { backgroundColor: 'rgba(107, 83, 226, 0.1)' },
-  currentHourColumn: { backgroundColor: 'rgba(107, 83, 226, 0.1)' },
-  currentHourText: { color: '#6b53e2', fontWeight: '700' },
-  fullscreenModal: { flex: 1, backgroundColor: '#f0f8ff' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#f0f8ff' },
-  closeButton: { padding: 8 },
-  createButton: { backgroundColor: Colors.light.tint, paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20 },
-  createButtonText: { color: 'white', fontWeight: '600', fontSize: 16 },
-  modalContent: { flex: 1, paddingHorizontal: 20, paddingTop: 20 },
-  titleSection: { alignItems: 'center', marginBottom: 20 },
-  emoji: { fontSize: 60, marginBottom: 10 },
-  taskTitle: { fontSize: 24, fontWeight: 'bold', color: Colors.light.text, marginBottom: 4 },
-  subtitle: { fontSize: 14, color: '#666' },
-  titleInput: { backgroundColor: 'white', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, marginBottom: 8, borderWidth: 1, borderColor: '#e0e0e0' },
-  charCounter: { fontSize: 12, color: '#666', textAlign: 'right', marginBottom: 20 },
-  colorSection: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginBottom: 30 },
-  colorCircle: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'transparent' },
-  selectedColorCircle: { borderColor: Colors.light.text },
-  configCard: { backgroundColor: 'white', borderRadius: 12, padding: 16, marginBottom: 16 },
-  configRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  configLabel: { flex: 1, fontSize: 16, color: Colors.light.text, marginLeft: 12 },
-  configValue: { fontSize: 14, color: '#666', marginRight: 8 },
-  subtasksSection: { marginBottom: 16 },
-  subtasksCard: { backgroundColor: 'white', borderRadius: 12, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  subtasksLabel: { fontSize: 16, color: Colors.light.text, marginLeft: 12 },
-  subtasksDescription: { fontSize: 12, color: '#666', textAlign: 'center', lineHeight: 16, marginBottom: 12 },
-  
-  // Estilos para input de subtarea
-  subtaskInputContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: 'white', 
-    borderRadius: 12, 
-    padding: 12, 
-    marginBottom: 8 
-  },
-  subtaskInput: { 
-    flex: 1, 
-    fontSize: 16, 
-    color: Colors.light.text, 
-    paddingVertical: 8 
-  },
-  subtaskAddButton: { 
-    backgroundColor: Colors.light.tint, 
-    borderRadius: 20, 
-    width: 40, 
-    height: 40, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    marginLeft: 8 
-  },
-  
-  // Estilos para items de subtarea
-  subtaskItem: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: 'white', 
-    borderRadius: 12, 
-    padding: 12, 
-    marginBottom: 8 
-  },
-  subtaskCheckbox: { 
-    width: 24, 
-    height: 24, 
-    borderRadius: 12, 
-    borderWidth: 2, 
-    borderColor: '#ddd', 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    marginRight: 12,
-    backgroundColor: '#f8f8f8'
-  },
-  subtaskCheckboxCompleted: {
-    backgroundColor: Colors.light.tint,
-    borderColor: Colors.light.tint
-  },
-  subtaskText: { 
-    flex: 1, 
-    fontSize: 16, 
-    color: Colors.light.text, 
-    paddingVertical: 4 
-  },
-  subtaskTextCompleted: { 
-    textDecorationLine: 'line-through', 
-    color: '#999' 
-  },
-  subtaskDeleteButton: { 
-    padding: 8, 
-    marginLeft: 8 
-  },
-  
-  // Estilos para botón de borrar
-  deleteButton: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'center',
-    backgroundColor: '#fff5f5', 
-    borderRadius: 12, 
-    padding: 16, 
-    marginTop: 20,
-    borderWidth: 1,
-    borderColor: '#ff4444'
-  },
-  deleteButtonText: { 
-    fontSize: 16, 
-    fontWeight: '600', 
-    color: '#ff4444', 
-    marginLeft: 8 
-  },
-  
-  // Padding adicional para evitar que el botón de borrar quede oculto detrás de los botones del celular
-  bottomPadding: {
-    height: 100, // Espacio suficiente para los botones de navegación del celular
-    backgroundColor: 'transparent'
-  },
-  
-  // Estilos para modal de confirmación de borrado
-  deleteModalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0, 0, 0, 0.5)', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  deleteModalContent: { 
-    backgroundColor: 'white', 
-    borderRadius: 16, 
-    padding: 24, 
-    margin: 20, 
-    minWidth: 280 
-  },
-  deleteModalTitle: { 
-    fontSize: 20, 
-    fontWeight: 'bold', 
-    color: Colors.light.text, 
-    textAlign: 'center', 
-    marginBottom: 8 
-  },
-  deleteModalMessage: { 
-    fontSize: 16, 
-    color: '#666', 
-    textAlign: 'center', 
-    marginBottom: 24 
-  },
-  deleteModalButtons: { 
-    flexDirection: 'row', 
-    gap: 12, 
-    marginBottom: 16 
-  },
-  deleteModalButton: { 
-    flex: 1, 
-    paddingVertical: 12, 
-    paddingHorizontal: 16, 
-    borderRadius: 8 
-  },
-  deleteModalButtonSecondary: { 
-    backgroundColor: '#f5f5f5', 
-    borderWidth: 1, 
-    borderColor: '#ddd' 
-  },
-  deleteModalButtonPrimary: { 
-    backgroundColor: '#ff4444' 
-  },
-  deleteModalButtonTextSecondary: { 
-    color: Colors.light.text, 
-    textAlign: 'center', 
-    fontWeight: '600' 
-  },
-  deleteModalButtonTextPrimary: { 
-    color: 'white', 
-    textAlign: 'center', 
-    fontWeight: '600' 
-  },
-  deleteModalCancel: { 
-    paddingVertical: 8 
-  },
-  deleteModalCancelText: { 
-    color: '#666', 
-    textAlign: 'center', 
-    fontSize: 16 
-  },
-});
 
-// Estilos para el Modal de Repetición
-const recurrenceStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f8ff' },
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    paddingHorizontal: 20, 
-    paddingVertical: 16, 
-    backgroundColor: '#f0f8ff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0'
-  },
-  backButton: { padding: 8, marginRight: 12 },
-  headerTitle: { fontSize: 18, fontWeight: '600', color: Colors.light.text },
-  content: { flex: 1, paddingHorizontal: 20 },
-  
-  // Switch principal
-  mainSwitchSection: { 
-    backgroundColor: 'white', 
-    borderRadius: 12, 
-    marginVertical: 20,
-    padding: 16 
-  },
-  mainSwitchRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center',
-    minHeight: 50
-  },
-  mainSwitchLabel: { 
-    fontSize: 16, 
-    fontWeight: '600',
-    color: Colors.light.text, 
-    marginLeft: 12,
-    flex: 1
-  },
-  mainSwitchSubtitle: { 
-    fontSize: 12, 
-    color: '#666',
-    marginTop: 4,
-    marginLeft: 12,
-    flex: 2
-  },
-  
-  // Pestañas
-  tabsSection: { marginBottom: 20 },
-  tabsContainer: { 
-    flexDirection: 'row', 
-    backgroundColor: '#f5f5f5',
-    borderRadius: 25,
-    padding: 4
-  },
-  tab: { 
-    flex: 1, 
-    paddingVertical: 12, 
-    alignItems: 'center',
-    borderRadius: 20
-  },
-  tabActive: { backgroundColor: '#a8e6cf' },
-  tabText: { fontSize: 14, fontWeight: '500', color: '#666' },
-  tabTextActive: { color: Colors.light.text },
-  
-  // Contenido de pestañas
-  tabContent: { marginBottom: 20 },
-  
-  // Secciones
-  intervalSection: { 
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16
-  },
-  sectionTitle: { 
-    fontSize: 16, 
-    fontWeight: '600', 
-    color: Colors.light.text, 
-    marginBottom: 16 
-  },
-  
-  // Controles de intervalo
-  intervalRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between' 
-  },
-  intervalLabel: { fontSize: 14, color: Colors.light.text },
-  stepperContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 4
-  },
-  stepperButton: { 
-    width: 32, 
-    height: 32, 
-    backgroundColor: 'white',
-    borderRadius: 6,
-    justifyContent: 'center', 
-    alignItems: 'center',
-    marginHorizontal: 2
-  },
-  stepperText: { fontSize: 18, fontWeight: 'bold', color: Colors.light.tint },
-  stepperDisabled: { color: '#ccc' },
-  intervalValue: { 
-    fontSize: 16, 
-    fontWeight: '600', 
-    color: Colors.light.text,
-    minWidth: 40,
-    textAlign: 'center',
-    marginHorizontal: 8
-  },
-  
-  // Días de la semana
-  weekDaysSection: { 
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16
-  },
-  weekDaysGrid: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between' 
-  },
-  weekDayChip: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
-    backgroundColor: '#f5f5f5',
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  weekDayChipSelected: { backgroundColor: '#a8e6cf' },
-  weekDayChipText: { fontSize: 14, fontWeight: '500', color: '#666' },
-  weekDayChipTextSelected: { color: Colors.light.text },
-  
-  // Días del mes
-  monthDaysSection: { 
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16
-  },
-  monthGrid: { 
-    flexDirection: 'row', 
-    flexWrap: 'wrap',
-    justifyContent: 'space-between'
-  },
-  monthDayChip: { 
-    width: '13%', 
-    aspectRatio: 1,
-    borderRadius: 8, 
-    backgroundColor: '#f5f5f5',
-    justifyContent: 'center', 
-    alignItems: 'center',
-    marginBottom: 8
-  },
-  monthDayChipSelected: { backgroundColor: '#a8e6cf' },
-  monthDayChipText: { fontSize: 12, fontWeight: '500', color: '#666' },
-  monthDayChipTextSelected: { color: Colors.light.text },
-  
-  // Fecha de término
-  endDateSection: { 
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20
-  },
-  endDateRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between',
-    marginBottom: 12
-  },
-  endDateLabel: { fontSize: 16, fontWeight: '600', color: Colors.light.text },
-  endDateButton: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 12
-  },
-  endDateButtonText: { fontSize: 14, color: Colors.light.text },
-  
-  // Botón de guardar
-  saveSection: { paddingBottom: 40 },
-  saveButton: { 
-    backgroundColor: Colors.light.tint, 
-    borderRadius: 12, 
-    padding: 16, 
-    alignItems: 'center' 
-  },
-  saveButtonText: { 
-    color: 'white', 
-    fontSize: 16, 
-    fontWeight: '600' 
-  },
-  
-  // Botón de refresh
-  refreshButton: { 
-    marginLeft: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: '#f0f0f0'
-  },
-  refreshButtonText: { 
-    fontSize: 18, 
-    fontWeight: 'bold', 
-    color: Colors.light.tint 
-  },
-});
-
-/* 
-// ===== DEFINICIONES ORIGINALES COMENTADAS (FASE 3) =====
-// Estas definiciones fueron movidas a archivos separados en app/(tabs)/components/calendar/
-
-// RecurrenceModal - movido a ./components/calendar/RecurrenceModal.tsx
-// EventModal - movido a ./components/calendar/EventModal.tsx  
-// DeleteModal - movido a ./components/calendar/DeleteModal.tsx
-
-// Las definiciones originales se mantienen comentadas aquí hasta que se confirmen los tests
-*/
