@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { Colors } from '../../../constants/theme';
+import { Colors } from '@/constants/theme';
 import {
   WEEK_DAY_ITEMS,
   MONTH_DAY_ITEMS,
@@ -85,7 +85,7 @@ export default function RecurrenceModal({
     onTutorialSkip &&
     onTutorialComplete;
   
-  // console.log('🔄 RecurrenceModal Tutorial Debug:', {
+  // console.log('?? RecurrenceModal Tutorial Debug:', {
   //   tutorialVisible,
   //   tutorialStep,
   //   currentTutorialStep: currentTutorialStep?.id,
@@ -115,14 +115,14 @@ export default function RecurrenceModal({
     
     // Detectar cuando se activa la recurrencia
     if (objective === 'enable-recurrence' && localConfig.enabled) {
-      console.log('✅ RecurrenceModal: Objetivo cumplido: enable-recurrence');
+      console.log('? RecurrenceModal: Objetivo cumplido: enable-recurrence');
       setTimeout(() => onTutorialNext?.(), 500);
       return;
     }
     
     // Detectar cuando se selecciona modo semanal
     if (objective === 'select-weekly-mode' && localConfig.enabled && localConfig.mode === 'weekly') {
-      console.log('✅ RecurrenceModal: Objetivo cumplido: select-weekly-mode');
+      console.log('? RecurrenceModal: Objetivo cumplido: select-weekly-mode');
       setTimeout(() => onTutorialNext?.(), 500);
       return;
     }
@@ -134,7 +134,7 @@ export default function RecurrenceModal({
           localConfig.mode === 'weekly' && 
           localConfig.weekDays.length >= 4 &&
           requiredDays.every(day => localConfig.weekDays.includes(day))) {
-        console.log('✅ RecurrenceModal: Objetivo cumplido: select-recurrence-days');
+        console.log('? RecurrenceModal: Objetivo cumplido: select-recurrence-days');
         setTimeout(() => onTutorialNext?.(), 500);
         return;
       }
@@ -697,3 +697,10 @@ const recurrenceStyles = {
     color: 'white',
   },
 };
+
+
+
+
+
+
+

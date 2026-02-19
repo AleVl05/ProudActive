@@ -263,7 +263,7 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       // Estado 1: Sin subtareas → color original
       return {
         type: 'solid' as const,
-        solidColor: ev.color,
+        solidColor: ev.color || '#6b53e2',
       };
     }
   }, [subtaskStatus, ev.color]);
@@ -574,6 +574,26 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
       clearTimeout(dragActivationTimer.current);
       dragActivationTimer.current = null;
       dragTouchStartRef.current = null;
+    }
+  }, []);
+
+  const cancelLongPressTimer = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const cancelPendingMoveIfNoDrag = useCallback(() => {
+    if (isMovingRef.current && !hasMovedRef.current) {
+      // Se activó el drag por tiempo, pero el usuario soltó sin mover
+      setShowGhost(false);
+      setIsMoving(false);
+      isMovingRef.current = false;
+      ghostTopOffsetRef.current = 0;
+      ghostLeftOffsetRef.current = 0;
+      dragTouchStartRef.current = null;
+      hasMovedRef.current = false;
     }
   }, []);
   
@@ -967,6 +987,8 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
               }
             }}
             onTouchEnd={() => {
+              cancelLongPressTimer();
+              cancelPendingMoveIfNoDrag();
               // Limpiar timers si no se activó el drag
               if (!isMovingRef.current) {
                 if (dragActivationTimer.current) {
@@ -1024,6 +1046,8 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
               }
             }}
             onTouchEnd={() => {
+              cancelLongPressTimer();
+              cancelPendingMoveIfNoDrag();
               // Limpiar timers si no se activó el drag
               if (!isMovingRef.current) {
                 if (dragActivationTimer.current) {
@@ -1185,12 +1209,14 @@ const EventResizableBlock = React.memo(function EventResizableBlock({
                   cancelDragActivation();
                 }
               }}
-              onTouchEnd={() => {
-                // Limpiar timers si no se activó el drag
-                if (!isMovingRef.current) {
-                  if (dragActivationTimer.current) {
-                    clearTimeout(dragActivationTimer.current);
-                    dragActivationTimer.current = null;
+            onTouchEnd={() => {
+              cancelLongPressTimer();
+              cancelPendingMoveIfNoDrag();
+              // Limpiar timers si no se activó el drag
+              if (!isMovingRef.current) {
+                if (dragActivationTimer.current) {
+                  clearTimeout(dragActivationTimer.current);
+                  dragActivationTimer.current = null;
                   }
                   dragTouchStartRef.current = null;
                   hasMovedRef.current = false;

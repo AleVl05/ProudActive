@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\Calendar;
 use App\Models\EventCategory;
+use App\Models\EventInstanceStatus;
+use App\Models\Subtask;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -37,14 +39,100 @@ class EventController extends Controller
 
         $query = Event::with(['calendar', 'category', 'alarms', 'recurrenceExceptions'])
             ->where('user_id', $request->user()->id)
-            ->whereBetween('start_utc', [$request->start, $request->end])
-            ->whereNull('deleted_at');
+            ->whereNull('deleted_at')
+            ->where(function ($q) use ($request) {
+                $q->whereBetween('start_utc', [$request->start, $request->end])
+                  ->orWhereBetween('original_start_utc', [$request->start, $request->end])
+                  ->orWhere(function ($q2) use ($request) {
+                      // Incluir series recurrentes activas aunque su start_utc sea anterior
+                      $q2->where('is_recurring', true)
+                         ->where('start_utc', '<=', $request->end)
+                         ->where(function ($q3) use ($request) {
+                             $q3->whereNull('recurrence_end_date')
+                                ->orWhere('recurrence_end_date', '>=', $request->start);
+                         });
+                  });
+            });
 
         if ($request->calendar_id) {
             $query->where('calendar_id', $request->calendar_id);
         }
 
         $events = $query->orderBy('start_utc')->get();
+
+        $eventIds = $events->pluck('id')->all();
+        $statusesByEventId = EventInstanceStatus::whereIn('event_id', $eventIds)->get()->keyBy('event_id');
+
+        $seriesEvents = $events->filter(function ($event) {
+            return $event->is_recurring;
+        });
+        $seriesIds = $seriesEvents->pluck('id')->all();
+
+        $instanceStatusesBySeries = collect();
+        if (!empty($seriesIds)) {
+            $rangeStartDate = \Carbon\Carbon::parse($request->start)->toDateString();
+            $rangeEndDate = \Carbon\Carbon::parse($request->end)->toDateString();
+            $instanceStatuses = EventInstanceStatus::whereIn('series_id', $seriesIds)
+                ->whereBetween('instance_date', [$rangeStartDate, $rangeEndDate])
+                ->get()
+                ->groupBy('series_id');
+            $instanceStatusesBySeries = $instanceStatuses;
+        }
+
+        $masterSubtasksTotals = collect();
+        if (!empty($seriesIds)) {
+            $masterSubtasksTotals = Subtask::whereIn('event_id', $seriesIds)
+                ->whereNull('deleted_at')
+                ->get()
+                ->groupBy('event_id')
+                ->map(function ($items) {
+                    return $items->count();
+                });
+        }
+
+        $events = $events->map(function ($event) use ($statusesByEventId, $instanceStatusesBySeries, $masterSubtasksTotals) {
+            $status = $statusesByEventId->get($event->id);
+
+            if ($status) {
+                $event->subtasks_total = $status->subtasks_total;
+                $event->subtasks_completed = $status->subtasks_completed;
+                $event->subtask_status = $status->status;
+            } else {
+                // Fallback para eventos no recurrentes
+                if (!$event->is_recurring) {
+                    $total = $event->subtasks()->whereNull('deleted_at')->count();
+                    $completed = $event->subtasks()->whereNull('deleted_at')->where('completed', true)->count();
+                    $event->subtasks_total = $total;
+                    $event->subtasks_completed = $completed;
+                    if ($total <= 0) {
+                        $event->subtask_status = 'none';
+                    } elseif ($completed >= $total) {
+                        $event->subtask_status = 'done';
+                    } else {
+                        $event->subtask_status = 'partial';
+                    }
+                } else {
+                    $event->subtasks_total = 0;
+                    $event->subtasks_completed = 0;
+                    $event->subtask_status = 'none';
+                }
+            }
+
+            if ($event->is_recurring) {
+                $event->master_subtasks_total = (int) ($masterSubtasksTotals[$event->id] ?? 0);
+                $instanceStatuses = $instanceStatusesBySeries->get($event->id, collect());
+                $event->instance_statuses = $instanceStatuses->map(function ($item) {
+                    return [
+                        'instance_date' => $item->instance_date ? $item->instance_date->format('Y-m-d') : null,
+                        'subtasks_total' => $item->subtasks_total,
+                        'subtasks_completed' => $item->subtasks_completed,
+                        'status' => $item->status,
+                    ];
+                })->values();
+            }
+
+            return $event;
+        });
 
         return response()->json([
             'success' => true,

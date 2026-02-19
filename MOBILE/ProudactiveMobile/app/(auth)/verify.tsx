@@ -9,7 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import authService from '../../services/auth';
+import authService from '@/services/auth';
 
 export default function VerifyScreen() {
   const router = useRouter();
@@ -96,7 +96,7 @@ export default function VerifyScreen() {
     <View style={styles.container}>
       <View style={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.emoji}>📧</Text>
+          <Text style={styles.emoji}>*</Text>
           <Text style={styles.title}>Verifica tu email</Text>
           <Text style={styles.subtitle}>
             Hemos enviado un código de 6 dígitos a{'\n'}
@@ -240,3 +240,9 @@ const styles = StyleSheet.create({
   },
 });
 
+
+
+
+
+
+

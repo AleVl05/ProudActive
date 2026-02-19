@@ -1,5 +1,5 @@
 // calendarApi.ts - API calls for calendar events and subtasks
-import { API_BASE } from '../src/config/api';
+import { API_BASE } from '@/config/api';
 import authService from './auth';
 
 // ===== AUTHENTICATION =====
@@ -349,3 +349,4 @@ export {
   apiRegisterDailyAccess,
   apiGetStats
 };
+

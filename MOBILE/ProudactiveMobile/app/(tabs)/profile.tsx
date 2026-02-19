@@ -3,10 +3,10 @@ import { Colors } from '@/constants/theme';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import authService, { User } from '../../services/auth';
-import tutorialService from '../../src/utils/tutorialService';
+import authService, { User } from '@/services/auth';
+import tutorialService from '@/utils/tutorialService';
 import { PermissionsAndroid } from 'react-native';
-import { apiDeleteAllEvents, apiRestoreAllEvents, apiGetPreferences, apiUpdatePreferences, apiFetchEvents, apiGetStats } from '../../services/calendarApi';
+import { apiDeleteAllEvents, apiRestoreAllEvents, apiGetPreferences, apiUpdatePreferences, apiFetchEvents, apiGetStats } from '@/services/calendarApi';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -183,7 +183,7 @@ export default function ProfileScreen() {
   const saveHourPreferences = async (startHourNum: number, endHourNum: number) => {
     setIsLoading(true);
     try {
-      console.log('💾 Guardando preferencias:', { start_hour: startHourNum, end_hour: endHourNum });
+      console.log('[Profile] Guardando preferencias:', { start_hour: startHourNum, end_hour: endHourNum });
       const response = await apiUpdatePreferences({
         start_hour: startHourNum,
         end_hour: endHourNum
@@ -191,24 +191,24 @@ export default function ProfileScreen() {
 
       if (response.ok) {
         const result = await response.json();
-        console.log('💾 Respuesta del servidor:', result);
+        console.log('[Profile] Respuesta del servidor:', result);
         if (result.success) {
-          console.log('✅ Preferencias guardadas correctamente:', result.data);
+          console.log('[Profile] Preferencias guardadas correctamente:', result.data);
           Alert.alert('Configuración guardada', `Horas del calendario: ${startHourNum}:00 - ${endHourNum === 24 ? '00:00' : endHourNum + ':00'}`);
           setShowHourConfig(false);
           // Recargar preferencias para asegurar sincronización
           await loadPreferences();
         } else {
-          console.error('❌ Error guardando preferencias:', result.message);
+          console.error('[Profile] Error guardando preferencias:', result.message);
           Alert.alert('Error', result.message || 'No se pudo guardar la configuración');
         }
       } else {
         const errorData = await response.json();
-        console.error('❌ Error en respuesta:', response.status, errorData);
+        console.error('[Profile] Error en respuesta:', response.status, errorData);
         Alert.alert('Error', errorData.message || 'No se pudo guardar la configuración');
       }
     } catch (error) {
-      console.error('❌ Excepción guardando preferencias:', error);
+      console.error('[Profile] Excepción guardando preferencias:', error);
       Alert.alert('Error', 'Error al guardar la configuración');
     } finally {
       setIsLoading(false);
@@ -332,7 +332,7 @@ export default function ProfileScreen() {
   const handleDeleteAllEventsPress = () => {
     // Primera confirmación: ¿Estás seguro?
     Alert.alert(
-      '⚠️ ELIMINAR TODOS LOS EVENTOS',
+      'ELIMINAR TODOS LOS EVENTOS',
       'Esta acción eliminará PERMANENTEMENTE todos los eventos de tu cuenta. Esta acción NO se puede deshacer.\n\n¿Estás completamente seguro?',
       [
         { text: 'Cancelar', style: 'cancel' },
@@ -361,7 +361,7 @@ export default function ProfileScreen() {
 
       if (result.success) {
         Alert.alert(
-          '✅ Eventos eliminados',
+          'Eventos eliminados',
           result.message || 'Todos los eventos han sido eliminados exitosamente.',
           [
             {
@@ -387,8 +387,8 @@ export default function ProfileScreen() {
 
   const handleRestoreAllEvents = async () => {
     Alert.alert(
-      '🔄 Restaurar Eventos',
-      '¿Deseas restaurar los eventos que fueron eliminados en los últimos 7 días?',
+      'Restaurar eventos',
+      '¿Deseas restaurar los eventos que fueron eliminados en los últimos 7 díasí',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -401,7 +401,7 @@ export default function ProfileScreen() {
 
               if (result.success) {
                 Alert.alert(
-                  '✅ Eventos restaurados',
+                  'Eventos restaurados',
                   result.message || 'Los eventos eliminados en los últimos 7 días han sido restaurados exitosamente.',
                   [{ text: 'OK' }]
                 );
@@ -425,7 +425,7 @@ export default function ProfileScreen() {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.loginContainer}>
         <View style={styles.loginContent}>
-          <Text style={styles.loginEmoji}>👤</Text>
+          <Text style={styles.loginEmoji}>*</Text>
           <Text style={styles.loginTitle}>Inicia sesión</Text>
           <Text style={styles.loginSubtitle}>Para acceder a tu perfil, necesitas iniciar sesión</Text>
           
@@ -433,7 +433,7 @@ export default function ProfileScreen() {
             style={styles.loginButton}
             onPress={() => router.push('/(auth)/login')}
           >
-            <Text style={styles.loginButtonText}>🚀 Iniciar Sesión</Text>
+            <Text style={styles.loginButtonText}>Iniciar Sesión</Text>
           </TouchableOpacity>
           
           <View style={styles.loginFooter}>
@@ -469,13 +469,13 @@ export default function ProfileScreen() {
           style={styles.editProfileButton}
           onPress={() => setShowEditProfile(true)}
         >
-          <Text style={styles.editProfileText}>✏️ Editar perfil</Text>
+          <Text style={styles.editProfileText}>Editar perfil</Text>
         </TouchableOpacity>
       </View>
 
       {/* Estadísticas del Usuario */}
       <View style={styles.statsSection}>
-        <Text style={styles.sectionTitle}>📊 Estadísticas</Text>
+        <Text style={styles.sectionTitle}>Estadísticas</Text>
         
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
@@ -498,7 +498,7 @@ export default function ProfileScreen() {
                   {animatedValue}
                 </Animated.Text>
                 <View style={styles.celebrationBadge}>
-                  <Text style={styles.celebrationText}>🎉</Text>
+                  <Text style={styles.celebrationText}>!</Text>
                 </View>
               </View>
             ) : (
@@ -526,24 +526,24 @@ export default function ProfileScreen() {
 
       {/* Información Personal */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>👤 Información Personal</Text>
+        <Text style={styles.sectionTitle}>Información Personal</Text>
         
         <TouchableOpacity 
           style={styles.infoRow}
           onPress={() => setShowEditEmail(true)}
         >
-          <Text style={styles.infoLabel}>📧 Email</Text>
+          <Text style={styles.infoLabel}>Email</Text>
           <Text style={styles.infoValue}>{user?.email || 'usuario@ejemplo.com'}</Text>
           <Ionicons name="chevron-forward" size={16} color="#ccc" />
         </TouchableOpacity>
         
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>🌐 Idioma</Text>
+          <Text style={styles.infoLabel}>Idioma</Text>
           <Text style={styles.infoValue}>{user?.locale || 'es'}</Text>
         </View>
         
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>📅 Accesos consecutivos</Text>
+          <Text style={styles.infoLabel}>Accesos consecutivos</Text>
           <Text style={styles.infoValue}>{userStats.consecutiveAccesses} días</Text>
         </View>
       </View>
@@ -555,14 +555,14 @@ export default function ProfileScreen() {
           onPress={() => setShowSettings(!showSettings)}
         >
           <Text style={styles.settingsButtonText}>
-            ⚙️ Configuraciones {showSettings ? '▲' : '▼'}
+            Configuraciones {showSettings ? '^' : 'v'}
           </Text>
         </TouchableOpacity>
         
         {showSettings && (
           <View style={styles.settingsContent}>
             <TouchableOpacity style={styles.settingItem} onPress={() => setShowHourConfig(true)}>
-              <Text style={styles.settingText}>⏰ Configurar horas del calendario</Text>
+              <Text style={styles.settingText}>Configurar horas del calendario</Text>
               <Ionicons name="chevron-forward" size={16} color="#ccc" />
             </TouchableOpacity>
             
@@ -585,12 +585,12 @@ export default function ProfileScreen() {
                 );
               }}
             >
-              <Text style={styles.settingText}>🎓 Ver tutorial de nuevo</Text>
+              <Text style={styles.settingText}>Ver tutorial de nuevo</Text>
               <Ionicons name="chevron-forward" size={16} color="#ccc" />
             </TouchableOpacity>
             
             <View style={styles.settingItem}>
-              <Text style={styles.settingText}>🔔 Notificaciones</Text>
+              <Text style={styles.settingText}>Notificaciones</Text>
               <Switch
                 value={notificationsEnabled}
                 onValueChange={handleNotificationsToggle}
@@ -604,7 +604,7 @@ export default function ProfileScreen() {
               onPress={handleDeleteAllEventsPress}
             >
               <Text style={[styles.settingText, styles.dangerText]}>
-                🗑️ Eliminar todos los eventos
+                Eliminar todos los eventos
               </Text>
               <Ionicons name="chevron-forward" size={16} color="#ff3b30" />
             </TouchableOpacity>
@@ -615,7 +615,7 @@ export default function ProfileScreen() {
               disabled={isRestoringEvents}
             >
               <Text style={[styles.settingText, styles.restoreText]}>
-                {isRestoringEvents ? '🔄 Restaurando eventos...' : '🔄 Restaurar eventos (últimos 7 días)'}
+                {isRestoringEvents ? 'Restaurando eventos...' : 'Restaurar eventos (últimos 7 días)'}
               </Text>
               {!isRestoringEvents && <Ionicons name="chevron-forward" size={16} color={Colors.light.tint} />}
             </TouchableOpacity>
@@ -625,7 +625,7 @@ export default function ProfileScreen() {
       
       {/* Cerrar Sesión */}
       <TouchableOpacity style={[styles.button, styles.logoutButton]} onPress={handleLogout}>
-        <Text style={[styles.buttonText, styles.logoutButtonText]}>🚪 Cerrar sesión</Text>
+        <Text style={[styles.buttonText, styles.logoutButtonText]}>Cerrar sesión</Text>
       </TouchableOpacity>
       
       <Text style={styles.infoText}>
@@ -834,7 +834,7 @@ export default function ProfileScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={[styles.modalTitle, styles.dangerTitle]}>
-              ⚠️ ELIMINAR TODOS LOS EVENTOS
+              ELIMINAR TODOS LOS EVENTOS
             </Text>
             
             <Text style={styles.warningText}>
@@ -1291,3 +1291,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+
+
+
+
+
+
+
+

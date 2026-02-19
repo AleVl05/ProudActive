@@ -11,8 +11,8 @@ import {
 } from 'react-native';
 import { Colors } from '@/constants/theme';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { API_BASE } from '../../src/config/api';
-import authService from '../../services/auth';
+import { API_BASE } from '@/config/api';
+import authService from '@/services/auth';
 
 // Helper para obtener headers autenticados
 async function getAuthHeaders(): Promise<HeadersInit> {
@@ -102,7 +102,7 @@ export default function MarketScreen() {
         }
       }
     } catch (error) {
-      console.error('❌ Error loading items:', error);
+      console.error('? Error loading items:', error);
     } finally {
       setLoading(false);
     }
@@ -129,7 +129,7 @@ export default function MarketScreen() {
         setNewItemName('');
       }
     } catch (error) {
-      console.error('❌ Error creating item:', error);
+      console.error('? Error creating item:', error);
     } finally {
       setLoading(false);
     }
@@ -137,13 +137,13 @@ export default function MarketScreen() {
 
   const toggleItem = async (id: string) => {
     try {
-      console.log('🔄 Toggling item:', id);
+      console.log('[Challenges] Toggling item:', id);
       const response = await apiToggleMarketItem(id);
-      console.log('📡 Toggle API Response status:', response.status);
+      console.log('[Challenges] Toggle API Response status:', response.status);
       
       if (response.ok) {
         const data = await response.json();
-        console.log('📦 Toggle API Response data:', data);
+        console.log('[Challenges] Toggle API Response data:', data);
         // La API devuelve directamente el objeto item, no un objeto con success/item
         if (data && data.id) {
           setItems(prevItems =>
@@ -151,37 +151,37 @@ export default function MarketScreen() {
               item.id === String(id) ? { ...item, checked: data.checked } : item
             )
           );
-          console.log('✅ Item toggled successfully');
+          console.log('? Item toggled successfully');
         }
       } else {
-        console.error('❌ Toggle API Error:', response.status, response.statusText);
+        console.error('? Toggle API Error:', response.status, response.statusText);
       }
     } catch (error) {
-      console.error('❌ Error toggling item:', error);
+      console.error('? Error toggling item:', error);
     }
   };
 
   const deleteItem = async (id: string) => {
     try {
-      console.log('🗑️ Deleting item:', id);
+      console.log('[Challenges]? Deleting item:', id);
       const response = await apiDeleteMarketItem(id);
-      console.log('📡 Delete API Response status:', response.status);
+      console.log('[Challenges] Delete API Response status:', response.status);
       
       if (response.ok) {
         const data = await response.json();
-        console.log('📦 Delete API Response data:', data);
+        console.log('[Challenges] Delete API Response data:', data);
         // La API devuelve {"message": "..."}, no tiene success, pero si response.ok es true, fue exitoso
           setItems(prevItems => prevItems.filter(item => item.id !== id));
-          console.log('✅ Item deleted successfully');
+          console.log('? Item deleted successfully');
       } else {
-        console.error('❌ Delete API Error:', response.status, response.statusText);
+        console.error('? Delete API Error:', response.status, response.statusText);
         // Si es 404, el item ya no existe, así que lo eliminamos del estado de todas formas
         if (response.status === 404) {
           setItems(prevItems => prevItems.filter(item => item.id !== id));
         }
       }
     } catch (error) {
-      console.error('❌ Error deleting item:', error);
+      console.error('? Error deleting item:', error);
     }
   };
 
@@ -201,21 +201,21 @@ export default function MarketScreen() {
           onPress: async () => {
             try {
               setLoading(true);
-              console.log('🗑️ Deleting all items...');
+              console.log('[Challenges]? Deleting all items...');
               const response = await apiDeleteAllMarketItems();
-              console.log('📡 Delete All API Response status:', response.status);
+              console.log('[Challenges] Delete All API Response status:', response.status);
               
               if (response.ok) {
                 const data = await response.json();
-                console.log('📦 Delete All API Response data:', data);
+                console.log('[Challenges] Delete All API Response data:', data);
                 // La API devuelve {"message": "..."}, no tiene success, pero si response.ok es true, fue exitoso
                   setItems([]);
-                  console.log('✅ All items deleted successfully');
+                  console.log('? All items deleted successfully');
               } else {
-                console.error('❌ Delete All API Error:', response.status, response.statusText);
+                console.error('? Delete All API Error:', response.status, response.statusText);
               }
             } catch (error) {
-              console.error('❌ Error deleting all items:', error);
+              console.error('? Error deleting all items:', error);
             } finally {
               setLoading(false);
             }
@@ -466,3 +466,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+
+
+
+
+
+

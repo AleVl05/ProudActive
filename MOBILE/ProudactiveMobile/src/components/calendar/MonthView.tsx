@@ -19,8 +19,8 @@ import {
 import {
   apiPutMonthEvent,
   apiPostMonthEvent,
-} from '../../../services/calendarApi';
-import { apiGetCalendars } from '../../../services/calendarApi';
+} from '@/services/calendarApi';
+import { apiGetCalendars } from '@/services/calendarApi';
 
 interface Event {
   id: string;
@@ -44,7 +44,7 @@ interface MonthViewProps {
   setEventDescription: (description: string) => void;
   setEventColor: (color: string) => void;
   setModalVisible: (visible: boolean) => void;
-  setSelectedMonthCell: (cell: { dayIndex: number; day: number }) => void;
+  setSelectedMonthCell: (cell: { dayIndex: number; day: number } | null) => void;
   getRandomColor: () => string;
   createDefaultRecurrenceConfig: () => any;
   setSubtasks: (tasks: any[]) => void;
@@ -94,11 +94,15 @@ export default function MonthView({
   const monthEventsByDayIndex = useMemo(() => {
     const map: Record<number, MonthEvent> = {};
     monthEvents.forEach(ev => {
-      // Solo mapear el día de inicio del evento
-      map[ev.startDay] = ev;
+      // Mapear todos los días que cubre el evento para permitir edición desde cualquier día visible
+      const start = Math.max(1, ev.startDay);
+      const end = Math.min(monthDays.length, ev.startDay + ev.duration - 1);
+      for (let day = start; day <= end; day += 1) {
+        map[day] = ev;
+      }
     });
     return map;
-  }, [monthEvents, currentDate]);
+  }, [monthEvents, monthDays.length]);
 
   // Adaptar MonthEvent a Event helper function
   const adaptMonthEvent = useCallback((ev: MonthEvent): Event => ({
@@ -153,6 +157,7 @@ export default function MonthView({
           <View style={{ position: 'absolute', left: 60, top: 0, width: getCellWidth(), height: monthDays.length * CELL_HEIGHT }}>
             {monthDays.map((day, dayIndex) => {
               const event = monthEventsByDayIndex[day];
+              const isStartDay = !!event && event.startDay === day;
               
               const now = new Date();
               const currentDay = now.getDate();
@@ -196,9 +201,9 @@ export default function MonthView({
                         return;
                       }
                       // Editar evento existente
-                      // 🔧 FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
-                      const adaptedEvent = adaptMonthEvent(event);
-                      setSelectedEvent(adaptedEvent);
+                      // ?? FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
+                      setSelectedMonthCell(null);
+                      setSelectedEvent(event);
                       setEventTitle(event.title);
                       setEventDescription(event.description || '');
                       setEventColor(event.color);
@@ -217,11 +222,11 @@ export default function MonthView({
                       }
                     }
                   }}
-                  delayLongPress={1500}
+                  delayLongPress={2000}
                 >
                   {(() => {
-                    // 🔧 FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
-                    if (event) {
+                    // ?? FIX: Renderizar EventResizableBlock solo en la celda donde el evento empieza
+                    if (event && isStartDay) {
                       const adaptedEvent = adaptMonthEvent(event);
                       return (
                         <EventResizableBlock 
@@ -244,7 +249,12 @@ export default function MonthView({
                             // 2. Actualizar en API (en background)
                             try {
                               const backendData = monthEventFrontendToBackend(updated);
-                              await apiPutMonthEvent(event.id, backendData);
+                              await apiPutMonthEvent(event.id, {
+                                title: updated.title,
+                                description: updated.description || '',
+                                color: updated.color,
+                                ...backendData,
+                              });
                               // Si hay cambio de mes, refrescar eventos
                               if (newYear !== currentDate.getFullYear() || newMonth !== currentDate.getMonth()) {
                                 await refreshMonthEvents();
@@ -271,7 +281,12 @@ export default function MonthView({
                             // 2. Actualizar en API (en background)
                             try {
                               const backendData = monthEventFrontendToBackend(updated);
-                              await apiPutMonthEvent(event.id, backendData);
+                              await apiPutMonthEvent(event.id, {
+                                title: updated.title,
+                                description: updated.description || '',
+                                color: updated.color,
+                                ...backendData,
+                              });
                             } catch (e) {
                               // Revertir cambios si hay error
                               setMonthEvents(prev => prev.map(e => e.id === event.id ? event : e));
@@ -279,9 +294,10 @@ export default function MonthView({
                             }
                           }}
                           onQuickPress={(ev) => {
-                            // 🔧 FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
+                            // ?? FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
                             const adaptedEvent = adaptMonthEvent(event);
-                            setSelectedEvent(adaptedEvent);
+                            setSelectedMonthCell(null);
+                            setSelectedEvent(event);
                             setEventTitle(event.title);
                             setEventDescription(event.description || '');
                             setEventColor(event.color);
@@ -343,7 +359,7 @@ export default function MonthView({
                       );
                     }
                     
-                    // 🔧 FIX: Buscar eventos que ocupan esta celda pero empiezan antes
+                    // ?? FIX: Buscar eventos que ocupan esta celda pero empiezan antes
                     let occupyingEvent = null;
                     let isFirstCell = false;
                     let isLastCell = false;
@@ -366,7 +382,7 @@ export default function MonthView({
                       }
                     }
                     
-                    // 🔧 FIX: Renderizar drag handler en celdas intermedias
+                    // ?? FIX: Renderizar drag handler en celdas intermedias
                     if (occupyingEvent && !isFirstCell && !isLastCell) {
                       const adaptedEvent = adaptMonthEvent(occupyingEvent);
                       return (
@@ -420,9 +436,9 @@ export default function MonthView({
                             }
                           }}
                           onQuickPress={(ev) => {
-                            // 🔧 FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
+                            // ?? FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
                             const adaptedEvent = adaptMonthEvent(occupyingEvent);
-                            setSelectedEvent(adaptedEvent);
+                            setSelectedEvent(event);
                             setEventTitle(occupyingEvent.title);
                             setEventDescription(occupyingEvent.description || '');
                             setEventColor(occupyingEvent.color);
@@ -441,7 +457,7 @@ export default function MonthView({
                       );
                     }
                     
-                    // 🔧 FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
+                    // ?? FIX: Renderizar bloque extendido SOLO en la última celda para el handler de abajo
                     if (occupyingEvent && !isFirstCell && isLastCell) {
                       const adaptedEvent = adaptMonthEvent(occupyingEvent);
                       return (
@@ -495,9 +511,9 @@ export default function MonthView({
                             }
                           }}
                           onQuickPress={(ev) => {
-                            // 🔧 FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
+                            // ?? FIX: Convertir MonthEvent a Event antes de pasarlo (para evitar crash en DatePickerSetting)
                             const adaptedEvent = adaptMonthEvent(occupyingEvent);
-                            setSelectedEvent(adaptedEvent);
+                            setSelectedEvent(event);
                             setEventTitle(occupyingEvent.title);
                             setEventDescription(occupyingEvent.description || '');
                             setEventColor(occupyingEvent.color);
@@ -549,3 +565,10 @@ const styles = StyleSheet.create({
   currentHourCell: { backgroundColor: 'rgba(107, 83, 226, 0.1)' },
 });
 
+
+
+
+
+
+
+

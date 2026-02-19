@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../../../constants/theme';
+import { Colors } from '@/constants/theme';
 import AlarmSetting from './AlarmSetting';
 import DatePickerSetting from './DatePickerSetting';
 import TutorialOverlay from '../tutorial/TutorialOverlay';
@@ -46,6 +46,7 @@ interface EventModalProps {
   selectedEvent: any;
   onDeleteEvent: () => void;
   selectedCell?: any;
+  selectedMonthCell?: any;
   eventDateKey?: string;
   onAlarmChange?: (enabled: boolean, option?: string) => void;
   alarmEnabled?: boolean;
@@ -62,7 +63,7 @@ interface EventModalProps {
 }
 
 // Colores principales (5 colores por defecto)
-const DEFAULT_MAIN_COLORS = ['#6b53e2', '#f44336', '#4caf50', '#ff9800', '#2196F3']; // Cambié el lila por azul
+const DEFAULT_MAIN_COLORS = ['#6b53e2', '#f44336', '#4caf50', '#ff9800', '#2196F3']; // Cambi? el lila por azul
 
 // Biblioteca completa de 25 colores (incluye los 5 principales)
 const COLOR_LIBRARY = [
@@ -76,7 +77,7 @@ const COLOR_LIBRARY = [
   // Colores adicionales (20 más)
   '#9c27b0', // Púrpura
   '#673AB7', // Púrpura oscuro
-  '#3F51B5', // Índigo
+  '#3F51B5', // índigo
   '#00BCD4', // Cian/Turquesa
   '#009688', // Verde esmeralda
   '#8BC34A', // Lima
@@ -119,6 +120,7 @@ export default function EventModal({
   selectedEvent,
   onDeleteEvent,
   selectedCell,
+  selectedMonthCell,
   eventDateKey,
   onAlarmChange,
   alarmEnabled,
@@ -148,7 +150,7 @@ export default function EventModal({
   const colorSectionRef = useRef<View | null>(null);
   
 
-  // 🎯 UX: Hacer scroll automático cuando se abre el input de subtareas
+  // UX: Hacer scroll automático cuando se abre el input de subtareas
   useEffect(() => {
     if (showSubtaskInput) {
       // Esperar menos tiempo y hacer scroll más suave
@@ -180,7 +182,7 @@ export default function EventModal({
       newMainColors[index] = selectedColorToReplace;
       setMainColors(newMainColors);
       
-      // Si el color seleccionado era el que se reemplazó, actualizar también
+      // Si el color seleccionado era el que se reemplaz?, actualizar también
       if (eventColor === color) {
         setEventColor(selectedColorToReplace);
       }
@@ -212,7 +214,7 @@ export default function EventModal({
     }
   }, [shouldShowTutorialInModal, currentTutorialStep?.needScroll]);
   
-  // console.log('🐾 EventModal Tutorial Debug:', {
+  // console.log('[EventModal] EventModal Tutorial Debug:', {
   //   tutorialVisible: !!tutorialVisible,
   //   visible: !!visible,
   //   tutorialStep,
@@ -252,7 +254,7 @@ export default function EventModal({
             keyboardShouldPersistTaps="handled"
           >
           <View style={styles.titleSection}>
-            <Text style={styles.emoji}>☀️</Text>
+            <Text style={styles.emoji}>*</Text>
             <Text style={styles.taskTitle}>Nueva tarea</Text>
             <Text style={styles.subtitle}>Toque para renombrar</Text>
           </View>
@@ -325,17 +327,19 @@ export default function EventModal({
             />
           </View>
 
-          <View style={styles.configCard}>
-            <TouchableOpacity
-              style={styles.configRow}
-              onPress={onOpenRecurrenceModal}
-            >
-              <Ionicons name="refresh-outline" size={20} color={Colors.light.tint} />
-              <Text style={styles.configLabel}>Repetir</Text>
-              <Text style={styles.configValue} numberOfLines={1}>{recurrenceSummary}</Text>
-              <Ionicons name="chevron-forward" size={16} color="#ccc" />
-            </TouchableOpacity>
-          </View>
+          {!(selectedMonthCell || (selectedEvent && 'startDay' in selectedEvent)) && (
+            <View style={styles.configCard}>
+              <TouchableOpacity
+                style={styles.configRow}
+                onPress={onOpenRecurrenceModal}
+              >
+                <Ionicons name="refresh-outline" size={20} color={Colors.light.tint} />
+                <Text style={styles.configLabel}>Repetir</Text>
+                <Text style={styles.configValue} numberOfLines={1}>{recurrenceSummary}</Text>
+                <Ionicons name="chevron-forward" size={16} color="#ccc" />
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.configCard}>
             <AlarmSetting
@@ -632,7 +636,7 @@ const styles = {
     color: '#ff4444',
     marginLeft: 8
   },
-  bottomPadding: { height: 100 }, // 🎯 UX: Espacio adicional para que el teclado no tape el contenido
+  bottomPadding: { height: 100 }, // UX: Espacio adicional para que el teclado no tape el contenido
   addColorCircle: {
     width: 40,
     height: 40,
@@ -713,3 +717,14 @@ const styles = {
     alignItems: 'center',
   },
 };
+
+
+
+
+
+
+
+
+
+
+

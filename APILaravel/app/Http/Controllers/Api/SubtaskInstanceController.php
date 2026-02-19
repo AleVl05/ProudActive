@@ -7,6 +7,7 @@ use App\Models\SubtaskInstance;
 use App\Models\Subtask;
 use App\Models\Event;
 use App\Models\CustomSubtask;
+use App\Services\EventInstanceStatusService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -215,6 +216,8 @@ class SubtaskInstanceController extends Controller
                 'was_existing' => $subtaskInstance->wasRecentlyCreated ? 'no' : 'yes'
             ]);
 
+            EventInstanceStatusService::updateForInstanceId((string) $request->event_instance_id);
+
             return response()->json([
                 'success' => true,
                 'data' => $subtaskInstance
@@ -284,6 +287,8 @@ class SubtaskInstanceController extends Controller
                 DB::rollBack();
                 throw $e;
             }
+
+            EventInstanceStatusService::updateForInstanceId((string) $request->event_instance_id);
 
             return response()->json([
                 'success' => true,
@@ -377,6 +382,8 @@ class SubtaskInstanceController extends Controller
                 'overridden' => $subtaskInstance->overridden
             ]);
 
+            EventInstanceStatusService::updateForInstanceId((string) $eventInstanceId);
+
             return response()->json([
                 'success' => true,
                 'data' => $subtaskInstance
@@ -442,6 +449,28 @@ class SubtaskInstanceController extends Controller
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
+            // Idempotencia: evitar duplicados por reintento/doble submit
+            $existingCustom = CustomSubtask::where('event_instance_id', $eventInstanceId)
+                ->where('text', $request->text)
+                ->where('sort_order', $request->get('sort_order', 0))
+                ->first();
+
+            if ($existingCustom) {
+                $requestId = $request->header('X-Request-Id') ?? $request->header('X-Request-ID');
+                \Log::warning('⚠️  SubtaskInstanceController::storeCustomSubtask - Duplicate prevented', [
+                    'event_instance_id' => $eventInstanceId,
+                    'text' => $request->text,
+                    'sort_order' => $request->get('sort_order', 0),
+                    'custom_subtask_id' => $existingCustom->id,
+                    'request_id' => $requestId
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'data' => $existingCustom
+                ], 200);
+            }
+
             // Crear custom subtask con el event_instance_id original (puede ser virtual)
             $customSubtask = CustomSubtask::create([
                 'event_instance_id' => $eventInstanceId, // Mantener el ID original (puede ser virtual)
@@ -455,6 +484,8 @@ class SubtaskInstanceController extends Controller
                 'custom_subtask_id' => $customSubtask->id,
                 'event_instance_id' => $eventInstanceId
             ]);
+
+            EventInstanceStatusService::updateForInstanceId((string) $eventInstanceId);
 
             return response()->json([
                 'success' => true,
@@ -508,6 +539,8 @@ class SubtaskInstanceController extends Controller
 
             $customSubtask->update($updateData);
 
+            EventInstanceStatusService::updateForInstanceId((string) $customSubtask->event_instance_id);
+
             return response()->json([
                 'success' => true,
                 'data' => $customSubtask->fresh()
@@ -535,6 +568,8 @@ class SubtaskInstanceController extends Controller
 
             $customSubtask->delete();
 
+            EventInstanceStatusService::updateForInstanceId((string) $customSubtask->event_instance_id);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Subtarea personalizada eliminada correctamente'
@@ -547,4 +582,3 @@ class SubtaskInstanceController extends Controller
         }
     }
 }
-

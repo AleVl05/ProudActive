@@ -12,7 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import authService from '../../services/auth';
+import authService from '@/services/auth';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -61,7 +61,7 @@ export default function LoginScreen() {
         }
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error. Intenta de nuevo');
+      Alert.alert('Error', 'Ocurri? un error. Intenta de nuevo');
     } finally {
       setLoading(false);
     }
@@ -231,3 +231,7 @@ const styles = StyleSheet.create({
   },
 });
 
+
+
+
+

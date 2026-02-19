@@ -10,7 +10,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { Colors } from '../../../constants/theme';
+import { Colors } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 // Importación normal - Expo hot reload debería funcionar automáticamente
 // Si los cambios no se reflejan:
@@ -279,7 +279,7 @@ export default function TutorialOverlay({
         result.maxWidth = usePercentageForMaxWidth ? width * dialogConfig.maxWidth : dialogConfig.maxWidth;
       }
       
-      // Asegurar que el diálogo esté dentro de la pantalla
+      // Asegurar que el diálogo está dentro de la pantalla
       if (result.left !== undefined && result.left < 0) result.left = 10;
       if (result.right !== undefined && result.right < 0) result.right = 10;
       if (result.top !== undefined && result.top < 0) result.top = 10;
@@ -505,7 +505,7 @@ export default function TutorialOverlay({
     outputRange: [0, 10],
   });
 
-  // console.log('🎯 TUTORIAL: Renderizando', {
+  // console.log('[Tutorial] TUTORIAL: Renderizando', {
   //   visible,
   //   requiresAction,
   //   step: currentStep,
@@ -605,7 +605,7 @@ export default function TutorialOverlay({
             <TouchableOpacity
               style={styles.skipButtonInside}
               onPress={(e) => {
-                console.log('🔘 Tutorial: Botón presionado en posición:', {
+                console.log('[Tutorial] Tutorial: Botón presionado en posición:', {
                   x: e.nativeEvent.locationX,
                   y: e.nativeEvent.locationY,
                 });
@@ -723,7 +723,7 @@ export default function TutorialOverlay({
             <TouchableOpacity
               style={styles.skipButtonInside}
               onPress={() => {
-                console.log('🔘 Tutorial: Botón Saltar presionado');
+                console.log('[Tutorial] Tutorial: Botón Saltar presionado');
                 onSkip();
               }}
               activeOpacity={0.7}
@@ -909,3 +909,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+
+
+
+
+
+

@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   Modal,
 } from 'react-native';
-import { Colors } from '../../../constants/theme';
+import { Colors } from '@/constants/theme';
 
 interface DeleteModalProps {
   visible: boolean;
@@ -129,3 +129,8 @@ const styles = {
     color: '#666',
   },
 };
+
+
+
+
+

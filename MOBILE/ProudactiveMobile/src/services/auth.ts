@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE } from '../src/config/api';
+import { API_BASE } from '@/config/api';
 
 const TOKEN_KEY = '@proudactive_token';
 const USER_KEY = '@proudactive_user';
@@ -92,12 +92,12 @@ class AuthService {
   // Login
   async login(email: string, password: string): Promise<AuthResponse> {
     try {
-      console.log('🔵 Intentando login a:', `${API_BASE}/auth/login`);
-      console.log('🔵 Email intentando login:', email);
+      console.log('[Auth] Intentando login a:', `${API_BASE}/auth/login`);
+      console.log('[Auth] Email intentando login:', email);
       
       // LIMPIAR SESIÓN ANTES DE LOGIN
       await this.clearSession();
-      console.log('🧹 Sesión limpiada antes de login');
+      console.log('[Auth] Sesión limpiada antes de login');
       
       const response = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -107,16 +107,16 @@ class AuthService {
         body: JSON.stringify({ email, password }),
       });
 
-      console.log('🔵 Status de respuesta:', response.status);
+      console.log('[Auth] Status de respuesta:', response.status);
       
       const responseText = await response.text();
-      console.log('🔵 Respuesta recibida:', responseText.substring(0, 200));
+      console.log('[Auth] Respuesta recibida:', responseText.substring(0, 200));
 
       let result;
       try {
         result = JSON.parse(responseText);
       } catch (parseError) {
-        console.error('❌ Error parseando JSON:', parseError);
+        console.error('[Auth] Error parseando JSON:', parseError);
         return {
           success: false,
           message: `Error del servidor (${response.status}). La API puede estar caída o devolviendo HTML.`,
@@ -124,7 +124,7 @@ class AuthService {
       }
 
       if (result.success && result.data) {
-        console.log('🔍 Usuario recibido del servidor:', {
+        console.log('[Auth] Usuario recibido del servidor:', {
           id: result.data.user.id,
           email: result.data.user.email,
           email_verified_at: result.data.user.email_verified_at
@@ -135,7 +135,7 @@ class AuthService {
         
         // Verificar que se guardó correctamente
         const savedUser = await this.getUser();
-        console.log('🔍 Usuario guardado en storage:', {
+        console.log('[Auth] Usuario guardado en storage:', {
           id: savedUser?.id,
           email: savedUser?.email
         });
@@ -143,7 +143,7 @@ class AuthService {
 
       return result;
     } catch (error) {
-      console.error('❌ Error en login:', error);
+      console.error('[Auth] Error en login:', error);
       return {
         success: false,
         message: 'Error de conexión. Verifica tu internet.',
@@ -165,7 +165,7 @@ class AuthService {
       const result = await response.json();
 
       if (result.success && result.data) {
-        console.log('🔍 Saving token and user after verification:', {
+        console.log('[Auth] Saving token and user after verification:', {
           hasToken: !!result.data.token,
           hasUser: !!result.data.user,
           userEmail: result.data.user?.email
@@ -176,7 +176,7 @@ class AuthService {
         // Verificar que se guardó
         const savedToken = await this.getToken();
         const savedUser = await this.getUser();
-        console.log('🔍 Verification complete - saved:', {
+        console.log('[Auth] Verification complete - saved:', {
           tokenSaved: !!savedToken,
           userSaved: !!savedUser,
           userId: savedUser?.id
@@ -361,4 +361,5 @@ class AuthService {
 }
 
 export default new AuthService();
+
 

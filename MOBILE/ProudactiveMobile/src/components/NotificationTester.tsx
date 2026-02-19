@@ -4,7 +4,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 //   initializeNotifications, 
 //   displayTestNotification, 
 //   displayTaskNotification 
-// } from '../services/notifications';
+// } from '@/services/notifications';
 
 export default function NotificationTester() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -13,25 +13,25 @@ export default function NotificationTester() {
   // Inicializar notificaciones al montar el componente
   useEffect(() => {
     // TODO: Implementar con expo-notifications
-    console.log('⚠️ Sistema de notificaciones deshabilitado - Notifee removido');
+    console.log('Sistema de notificaciones deshabilitado - Notifee removido');
     setIsInitialized(false);
   }, []);
 
   const handleTestNotification = async () => {
-    Alert.alert('⚠️ Deshabilitado', 'Sistema de notificaciones deshabilitado - Notifee removido');
+    Alert.alert('Deshabilitado', 'Sistema de notificaciones deshabilitado - Notifee removido');
   };
 
   const handleTaskNotification = async () => {
-    Alert.alert('⚠️ Deshabilitado', 'Sistema de notificaciones deshabilitado - Notifee removido');
+    Alert.alert('Deshabilitado', 'Sistema de notificaciones deshabilitado - Notifee removido');
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>🔔 Probador de Notificaciones</Text>
+      <Text style={styles.title}>Probador de Notificaciones</Text>
       
       <View style={styles.statusContainer}>
         <Text style={styles.statusText}>
-          Estado: ⚠️ Deshabilitado (Notifee removido)
+          Estado: Deshabilitado (Notifee removido)
         </Text>
       </View>
 
@@ -42,7 +42,7 @@ export default function NotificationTester() {
           disabled={true}
         >
           <Text style={styles.buttonText}>
-            🔔 Probar Notificación (Deshabilitado)
+            Probar Notificación (Deshabilitado)
           </Text>
         </TouchableOpacity>
 
@@ -52,23 +52,23 @@ export default function NotificationTester() {
           disabled={true}
         >
           <Text style={styles.buttonText}>
-            📋 Notificación de Tarea (Deshabilitado)
+            Notificación de Tarea (Deshabilitado)
           </Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.infoContainer}>
         <Text style={styles.infoText}>
-          💡 <Text style={styles.bold}>Nota:</Text>
+          <Text style={styles.bold}>Nota:</Text>
         </Text>
         <Text style={styles.infoText}>
-          • El sistema de notificaciones fue deshabilitado al remover Notifee
+          El sistema de notificaciones fue deshabilitado al remover Notifee
         </Text>
         <Text style={styles.infoText}>
-          • Para habilitar notificaciones, implementar con expo-notifications
+          Para habilitar notificaciones, implementar con expo-notifications
         </Text>
         <Text style={styles.infoText}>
-          • O usar react-native-firebase para notificaciones avanzadas
+          O usar react-native-firebase para notificaciones avanzadas
         </Text>
       </View>
     </View>

@@ -202,6 +202,15 @@ export const generateRecurrentInstances = (
     const originalStart = new Date(masterEvent.start_utc);
     const eventEnd = new Date(masterEvent.end_utc);
     const duration = eventEnd.getTime() - originalStart.getTime();
+
+    const statusMap = new Map<string, any>();
+    if (Array.isArray(masterEvent.instance_statuses)) {
+      masterEvent.instance_statuses.forEach((item: any) => {
+        if (item?.instance_date) {
+          statusMap.set(item.instance_date, item);
+        }
+      });
+    }
     
     // AJUSTAR LA FECHA INICIAL SEGÚN LA REGLA DE RECURRENCIA
     const adjustedStart = adjustStartDateToRecurrenceRule(originalStart, rule);
@@ -271,6 +280,7 @@ export const generateRecurrentInstances = (
           const isCompletelyAfterRange = overrideStartTotalMinutes >= rangeEndTotalMinutes;
           
           if (!isCompletelyBeforeRange && !isCompletelyAfterRange) {
+            const resolvedColor = override.color || masterEvent.color || '#6b53e2';
             // Convertir override a formato Event solo si está en el rango
             const overrideEvent: any = {
               id: String(override.id),
@@ -278,13 +288,15 @@ export const generateRecurrentInstances = (
               description: override.description,
               startTime: (new Date(override.start_utc).getUTCHours() * 60 + new Date(override.start_utc).getUTCMinutes()) - (startHour * 60),
               duration: Math.round((new Date(override.end_utc).getTime() - new Date(override.start_utc).getTime()) / (1000 * 60)),
-              color: override.color,
+              color: resolvedColor,
               category: override.category || 'General',
               date: new Date(override.start_utc).toISOString().slice(0, 10),
               is_recurring: false,
-              // 🆕 Heredar información de subtareas del evento maestro
-              subtasks_count: masterEvent.subtasks_count || 0,
-              subtasks_completed_count: masterEvent.subtasks_completed_count || 0,
+              series_id: override.series_id ?? masterEvent.id,
+              original_start_utc: override.original_start_utc ?? instanceUtcKey,
+              subtasks_total: override.subtasks_total ?? override.subtasks_count ?? 0,
+              subtasks_completed: override.subtasks_completed ?? override.subtasks_completed_count ?? 0,
+              subtask_status: override.subtask_status || 'none',
             };
             instances.push(overrideEvent);
           }
@@ -311,23 +323,28 @@ export const generateRecurrentInstances = (
             // Saltar esta instancia - está fuera del rango visible
             // Continuar al siguiente cálculo de fecha (se hace al final del while)
           } else {
+            const instanceDateKey = instanceStart.toISOString().slice(0, 10);
+            const instanceStatus = statusMap.get(instanceDateKey);
+            const masterTotal = masterEvent.master_subtasks_total ?? masterEvent.subtasks_total ?? masterEvent.subtasks_count ?? 0;
+            const fallbackStatus = masterTotal > 0 ? 'partial' : 'none';
             const instance: any = {
               id: `${masterEvent.id}_${currentDate.toISOString().split('T')[0]}`,
               title: masterEvent.title,
               description: masterEvent.description,
               startTime: startTime,
               duration: Math.round(duration / (1000 * 60)),
-              color: masterEvent.color,
+              color: masterEvent.color || '#6b53e2',
               category: masterEvent.category || 'General',
               date: instanceStart.toISOString().slice(0, 10),
               is_recurring: masterEvent.is_recurring,
               recurrence_rule: masterEvent.recurrence_rule,
               recurrence_end_date: masterEvent.recurrence_end_date,
               series_id: masterEvent.id,
-              original_start_utc: masterEvent.start_utc,
-              // 🆕 Heredar información de subtareas del evento maestro
-              subtasks_count: masterEvent.subtasks_count || 0,
-              subtasks_completed_count: masterEvent.subtasks_completed_count || 0,
+              // Usar la fecha/hora REAL de la instancia para poder hacer override correcto
+              original_start_utc: instanceStart.toISOString(),
+              subtasks_total: instanceStatus?.subtasks_total ?? masterTotal,
+              subtasks_completed: instanceStatus?.subtasks_completed ?? 0,
+              subtask_status: instanceStatus?.status ?? fallbackStatus,
             };
 
             instances.push(instance);

@@ -4,16 +4,16 @@
     "strict": true,
     "paths": {
       "@/*": [
-        "./*"
+        "./src/*"
       ],
       "@components/*": [
         "./src/components/*"
       ],
       "@constants/*": [
-        "./constants/*"
+        "./src/constants/*"
       ],
       "@hooks/*": [
-        "./hooks/*"
+        "./src/hooks/*"
       ]
     }
   },

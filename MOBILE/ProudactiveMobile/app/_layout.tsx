@@ -5,10 +5,10 @@ import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import authService from '../services/auth';
+import authService from '@/services/auth';
 
 export const unstable_settings = {
-  initialRouteName: '(auth)/welcome',
+  initialRouteName: '(auth)',
 };
 
 export default function RootLayout() {
@@ -75,3 +75,4 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
+

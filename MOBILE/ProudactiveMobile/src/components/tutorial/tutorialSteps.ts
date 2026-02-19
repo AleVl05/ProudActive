@@ -173,7 +173,7 @@ export const calendarTutorialSteps: ExtendedTutorialStep[] = [
   // Paso 12: Guardar evento completo
   {
     id: 'save-event-final',
-    message: 'Perfecto. Ahora haz clic en el botón "Editar" para guardar el evento completo con todas sus configuraciones.',
+    message: 'Perfecto. Ahora haz clic en el botón "Guardar" para guardar el evento completo con todas sus configuraciones.',
     position: 'top-left', // Arriba para no tapar el botón
     highlightElement: 'create-button',
     arrowDirection: 'down', // Flecha apunta hacia abajo al botón, rotar 180 grados

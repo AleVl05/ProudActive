@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Subtask;
 use App\Models\Event;
+use App\Services\EventInstanceStatusService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -105,12 +106,37 @@ class SubtaskController extends Controller
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
+            // Idempotencia: evitar duplicados por reintento/doble submit
+            $existingSubtask = Subtask::where('event_id', $request->event_id)
+                ->where('text', $request->text)
+                ->where('sort_order', $request->get('sort_order', 0))
+                ->whereNull('deleted_at')
+                ->first();
+
+            if ($existingSubtask) {
+                $requestId = $request->header('X-Request-Id') ?? $request->header('X-Request-ID');
+                \Log::warning('⚠️  SubtaskController::store - Duplicate prevented', [
+                    'event_id' => $request->event_id,
+                    'text' => $request->text,
+                    'sort_order' => $request->get('sort_order', 0),
+                    'subtask_id' => $existingSubtask->id,
+                    'request_id' => $requestId
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'data' => $existingSubtask
+                ], 200);
+            }
+
             $subtask = Subtask::create([
                 'event_id' => $request->event_id,
                 'text' => $request->text,
                 'completed' => $request->boolean('completed', false),
                 'sort_order' => $request->get('sort_order', 0)
             ]);
+
+            EventInstanceStatusService::updateForEvent($event);
 
             return response()->json([
                 'success' => true,
@@ -151,6 +177,7 @@ class SubtaskController extends Controller
             }
 
             $subtask->update($request->only(['text', 'completed', 'sort_order']));
+            EventInstanceStatusService::updateForEvent($subtask->event);
 
             return response()->json([
                 'success' => true,
@@ -178,6 +205,7 @@ class SubtaskController extends Controller
             }
 
             $subtask->delete();
+            EventInstanceStatusService::updateForEvent($subtask->event);
 
             return response()->json([
                 'success' => true,
@@ -214,6 +242,7 @@ class SubtaskController extends Controller
 
             $updatedSubtasks = [];
 
+            $eventIds = [];
             foreach ($request->subtasks as $subtaskData) {
                 $subtask = Subtask::findOrFail($subtaskData['id']);
                 
@@ -227,6 +256,14 @@ class SubtaskController extends Controller
                 }, ARRAY_FILTER_USE_KEY));
 
                 $updatedSubtasks[] = $subtask->fresh();
+                $eventIds[$subtask->event_id] = true;
+            }
+
+            foreach (array_keys($eventIds) as $eventId) {
+                $event = Event::find($eventId);
+                if ($event) {
+                    EventInstanceStatusService::updateForEvent($event);
+                }
             }
 
             return response()->json([
